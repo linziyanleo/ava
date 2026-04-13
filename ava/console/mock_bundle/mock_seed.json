@@ -1,0 +1,715 @@
+{
+  "media_assets": [
+    {
+      "name": "mock-sky.png",
+      "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII="
+    },
+    {
+      "name": "mock-grid.png",
+      "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAusB9pQwP7cAAAAASUVORK5CYII="
+    }
+  ],
+  "media_records": [
+    {
+      "id": "mock-media-1",
+      "timestamp": "2026-04-07T09:00:00+08:00",
+      "prompt": "A bright editorial illustration with a clean sky gradient",
+      "reference_image": null,
+      "output_images": [
+        "workspace/media/generated/mock-sky.png"
+      ],
+      "output_text": "Generated successfully in mock mode.",
+      "model": "openai/gpt-image-1",
+      "status": "success",
+      "error": null
+    },
+    {
+      "id": "mock-media-2",
+      "timestamp": "2026-04-07T09:20:00+08:00",
+      "prompt": "Wireframe style dashboard blocks with soft neutral colors",
+      "reference_image": "workspace/assets/reference/mock-board.png",
+      "output_images": [
+        "workspace/media/generated/mock-grid.png"
+      ],
+      "output_text": "Second mock image record.",
+      "model": "google/gemini-image",
+      "status": "success",
+      "error": null
+    }
+  ],
+  "audit_entries": [
+    {
+      "timestamp": "2026-04-07T09:05:00+08:00",
+      "user": "mock_tester",
+      "role": "mock_tester",
+      "action": "mock.login",
+      "target": "console",
+      "detail": {
+        "source": "repo-mock-bundle"
+      },
+      "ip": "127.0.0.1"
+    }
+  ],
+  "sessions": [
+    {
+      "key": "console:mock-session-1",
+      "created_at": "2026-04-07T08:50:00+08:00",
+      "updated_at": "2026-04-07T09:00:00+08:00",
+      "metadata": {
+        "title": "Mock design pass",
+        "conversation_id": "mock-conv-1"
+      },
+      "last_consolidated": 0,
+      "last_completed": null,
+      "token_stats": {
+        "total_prompt_tokens": 600,
+        "total_completion_tokens": 270,
+        "total_tokens": 870,
+        "llm_calls": 2
+      }
+    },
+    {
+      "key": "console:mock-session-2",
+      "created_at": "2026-04-07T09:10:00+08:00",
+      "updated_at": "2026-04-07T09:16:30+08:00",
+      "metadata": {
+        "title": "Mock tool chain review",
+        "conversation_id": "mock-conv-2"
+      },
+      "last_consolidated": 0,
+      "last_completed": null,
+      "token_stats": {
+        "total_prompt_tokens": 1920,
+        "total_completion_tokens": 720,
+        "total_tokens": 2640,
+        "llm_calls": 7
+      }
+    },
+    {
+      "key": "console:mock-session-3",
+      "created_at": "2026-04-07T09:25:00+08:00",
+      "updated_at": "2026-04-07T09:27:10+08:00",
+      "metadata": {
+        "title": "Mock subagent digest",
+        "conversation_id": "mock-conv-3"
+      },
+      "last_consolidated": 0,
+      "last_completed": null,
+      "token_stats": {
+        "total_prompt_tokens": 180,
+        "total_completion_tokens": 120,
+        "total_tokens": 300,
+        "llm_calls": 1
+      }
+    }
+  ],
+  "session_messages": [
+    {
+      "session_key": "console:mock-session-1",
+      "seq": 0,
+      "conversation_id": "mock-conv-1",
+      "role": "user",
+      "content": "Please review the mock dashboard layout.\n\n[图片识别: 顶部状态 chip 对比度偏弱，MOCK badge 已出现。]\n[语音转录: 设计评审要求保留 12px divider，并把 chat 页面也纳入 mock_tester 覆盖。]",
+      "timestamp": "2026-04-07T08:50:00+08:00"
+    },
+    {
+      "session_key": "console:mock-session-1",
+      "seq": 1,
+      "conversation_id": "mock-conv-1",
+      "role": "assistant",
+      "content": "The layout is balanced but can use stronger contrast for status chips.",
+      "timestamp": "2026-04-07T08:50:06+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 0,
+      "conversation_id": "mock-conv-2",
+      "role": "user",
+      "content": "Run a mock-safe review of chat/tool blocks and background-task cards.",
+      "timestamp": "2026-04-07T09:10:00+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 1,
+      "conversation_id": "mock-conv-2",
+      "role": "assistant",
+      "content": "I will inspect the page state, analyze the screenshot, transcribe the voice note, search memory context, generate a mock image preview, and prepare a patch summary.",
+      "reasoning_content": "先验证页面骨架，再检查工具 block、图片输出和后台任务状态，最后汇总成可回归的 mock 样本。",
+      "tool_calls": [
+        {
+          "id": "mock-call-page-agent",
+          "type": "function",
+          "function": {
+            "name": "page_agent",
+            "arguments": "{\"url\":\"http://localhost:6688/chat\",\"instruction\":\"Verify mock_tester chat blocks, read-only composer state, and token entry points.\"}"
+          }
+        },
+        {
+          "id": "mock-call-vision",
+          "type": "function",
+          "function": {
+            "name": "vision",
+            "arguments": "{\"url\":\"workspace/media/generated/mock-grid.png\",\"prompt\":\"Check the mock badge contrast and whether the token entry is visible in the session header.\"}"
+          }
+        },
+        {
+          "id": "mock-call-transcribe",
+          "type": "function",
+          "function": {
+            "name": "transcribe",
+            "arguments": "{\"query\":\"Transcribe the attached regression voice note about token stats coverage.\",\"audio\":\"workspace/media/generated/mock-voice-note.wav\"}"
+          }
+        },
+        {
+          "id": "mock-call-memory-tool",
+          "type": "function",
+          "function": {
+            "name": "memory_tool",
+            "arguments": "{\"action\":\"search\",\"query\":\"mock tester token stats coverage\"}"
+          }
+        },
+        {
+          "id": "mock-call-image-gen",
+          "type": "function",
+          "function": {
+            "name": "image_gen",
+            "arguments": "{\"prompt\":\"Mock chat coverage collage\",\"reference_image\":\"workspace/media/generated/mock-grid.png\"}"
+          }
+        },
+        {
+          "id": "mock-call-claude-code",
+          "type": "function",
+          "function": {
+            "name": "claude_code",
+            "arguments": "{\"mode\":\"standard\",\"project_path\":\"/mock/workspace\",\"prompt\":\"Document the missing mock_tester page coverage and add a token-stats jump from the chat session.\"}"
+          }
+        }
+      ],
+      "timestamp": "2026-04-07T09:10:04+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 2,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-page-agent",
+      "name": "page_agent",
+      "content": "[PageAgent SUCCESS] session=mock-pa-01 | Steps: 5 | Duration: 3200ms\nURL: http://localhost:6688/chat\nTitle: 聊天\n\nVerified mock banner, tool-call stack, token badge, and read-only composer state.",
+      "timestamp": "2026-04-07T09:10:07+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 3,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-vision",
+      "name": "vision",
+      "content": "Image analysis complete. The MOCK badge is visible, token summary chip is in the session header, and the read-only composer banner is present.",
+      "timestamp": "2026-04-07T09:10:11+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 4,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-transcribe",
+      "name": "transcribe",
+      "content": "Transcript: chat 会话内部需要覆盖 tool block 类型，并且要能直接跳去 token 统计页面确认该轮调用成本。",
+      "timestamp": "2026-04-07T09:10:19+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 5,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-memory-tool",
+      "name": "memory_tool",
+      "content": "{\"matches\":[{\"title\":\"console_ui_regression/pages\",\"snippet\":\"chat page should expose token stats drill-down in mock mode\"}]}",
+      "timestamp": "2026-04-07T09:10:22+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 6,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-image-gen",
+      "name": "image_gen",
+      "content": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png",
+      "timestamp": "2026-04-07T09:10:25+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 7,
+      "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-claude-code",
+      "name": "claude_code",
+      "content": "[Claude Code SUCCESS]\nTurns: 4 | Duration: 8200ms | Cost: $0.42\nSession: 12345678-1234-5678-9abc-def012345678\n\nPatched mock-safe routing, seeded richer sessions, and added a token-stats jump from the chat session header.",
+      "timestamp": "2026-04-07T09:10:31+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 8,
+      "conversation_id": "mock-conv-2",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, and `claude_code` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
+        }
+      ],
+      "timestamp": "2026-04-07T09:10:36+08:00"
+    },
+    {
+      "session_key": "console:mock-session-3",
+      "seq": 0,
+      "conversation_id": "mock-conv-3",
+      "role": "user",
+      "content": "[Subagent 'layout-inspector' completed successfully]\nTask: Review whether mock_tester can observe all key console pages.\n\nResult:\nConfirmed navigation coverage for config, tasks, bg-tasks, memory, media, persona, skills, chat, and tokens. Browser/admin pages remain intentionally excluded.",
+      "timestamp": "2026-04-07T09:25:00+08:00"
+    },
+    {
+      "session_key": "console:mock-session-3",
+      "seq": 1,
+      "conversation_id": "mock-conv-3",
+      "role": "assistant",
+      "content": "Accepted. I will keep browser preview and real runtime controls out of the mock surface while enriching the seeded regression data.",
+      "timestamp": "2026-04-07T09:25:12+08:00"
+    }
+  ],
+  "token_usage": [
+    {
+      "timestamp": "2026-04-07T08:50:01+08:00",
+      "model": "openai/gpt-4.1",
+      "provider": "openai",
+      "prompt_tokens": 420,
+      "completion_tokens": 180,
+      "total_tokens": 600,
+      "session_key": "console:mock-session-1",
+      "conversation_id": "mock-conv-1",
+      "turn_seq": 0,
+      "iteration": 0,
+      "user_message": "Please review the mock dashboard layout.",
+      "output_content": "The layout is balanced but can use stronger contrast for status chips.",
+      "system_prompt_preview": "You are reviewing a mock dashboard for UI coverage.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"messages\":[{\"role\":\"user\",\"content\":\"Please review the mock dashboard layout.\"}]}",
+      "finish_reason": "stop",
+      "model_role": "default",
+      "cached_tokens": 120,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0123,
+      "current_turn_tokens": 600,
+      "tool_names": ""
+    },
+    {
+      "timestamp": "2026-04-07T08:50:03+08:00",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "prompt_tokens": 180,
+      "completion_tokens": 90,
+      "total_tokens": 270,
+      "session_key": "console:mock-session-1",
+      "conversation_id": "mock-conv-1",
+      "turn_seq": 0,
+      "iteration": 1,
+      "user_message": "",
+      "output_content": "Summarized mock UI notes.",
+      "system_prompt_preview": "You are a compact follow-up model.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"messages\":[{\"role\":\"assistant\",\"content\":\"Summarized mock UI notes.\"}]}",
+      "finish_reason": "stop",
+      "model_role": "mini",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 50,
+      "cost_usd": 0.0021,
+      "current_turn_tokens": 870,
+      "tool_names": "style_review"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:04+08:00",
+      "model": "page-agent/browser",
+      "provider": "page-agent",
+      "prompt_tokens": 310,
+      "completion_tokens": 120,
+      "total_tokens": 430,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 0,
+      "user_message": "Run a mock-safe review of chat/tool blocks and background-task cards.",
+      "output_content": "Verified mock banner, read-only composer state, and token entry points in the chat header.",
+      "system_prompt_preview": "Run the page agent to inspect mock_tester chat coverage.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"page_agent\",\"instruction\":\"Verify mock_tester chat blocks, read-only composer state, and token entry points.\"}",
+      "finish_reason": "tool_result",
+      "model_role": "page-agent",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0043,
+      "current_turn_tokens": 430,
+      "tool_names": "page_agent"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:11+08:00",
+      "model": "google/gemini-2.5-flash",
+      "provider": "google",
+      "prompt_tokens": 250,
+      "completion_tokens": 90,
+      "total_tokens": 340,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 1,
+      "user_message": "Check the mock badge contrast and whether the token entry is visible in the session header.",
+      "output_content": "Image analysis complete. The MOCK badge is visible, token summary chip is in the session header, and the read-only composer banner is present.",
+      "system_prompt_preview": "You are a vision model validating the console mock UI.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"vision\",\"url\":\"workspace/media/generated/mock-grid.png\"}",
+      "finish_reason": "tool_result",
+      "model_role": "vision",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0051,
+      "current_turn_tokens": 770,
+      "tool_names": "vision"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:19+08:00",
+      "model": "openai/gpt-4o-mini-transcribe",
+      "provider": "openai",
+      "prompt_tokens": 160,
+      "completion_tokens": 80,
+      "total_tokens": 240,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 2,
+      "user_message": "Transcribe the attached regression voice note about token stats coverage.",
+      "output_content": "Transcript: chat 会话内部需要覆盖 tool block 类型，并且要能直接跳去 token 统计页面确认该轮调用成本。",
+      "system_prompt_preview": "You are a voice transcription model for regression notes.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"transcribe\",\"audio\":\"workspace/media/generated/mock-voice-note.wav\"}",
+      "finish_reason": "tool_result",
+      "model_role": "voice",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0032,
+      "current_turn_tokens": 1010,
+      "tool_names": "transcribe"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:22+08:00",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "prompt_tokens": 140,
+      "completion_tokens": 50,
+      "total_tokens": 190,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 3,
+      "user_message": "Search memory for mock tester token stats coverage.",
+      "output_content": "{\"matches\":[{\"title\":\"console_ui_regression/pages\",\"snippet\":\"chat page should expose token stats drill-down in mock mode\"}]}",
+      "system_prompt_preview": "You are a compact retrieval helper.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"memory_tool\",\"action\":\"search\",\"query\":\"mock tester token stats coverage\"}",
+      "finish_reason": "tool_result",
+      "model_role": "mini",
+      "cached_tokens": 40,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0019,
+      "current_turn_tokens": 1200,
+      "tool_names": "memory_tool"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:25+08:00",
+      "model": "openai/gpt-image-1",
+      "provider": "openai",
+      "prompt_tokens": 220,
+      "completion_tokens": 70,
+      "total_tokens": 290,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 4,
+      "user_message": "Mock chat coverage collage",
+      "output_content": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png",
+      "system_prompt_preview": "You are an image generation model producing mock regression assets.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"image_gen\",\"reference_image\":\"workspace/media/generated/mock-grid.png\"}",
+      "finish_reason": "tool_result",
+      "model_role": "imageGen",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0064,
+      "current_turn_tokens": 1490,
+      "tool_names": "image_gen"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:31+08:00",
+      "model": "claude-code/sonnet",
+      "provider": "claude-code-cli",
+      "prompt_tokens": 430,
+      "completion_tokens": 110,
+      "total_tokens": 540,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 5,
+      "user_message": "[claude_code] session=12345678-1234-5678-9abc-def012345678 turns=4 duration=8200ms\n--- Prompt ---\nDocument the missing mock_tester page coverage and add a token-stats jump from the chat session.",
+      "output_content": "Patched mock-safe routing, seeded richer sessions, and added a token-stats jump from the chat session header.",
+      "system_prompt_preview": "You are running Claude Code in mock mode.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"tool\":\"claude_code\",\"project_path\":\"/mock/workspace\"}",
+      "finish_reason": "tool_result",
+      "model_role": "claude_code",
+      "cached_tokens": 120,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0242,
+      "current_turn_tokens": 2030,
+      "tool_names": "claude_code"
+    },
+    {
+      "timestamp": "2026-04-07T09:10:36+08:00",
+      "model": "openai/gpt-4.1",
+      "provider": "openai",
+      "prompt_tokens": 410,
+      "completion_tokens": 200,
+      "total_tokens": 610,
+      "session_key": "console:mock-session-2",
+      "conversation_id": "mock-conv-2",
+      "turn_seq": 0,
+      "iteration": 6,
+      "user_message": "",
+      "output_content": "## Mock Review Summary",
+      "system_prompt_preview": "You are validating console-ui mock coverage.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"messages\":[{\"role\":\"tool\",\"content\":\"tool results\"}]}",
+      "finish_reason": "stop",
+      "model_role": "default",
+      "cached_tokens": 90,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0126,
+      "current_turn_tokens": 2640,
+      "tool_names": ""
+    },
+    {
+      "timestamp": "2026-04-07T09:25:12+08:00",
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "prompt_tokens": 180,
+      "completion_tokens": 120,
+      "total_tokens": 300,
+      "session_key": "console:mock-session-3",
+      "conversation_id": "mock-conv-3",
+      "turn_seq": 0,
+      "iteration": 0,
+      "user_message": "Subagent summary accepted.",
+      "output_content": "Accepted. I will keep browser preview and real runtime controls out of the mock surface while enriching the seeded regression data.",
+      "system_prompt_preview": "You are summarizing subagent findings.",
+      "conversation_history": "[]",
+      "full_request_payload": "{\"messages\":[{\"role\":\"user\",\"content\":\"subagent digest\"}]}",
+      "finish_reason": "stop",
+      "model_role": "mini",
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cost_usd": 0.0034,
+      "current_turn_tokens": 300,
+      "tool_names": ""
+    }
+  ],
+  "bg_tasks_active": [
+    {
+      "task_id": "mock-task-run-1",
+      "task_type": "claude_code",
+      "origin_session_key": "console:mock-session-2",
+      "status": "running",
+      "prompt_preview": "Patch mock_tester coverage for chat and background tasks.",
+      "started_at": 1775527800,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "implementing",
+      "last_tool_name": "read_file",
+      "todo_summary": {
+        "todo": 2,
+        "doing": 1,
+        "done": 4
+      },
+      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "cli_session_id": "mock-cli-session-01",
+      "timeline": [
+        {
+          "timestamp": 1775527800,
+          "event": "submitted",
+          "detail": "Patch mock_tester coverage for chat and background tasks."
+        },
+        {
+          "timestamp": 1775527808,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775527860,
+          "event": "checkpoint",
+          "detail": "chat mock blocks seeded; bg task samples pending"
+        }
+      ],
+      "full_prompt": "Patch mock_tester coverage for chat and background tasks.\n- Seed full block types in chat mock data\n- Add running/queued/history background task samples",
+      "full_result": ""
+    },
+    {
+      "task_id": "mock-task-queue-1",
+      "task_type": "codex",
+      "origin_session_key": "console:mock-session-3",
+      "status": "queued",
+      "prompt_preview": "Review whether mock Pages.md still misses any read-only regression route.",
+      "started_at": 1775527920,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "queued",
+      "last_tool_name": "",
+      "todo_summary": {
+        "todo": 3,
+        "doing": 0,
+        "done": 0
+      },
+      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "cli_session_id": "",
+      "timeline": [
+        {
+          "timestamp": 1775527920,
+          "event": "submitted",
+          "detail": "Review whether mock Pages.md still misses any read-only regression route."
+        }
+      ],
+      "full_prompt": "Review whether mock Pages.md still misses any read-only regression route.",
+      "full_result": ""
+    }
+  ],
+  "bg_tasks_history": [
+    {
+      "task_id": "mock-task-ok-1",
+      "task_type": "coding",
+      "origin_session_key": "console:mock-session-1",
+      "status": "succeeded",
+      "prompt_preview": "Seed token stats examples for mock_tester dashboard.",
+      "started_at": 1775524200,
+      "finished_at": 1775524320,
+      "elapsed_ms": 120000,
+      "result_preview": "Inserted summary and detailed token rows for mock conversations.",
+      "error_message": "",
+      "phase": "completed",
+      "last_tool_name": "write_file",
+      "todo_summary": null,
+      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "cli_session_id": "mock-cli-session-02",
+      "timeline": [
+        {
+          "timestamp": 1775524200,
+          "event": "submitted",
+          "detail": "Seed token stats examples for mock_tester dashboard."
+        },
+        {
+          "timestamp": 1775524215,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775524308,
+          "event": "succeeded",
+          "detail": "Inserted summary and detailed token rows."
+        }
+      ],
+      "full_prompt": "Seed token stats examples for mock_tester dashboard.",
+      "full_result": "Inserted summary and detailed token rows for mock conversations."
+    },
+    {
+      "task_id": "mock-task-fail-1",
+      "task_type": "claude_code",
+      "origin_session_key": "console:mock-session-2",
+      "status": "failed",
+      "prompt_preview": "Backfill mock browser preview frames for mock_tester.",
+      "started_at": 1775525100,
+      "finished_at": 1775525185,
+      "elapsed_ms": 85000,
+      "result_preview": "",
+      "error_message": "Mock browser preview intentionally disabled for mock_tester.",
+      "phase": "blocked",
+      "last_tool_name": "page_agent",
+      "todo_summary": null,
+      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "cli_session_id": "mock-cli-session-03",
+      "timeline": [
+        {
+          "timestamp": 1775525100,
+          "event": "submitted",
+          "detail": "Backfill mock browser preview frames for mock_tester."
+        },
+        {
+          "timestamp": 1775525112,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775525185,
+          "event": "failed",
+          "detail": "Mock browser preview intentionally disabled for mock_tester."
+        }
+      ],
+      "full_prompt": "Backfill mock browser preview frames for mock_tester.",
+      "full_result": "Blocked: browser preview remains excluded from the mock-safe role by design."
+    },
+    {
+      "task_id": "mock-task-cancel-1",
+      "task_type": "codex",
+      "origin_session_key": "console:mock-session-3",
+      "status": "cancelled",
+      "prompt_preview": "Refactor every console route to share one role matrix helper.",
+      "started_at": 1775526000,
+      "finished_at": 1775526060,
+      "elapsed_ms": 60000,
+      "result_preview": "",
+      "error_message": "Cancelled by operator after scope was reduced.",
+      "phase": "cancelled",
+      "last_tool_name": "update_plan",
+      "todo_summary": null,
+      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "cli_session_id": "mock-cli-session-04",
+      "timeline": [
+        {
+          "timestamp": 1775526000,
+          "event": "submitted",
+          "detail": "Refactor every console route to share one role matrix helper."
+        },
+        {
+          "timestamp": 1775526010,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775526060,
+          "event": "cancelled",
+          "detail": "Cancelled by operator after scope was reduced."
+        }
+      ],
+      "full_prompt": "Refactor every console route to share one role matrix helper.",
+      "full_result": "Cancelled before execution completed."
+    }
+  ],
+  "skill_config": [
+    {
+      "name": "memory_cleanup",
+      "source": "ava",
+      "enabled": 1,
+      "installed_at": "2026-04-07T08:00:00+08:00",
+      "install_method": "builtin",
+      "git_url": null,
+      "updated_at": "2026-04-07T08:00:00+08:00"
+    }
+  ]
+}

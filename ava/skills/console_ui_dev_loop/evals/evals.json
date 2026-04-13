@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skill": "console_ui_dev_loop",
+  "cases": [
+    {
+      "id": "single-page-fix-loop",
+      "prompt": "修复 console-ui 的配置页标题缺失问题，完成后自己回归，失败则继续修复。",
+      "must": [
+        "先生成 testing_task 和 master_checklist",
+        "使用 claude_code(sync) 作为默认 coding 主路径",
+        "回归时优先用 page_agent 的结构化结果",
+        "最终 pass 前执行 full_checklist"
+      ]
+    },
+    {
+      "id": "changed-files-mapped-regression",
+      "prompt": "我刚改了 console-ui/src/pages/BgTasksPage.tsx 和 console-ui/src/pages/ChatPage/index.tsx，帮我做开发回归闭环。",
+      "must": [
+        "根据 changed_files 选择页面",
+        "生成稳定 check_id",
+        "返回 completed_checks 和 pending_checks",
+        "中间轮次默认不跑全量"
+      ]
+    },
+    {
+      "id": "visual-followup-check",
+      "prompt": "页面功能正常，但我怀疑 Token 统计页布局乱了。请修复并回归。",
+      "must": [
+        "将视觉问题建模为 visual 或 hybrid checkpoint",
+        "先跑 deterministic 基线，再按需升级 vision",
+        "在 checklist_delta 中记录新增 follow-up 检查"
+      ]
+    }
+  ]
+}

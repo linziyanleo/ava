@@ -1,0 +1,10 @@
+{
+  "ui": {
+    "mockMode": true,
+    "previewTheme": "default"
+  },
+  "notes": [
+    "This file belongs to the repo-backed mock bundle.",
+    "Runtime edits should only affect ~/.nanobot/console/mock_data."
+  ]
+}

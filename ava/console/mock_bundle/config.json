@@ -1,0 +1,189 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/console/mock_data/workspace",
+      "provider": "openai",
+      "model": "openai/gpt-4.1",
+      "visionModel": "google/gemini-2.5-flash",
+      "miniModel": "openai/gpt-4.1-mini",
+      "voiceModel": "openai/gpt-4o-mini-tts",
+      "maxTokens": 16384,
+      "temperature": 0.7,
+      "maxToolIterations": 24,
+      "memoryWindow": 200,
+      "memoryTier": "default",
+      "reasoningEffort": "medium",
+      "contextCompression": {
+        "enabled": true,
+        "maxChars": 50000,
+        "recentTurns": 10,
+        "minRecentTurns": 4,
+        "maxOldTurns": 6,
+        "enableHistoryLookupHint": true,
+        "protectedRecentMessages": 20,
+        "bootstrapMaxChars": 16000
+      },
+      "inLoopTruncation": {
+        "enabled": true,
+        "readFile": 16000,
+        "exec": 8000,
+        "webFetch": 12000,
+        "default": 8000
+      },
+      "heartbeat": {
+        "enabled": true,
+        "interval_s": 1800,
+        "keep_recent_messages": 8,
+        "phrase1": {
+          "model": "openai/gpt-4.1-mini"
+        },
+        "phrase2": {
+          "model": "openai/gpt-4.1"
+        }
+      }
+    }
+  },
+  "token_stats": {
+    "enabled": true,
+    "record_full_request_payload": true
+  },
+  "channels": {
+    "sendProgress": true,
+    "telegram": {
+      "enabled": true,
+      "token": "mock-telegram-token",
+      "allowFrom": [
+        "10001",
+        "10002"
+      ],
+      "replyToMessage": true,
+      "groupPolicy": "mention"
+    },
+    "discord": {
+      "enabled": false,
+      "token": "",
+      "allowFrom": []
+    },
+    "email": {
+      "enabled": false,
+      "consentGranted": false,
+      "imapHost": "imap.example.test",
+      "imapPort": 993,
+      "imapUsername": "mock@example.test",
+      "imapPassword": "mock-password",
+      "smtpHost": "smtp.example.test",
+      "smtpPort": 587,
+      "smtpUsername": "mock@example.test",
+      "smtpPassword": "mock-password",
+      "allowFrom": []
+    },
+    "feishu": {
+      "enabled": false,
+      "appId": "",
+      "appSecret": "",
+      "verificationToken": ""
+    }
+  },
+  "providers": {
+    "openai": {
+      "apiKey": "mock-openai-key",
+      "apiBase": "https://api.openai.example/v1",
+      "extraHeaders": {
+        "x-mock-mode": "true"
+      }
+    },
+    "anthropic": {
+      "apiKey": "mock-anthropic-key",
+      "apiBase": "https://api.anthropic.example",
+      "extraHeaders": null
+    },
+    "google": {
+      "apiKey": "mock-google-key",
+      "apiBase": null,
+      "extraHeaders": null
+    },
+    "yunwu": {
+      "apiKey": "mock-yunwu-key",
+      "apiBase": "https://yunwu.example/v1",
+      "extraHeaders": {
+        "x-provider": "yunwu"
+      }
+    },
+    "zenmux": {
+      "apiKey": "mock-zenmux-key",
+      "apiBase": "https://zenmux.example/v1",
+      "extraHeaders": {
+        "x-provider": "zenmux"
+      }
+    }
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790,
+    "heartbeat": {
+      "enabled": true,
+      "interval_s": 1800,
+      "keep_recent_messages": 8,
+      "phrase1": {
+        "model": "openai/gpt-4.1-mini"
+      },
+      "phrase2": {
+        "model": "openai/gpt-4.1"
+      }
+    },
+    "console": {
+      "enabled": true,
+      "port": 6688,
+      "secretKey": "mock-console-secret-not-for-prod",
+      "tokenExpireMinutes": 480,
+      "publicDev": false,
+      "sessionCookieName": "ava_console_session",
+      "sessionCookieSecure": false,
+      "sessionCookieSameSite": "lax",
+      "cloudflareAccessTeamDomain": "",
+      "cloudflareAccessAudience": ""
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": false,
+    "restrictToConfigFile": true,
+    "web": {
+      "proxy": null,
+      "search": {
+        "apiKey": "",
+        "maxResults": 6
+      }
+    },
+    "exec": {
+      "timeout": 120,
+      "pathAppend": "",
+      "autoVenv": true
+    },
+    "claudeCode": {
+      "defaultProject": "/workspace/mock-project",
+      "model": "claude-sonnet-4-20250514",
+      "maxTurns": 8,
+      "allowedTools": "Read,Edit,Bash,Glob,Grep",
+      "timeout": 600,
+      "apiKey": "",
+      "baseUrl": ""
+    },
+    "pageAgent": {
+      "enabled": true,
+      "apiBase": "https://page-agent.example/api",
+      "apiKey": "mock-page-agent-key",
+      "apiKeyEnv": "PAGE_AGENT_API_KEY",
+      "model": "openai/gpt-4.1-mini",
+      "headless": true,
+      "browserType": "chromium",
+      "viewportWidth": 1280,
+      "viewportHeight": 720,
+      "maxSteps": 20,
+      "stepDelay": 0.2,
+      "timeout": 120,
+      "language": "zh-CN",
+      "userDataDir": "~/.nanobot/console/mock_data/browser-profile",
+      "screenshotDir": "~/.nanobot/console/mock_data/browser-shots"
+    }
+  }
+}

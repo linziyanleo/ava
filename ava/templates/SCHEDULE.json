@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "timezone": "Asia/Shanghai",
+  "defaults": {
+    "deliver": true,
+    "channel": "telegram",
+    "to": ""
+  },
+  "tasks": []
+}
