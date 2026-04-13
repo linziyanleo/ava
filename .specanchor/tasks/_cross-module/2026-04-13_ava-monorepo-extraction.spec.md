@@ -7,7 +7,7 @@ specanchor:
   reviewer: "@方壶"
   created: "2026-04-13"
   status: "active"
-  last_change: "补充仓库发布基线：新增根 README、MIT LICENSE，并准备在 linziyanleo/ava 下初始化公开仓库"
+  last_change: "完成独立 Ava 仓库抽离、外部 nanobot checkout 接线与测试基线收口"
   related_global:
     - ".specanchor/global/architecture.spec.md"
     - ".specanchor/global/project-setup.spec.md"
@@ -15,7 +15,7 @@ specanchor:
   flow_type: "standard"
   writing_protocol: "sdd-riper-one"
   sdd_phase: "EXECUTE"
-  branch: "feat/ava-monorepo-extraction"
+  branch: "codex/ava-monorepo-extraction"
 ---
 
 # SDD Spec: Ava 迁移基线——面向多 Agent 记忆系统适配的独立仓库收口
@@ -151,15 +151,16 @@ specanchor:
 
 ## 4. Plan (Contract)
 
-### 4.0 目标架构：独立 Ava Repo + Core / Adapters 分层
+### 4.0 目标架构：以 `ava/` 为仓库根的 Core / Adapters 分层
 
 > 这里描述的是方向，不是实现级 module 承诺。
+> 第一个 `ava/` 指仓库根目录；代码区里的第二个 `ava/` 指 Python package root。
 
 ```text
-ava-repo/
+ava/
 ├── pyproject.toml
 ├── README.md
-├── ava/
+├── ava/                            ← Python package root
 │   ├── core/                         ← 未来可复用的记忆管理与迁移能力
 │   ├── adapters/                     ← 各类 agent / memory runtime 的适配层
 │   ├── console/                      ← 迁移期保留
@@ -272,20 +273,20 @@ ava-repo/
 
 ### 4.8 Implementation Checklist
 
-- [ ] 1. 把任务目标改写为“当前项目迁移优先”，停止把本阶段绑定到跨框架产品化
-- [ ] 2. 明确 Ava 是独立开发真源，`nanobot__ava` 是当前迁移来源而不是最终边界定义者
-- [ ] 3. 将 `nanobot` 重写为首个 reference adapter 的定位，而不是 Ava 的唯一宿主
-- [ ] 4. 维持当前入口与行为兼容，避免 console 与主要使用链路回退
-- [ ] 5. 收紧 `ava.core` 与 `ava.adapters` 的抽象边界，但不提前落地实现级 Module Spec
-- [ ] 6. 把记忆管理语义与具体宿主 runtime 分离，避免把某一运行时的 memory store 当成全局真源
-- [ ] 7. 将 `commands / skills / bootstrap / TOOLS.md / onboard` 明确列为迁移期兼容链，不得遗漏
-- [ ] 8. 将 `bus observe / console listener / channel / transcription` 明确列为首个 reference adapter 的兼容 contract
-- [ ] 9. 保留当前 console backend + console-ui 的主要行为，不做重构，只做迁移期承接
-- [ ] 10. 当前阶段继续兼容现有 config / workspace / bootstrap 约定，推迟统一 config 设计
-- [ ] 11. 为现有路径设计 shim / alias，避免一次性搬目录导致入口与测试同时破裂
-- [ ] 12. 建立首个 reference adapter 的集成测试基线
-- [ ] 13. 删除当前过早写死的实现级 Module Spec，待核心抽象稳定后再补
-- [ ] 14. 同步更新 `.specanchor` 文档，使其服务多 Agent 记忆系统适配方向
+- [x] 1. 把任务目标改写为“当前项目迁移优先”，停止把本阶段绑定到跨框架产品化
+- [x] 2. 明确 Ava 是独立开发真源，`nanobot__ava` 是当前迁移来源而不是最终边界定义者
+- [x] 3. 将 `nanobot` 重写为首个 reference adapter 的定位，而不是 Ava 的唯一宿主
+- [x] 4. 维持当前入口与行为兼容，避免 console 与主要使用链路回退
+- [x] 5. 收紧 `ava.core` 与 `ava.adapters` 的抽象边界，但不提前落地实现级 Module Spec
+- [x] 6. 把记忆管理语义与具体宿主 runtime 分离，避免把某一运行时的 memory store 当成全局真源
+- [x] 7. 将 `commands / skills / bootstrap / TOOLS.md / onboard` 明确列为迁移期兼容链，不得遗漏
+- [x] 8. 将 `bus observe / console listener / channel / transcription` 明确列为首个 reference adapter 的兼容 contract
+- [x] 9. 保留当前 console backend + console-ui 的主要行为，不做重构，只做迁移期承接
+- [x] 10. 当前阶段继续兼容现有 config / workspace / bootstrap 约定，推迟统一 config 设计
+- [x] 11. 为现有路径设计 shim / alias，避免一次性搬目录导致入口与测试同时破裂
+- [x] 12. 建立首个 reference adapter 的集成测试基线
+- [x] 13. 删除当前过早写死的实现级 Module Spec，待核心抽象稳定后再补
+- [x] 14. 同步更新 `.specanchor` 文档，使其服务多 Agent 记忆系统适配方向
 
 ## 5. Execute Log
 
@@ -298,11 +299,35 @@ ava-repo/
 - 2026-04-13：已新增根目录 `README.md`，使用简短介绍说明 Ava 当前是面向多 Agent 的记忆管理与适配仓库
 - 2026-04-13：已新增根目录 `LICENSE`，当前采用 MIT 许可证，为公开初始化仓库做准备
 - 2026-04-13：已在 GitHub 创建公开仓库 `linziyanleo/ava`，后续以 `main` 作为默认公开基线分支
+- 2026-04-13：已把第 4.0 节的目标结构统一收紧为“仓库根是 `ava/`”，不再使用 `ava-repo/` 这种中间命名
+- 2026-04-13：已从 `/Users/fanghu/Documents/Test/nanobot__ava` 迁入 `ava/`、`console-ui/`、`bridge/` 与当前需要保留的测试基线，保留 `ava/.specanchor/migration/` 自举文档
+- 2026-04-13：已新增 `ava.adapters.nanobot.discovery` 与 `scripts/start-ava.sh`，通过外部 checkout 解析 `AVA_NANOBOT_ROOT`，默认接入同级 `/Users/fanghu/Documents/Test/nanobot`
+- 2026-04-13：已将 schema、skills、console skills service、launcher 与 onboard 链路改为优先依赖外部 `nanobot` checkout，而不是仓库内嵌源码
+- 2026-04-13：已保留 `console-ui/` 与 `bridge/` 目录形态，并完成 `npm install` + `npm run build` 验证迁移期前后端资产可构建
+- 2026-04-13：已新增外部 checkout 发现、guardrail、skills service 与兼容链测试，并通过 `./.venv/bin/pytest` 全量执行当前仓库测试，结果为 `158 passed`
 
 ## 6. Review Verdict
 
-（待 Execute 完成后填写）
+Execute 完成，当前仓库已从 `nanobot` fork 形态收敛为独立 Ava 插件仓库。
+
+当前结论：
+
+- Ava 代码、Console、Bridge 与测试已迁入独立仓库维护
+- 运行时不再要求把 `nanobot` 源码 vendor 到本仓库；通过外部 checkout + 启动脚本完成接线
+- 迁移期兼容链已覆盖 `launcher / schema / skills / onboard / transcription / console service`
+- 当前验收基线以本仓库测试全绿、前端构建通过、`./scripts/start-ava.sh --help` 可启动为准
+
+残留约束：
+
+- `nanobot` 仍是首个 reference adapter，后续多 runtime 抽象仍需在后续任务中继续收敛
+- `uv sync --all-extras` 在本机会受 `matrix` 依赖的本地编译工具链影响；当前以 `uv sync --extra dev` 作为可运行开发基线
 
 ## 7. Plan-Execution Diff
 
-（待 Execute 完成后填写）
+与原计划相比，当前执行刻意没有在本轮落地完整 `ava.core` 目录重切或多 adapter 产品化接口。
+
+保留的差异是有意的：
+
+- 本轮优先完成独立仓库抽离、外部 `nanobot` checkout 接线、兼容链修复和测试基线
+- `ava.adapters.nanobot` 先承担 reference adapter discovery/bootstrap 责任，避免过早冻结最终模块图
+- 多 runtime 的进一步抽象仍以当前独立插件仓库为真源，在后续任务中渐进演进
