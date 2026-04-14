@@ -1,6 +1,6 @@
 # Ava
 
-Ava 现在是一个独立仓库，承接从 `nanobot__ava` 抽取出来的外挂层代码。
+Ava 现在是一个独立仓库，承接从既有 sidecar 代码抽取出来的外挂层实现。
 
 这个仓库不再内嵌 `nanobot/` 源码；运行时通过外部 checkout 接入上游 `nanobot`，默认指向同级目录 `../nanobot`，也支持用 `AVA_NANOBOT_ROOT` 覆盖。
 
@@ -14,8 +14,8 @@ Ava 现在是一个独立仓库，承接从 `nanobot__ava` 抽取出来的外挂
 
 ## 启动
 
-1. 准备外部 nanobot checkout
-   默认路径：`/Users/fanghu/Documents/Test/nanobot`
+1. 准备外部 `nanobot` checkout
+   建议放在当前仓库同级目录，或通过环境变量显式指定
 2. 安装当前仓库依赖
 
 ```bash

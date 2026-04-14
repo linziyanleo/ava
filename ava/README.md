@@ -7,7 +7,7 @@
 - 当前仓库只维护 Ava 自己的代码
 - 上游 `nanobot` 通过外部 checkout 提供
 - 默认外部路径是仓库同级的 `../nanobot`
-- 也可以通过 `AVA_NANOBOT_ROOT` 指向任意完整 `HKUDS/nanobot` checkout
+- 也可以通过 `AVA_NANOBOT_ROOT` 指向任意完整的 `nanobot` checkout
 
 ## 推荐入口
 
@@ -52,5 +52,5 @@ python -m ava agent -m "Hello"
 ## Console / Mock 数据
 
 - repo 内版本化数据仍在 `ava/console/mock_bundle/`
-- 运行时可写数据仍落在 `~/.nanobot/console/`
+- 运行时可写数据继续沿用 nanobot 默认的工作目录与持久化位置
 - Console 和 gateway 的联动行为保持原契约，不因为仓库抽取而改成双进程分叉实现

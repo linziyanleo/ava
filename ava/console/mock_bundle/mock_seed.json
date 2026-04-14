@@ -538,7 +538,7 @@
         "doing": 1,
         "done": 4
       },
-      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "project_path": "/mock/workspace",
       "cli_session_id": "mock-cli-session-01",
       "timeline": [
         {
@@ -578,7 +578,7 @@
         "doing": 0,
         "done": 0
       },
-      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "project_path": "/mock/workspace",
       "cli_session_id": "",
       "timeline": [
         {
@@ -606,7 +606,7 @@
       "phase": "completed",
       "last_tool_name": "write_file",
       "todo_summary": null,
-      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "project_path": "/mock/workspace",
       "cli_session_id": "mock-cli-session-02",
       "timeline": [
         {
@@ -642,7 +642,7 @@
       "phase": "blocked",
       "last_tool_name": "page_agent",
       "todo_summary": null,
-      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "project_path": "/mock/workspace",
       "cli_session_id": "mock-cli-session-03",
       "timeline": [
         {
@@ -678,7 +678,7 @@
       "phase": "cancelled",
       "last_tool_name": "update_plan",
       "todo_summary": null,
-      "project_path": "/Users/fanghu/Documents/Test/nanobot__ava",
+      "project_path": "/mock/workspace",
       "cli_session_id": "mock-cli-session-04",
       "timeline": [
         {
