@@ -7,7 +7,7 @@ specanchor:
   reviewer: "@方壶"
   created: "2026-04-13"
   status: "active"
-  last_change: "完成独立 Ava 仓库抽离、外部 nanobot checkout 接线与测试基线收口"
+  last_change: "修复 skills_patch 未透传上游 disabled_skills 签名，恢复 gateway 启动兼容"
   related_global:
     - ".specanchor/global/architecture.spec.md"
     - ".specanchor/global/project-setup.spec.md"
@@ -305,6 +305,7 @@ ava/
 - 2026-04-13：已将 schema、skills、console skills service、launcher 与 onboard 链路改为优先依赖外部 `nanobot` checkout，而不是仓库内嵌源码
 - 2026-04-13：已保留 `console-ui/` 与 `bridge/` 目录形态，并完成 `npm install` + `npm run build` 验证迁移期前后端资产可构建
 - 2026-04-13：已新增外部 checkout 发现、guardrail、skills service 与兼容链测试，并通过 `./.venv/bin/pytest` 全量执行当前仓库测试，结果为 `158 passed`
+- 2026-04-14：已修复 `ava.patches.skills_patch` 未兼容上游 `SkillsLoader(..., disabled_skills=...)` 的签名漂移问题；补充回归测试后，全量测试更新为 `159 passed`，`./scripts/start-ava.sh gateway --port 18791` smoke 可正常进入生命周期初始化
 
 ## 6. Review Verdict
 
@@ -315,7 +316,7 @@ Execute 完成，当前仓库已从 `nanobot` fork 形态收敛为独立 Ava 插
 - Ava 代码、Console、Bridge 与测试已迁入独立仓库维护
 - 运行时不再要求把 `nanobot` 源码 vendor 到本仓库；通过外部 checkout + 启动脚本完成接线
 - 迁移期兼容链已覆盖 `launcher / schema / skills / onboard / transcription / console service`
-- 当前验收基线以本仓库测试全绿、前端构建通过、`./scripts/start-ava.sh --help` 可启动为准
+- 当前验收基线以本仓库测试全绿、前端构建通过、`./scripts/start-ava.sh gateway` 可进入生命周期初始化为准
 
 残留约束：
 

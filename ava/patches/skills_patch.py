@@ -76,12 +76,24 @@ def apply_skills_patch() -> str:
     # overrides nanobot/skills/ for same-named skills. Save the original
     # nanobot builtin dir for fallback.
     # ------------------------------------------------------------------
-    def patched_init(self, workspace: Path, builtin_skills_dir: Path | None = None):
+    def patched_init(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        **kwargs,
+    ):
         # Save original nanobot builtin dir before overriding
         self._nanobot_skills = builtin_skills_dir or _get_nanobot_skills_dir()
         # Override builtin_skills to ava/skills/ — this makes the original
         # list_skills() scan ava/ instead of nanobot/, giving ava priority.
-        original_init(self, workspace, _AVA_SKILLS_DIR)
+        original_init(
+            self,
+            workspace,
+            _AVA_SKILLS_DIR,
+            disabled_skills=disabled_skills,
+            **kwargs,
+        )
         self._agents_dir = _AGENTS_SKILLS_DIR
 
     # ------------------------------------------------------------------
@@ -123,7 +135,7 @@ def apply_skills_patch() -> str:
                             seen.add(skill_dir.name)
 
         # Filter disabled
-        disabled = _get_disabled_skills()
+        disabled = set(getattr(self, "disabled_skills", set())) | _get_disabled_skills()
         if disabled:
             skills = [s for s in skills if s["name"] not in disabled]
 
@@ -134,7 +146,7 @@ def apply_skills_patch() -> str:
     # ------------------------------------------------------------------
     def patched_load_skill(self, name: str) -> str | None:
         # Check disabled first
-        disabled = _get_disabled_skills()
+        disabled = set(getattr(self, "disabled_skills", set())) | _get_disabled_skills()
         if name in disabled:
             return None
 

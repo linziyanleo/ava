@@ -48,3 +48,19 @@ class TestSkillsPatch:
         assert SkillsLoader.__init__ is not orig_init
         assert SkillsLoader.list_skills is not orig_list
         assert SkillsLoader.load_skill is not orig_load
+
+    def test_patched_init_accepts_disabled_skills(self, tmp_path: Path):
+        """T10.4: patched __init__ preserves upstream disabled_skills signature."""
+        from ava.patches.skills_patch import apply_skills_patch
+
+        apply_skills_patch()
+
+        disabled = {"example-skill"}
+        loader = SkillsLoader(
+            tmp_path,
+            builtin_skills_dir=tmp_path / "builtin",
+            disabled_skills=disabled,
+        )
+
+        assert loader.disabled_skills == disabled
+        assert loader._nanobot_skills == tmp_path / "builtin"
