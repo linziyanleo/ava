@@ -118,6 +118,33 @@ class TestLoopPatch:
         finally:
             loop_patch_module._agent_loop_ref = original_ref
 
+    def test_snapshot_content_limit_reads_config(self, monkeypatch):
+        """snapshot_content_max_chars should come from config when available."""
+        from ava.patches.loop_patch import _get_snapshot_content_max_chars
+
+        monkeypatch.setattr(
+            "nanobot.config.loader.load_config",
+            lambda: SimpleNamespace(token_stats=SimpleNamespace(snapshot_content_max_chars=1234)),
+        )
+
+        assert _get_snapshot_content_max_chars() == 1234
+
+    def test_snapshot_content_limit_falls_back_on_invalid_config(self, monkeypatch):
+        """Invalid config values should not break token snapshot recording."""
+        from ava.patches.loop_patch import _get_snapshot_content_max_chars
+
+        monkeypatch.setattr(
+            "nanobot.config.loader.load_config",
+            lambda: SimpleNamespace(token_stats=SimpleNamespace(snapshot_content_max_chars=0)),
+        )
+        assert _get_snapshot_content_max_chars() == 3000
+
+        def _raise():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("nanobot.config.loader.load_config", _raise)
+        assert _get_snapshot_content_max_chars() == 3000
+
     @pytest.mark.asyncio
     async def test_process_message_preserves_upstream_kwargs(self):
         """T3.6b: patched _process_message forwards pending_queue and future kwargs."""

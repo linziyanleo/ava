@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, User, Bot, Wrench, MessageCircle, Layers } from 'lucide-react'
+import { ChevronDown, ChevronRight, User, Bot, Wrench, MessageCircle } from 'lucide-react'
 
 interface Message {
   role: string
@@ -13,31 +13,29 @@ interface ConversationHistoryViewProps {
 
 interface HistoryStats {
   totalMessages: number
-  userTurns: number
-  assistantTurns: number
+  userMessages: number
+  assistantMessages: number
   toolCalls: number
-  truncatedCount: number
 }
 
-const CONTENT_TRUNCATE_THRESHOLD = 198
+const CONTEXT_PREVIEW_LIMIT = 500
 
 function UserBubble({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false)
-  const isTruncated = content.length >= CONTENT_TRUNCATE_THRESHOLD
-  const displayTruncated = content.length > 200
-  const display = displayTruncated && !expanded ? content.slice(0, 200) + '…' : content
+  const isFolded = content.length > CONTEXT_PREVIEW_LIMIT
+  const display = isFolded && !expanded ? content.slice(0, CONTEXT_PREVIEW_LIMIT) + '…' : content
 
   return (
     <div className="w-full sm:max-w-[85%] md:max-w-[80%] px-3 py-2 rounded-xl rounded-br-sm bg-[var(--accent)]/15 border border-[var(--accent)]/20 text-sm">
       <div className="flex items-center gap-1.5 mb-1 text-xs text-[var(--text-secondary)]">
         <User className="w-3 h-3 shrink-0" />
         <span>User</span>
-        {isTruncated && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已截断</span>
+        {isFolded && !expanded && (
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已折叠</span>
         )}
       </div>
       <pre className="whitespace-pre-wrap font-[inherit] text-[var(--text-primary)] break-words">{display}</pre>
-      {displayTruncated && (
+      {isFolded && (
         <button
           onClick={() => setExpanded(!expanded)}
           className="mt-1 text-xs text-[var(--accent)] hover:underline"
@@ -51,21 +49,20 @@ function UserBubble({ content }: { content: string }) {
 
 function AssistantBubble({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false)
-  const isTruncated = content.length >= CONTENT_TRUNCATE_THRESHOLD
-  const displayTruncated = content.length > 300
-  const display = displayTruncated && !expanded ? content.slice(0, 300) + '…' : content
+  const isFolded = content.length > CONTEXT_PREVIEW_LIMIT
+  const display = isFolded && !expanded ? content.slice(0, CONTEXT_PREVIEW_LIMIT) + '…' : content
 
   return (
     <div className="w-full sm:max-w-[85%] md:max-w-[80%] px-3 py-2 rounded-xl rounded-bl-sm bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
       <div className="flex items-center gap-1.5 mb-1 text-xs text-[var(--text-secondary)]">
         <Bot className="w-3 h-3 shrink-0" />
         <span>Assistant</span>
-        {isTruncated && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已截断</span>
+        {isFolded && !expanded && (
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已折叠</span>
         )}
       </div>
       <pre className="whitespace-pre-wrap font-[inherit] text-[var(--text-primary)] break-words">{display}</pre>
-      {displayTruncated && (
+      {isFolded && (
         <button
           onClick={() => setExpanded(!expanded)}
           className="mt-1 text-xs text-[var(--accent)] hover:underline"
@@ -104,24 +101,14 @@ function StatsBar({ stats }: { stats: HistoryStats }) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 mb-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[11px] text-[var(--text-secondary)]">
       <span className="inline-flex items-center gap-1">
         <MessageCircle className="w-3 h-3" />
-        {stats.userTurns} 轮对话
+        {stats.userMessages} 条用户消息
       </span>
       <span>{stats.totalMessages} 条消息</span>
+      {stats.assistantMessages > 0 && <span>{stats.assistantMessages} 条助手消息</span>}
       {stats.toolCalls > 0 && (
         <span className="inline-flex items-center gap-1">
           <Wrench className="w-3 h-3" />
           {stats.toolCalls} 工具调用
-        </span>
-      )}
-      {stats.truncatedCount > 0 ? (
-        <span className="inline-flex items-center gap-1 text-[var(--warning)]">
-          <Layers className="w-3 h-3" />
-          已压缩 · {stats.truncatedCount} 条截断
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1 text-[var(--success)]">
-          <Layers className="w-3 h-3" />
-          未压缩
         </span>
       )}
     </div>
@@ -139,21 +126,19 @@ export default function ConversationHistoryView({ historyJson }: ConversationHis
   }, [historyJson])
 
   const stats = useMemo<HistoryStats>(() => {
-    let userTurns = 0
-    let assistantTurns = 0
+    let userMessages = 0
+    let assistantMessages = 0
     let toolCalls = 0
-    let truncatedCount = 0
     for (const m of messages) {
-      if (m.role === 'user') userTurns++
-      else if (m.role === 'assistant') assistantTurns++
+      if (m.role === 'user') userMessages++
+      else if (m.role === 'assistant') assistantMessages++
       else if (m.role === 'tool') toolCalls++
-      if (m.content && m.content.length >= CONTENT_TRUNCATE_THRESHOLD) truncatedCount++
     }
-    return { totalMessages: messages.length, userTurns, assistantTurns, toolCalls, truncatedCount }
+    return { totalMessages: messages.length, userMessages, assistantMessages, toolCalls }
   }, [messages])
 
   if (messages.length === 0) {
-    return <span className="text-xs text-[var(--text-secondary)] italic">No conversation history</span>
+    return <span className="text-xs text-[var(--text-secondary)] italic">无请求上下文</span>
   }
 
   return (

@@ -111,6 +111,20 @@ def _get_latest_history_entry(store, previous_cursor: int | None) -> str:
     return content if isinstance(content, str) else ""
 
 
+def _get_snapshot_content_max_chars() -> int:
+    """Read the configured snapshot truncation limit with a safe fallback."""
+    default_limit = 3000
+    try:
+        from nanobot.config.loader import load_config
+
+        cfg = load_config()
+        raw_limit = getattr(getattr(cfg, "token_stats", None), "snapshot_content_max_chars", default_limit)
+        limit = int(raw_limit)
+        return limit if limit > 0 else default_limit
+    except Exception:
+        return default_limit
+
+
 def _sync_categorized_memory(consolidator, session_key: str | None, history_entry: str) -> None:
     if not session_key or not history_entry:
         return
@@ -494,8 +508,9 @@ def apply_loop_patch() -> str:
             token_stats = getattr(self, "token_stats", None)
             if token_stats:
                 try:
+                    snapshot_limit = _get_snapshot_content_max_chars()
                     conv_history = _json.dumps(
-                        [{"role": m.get("role", ""), "content": str(m.get("content", ""))[:200]}
+                        [{"role": m.get("role", ""), "content": str(m.get("content", ""))[:snapshot_limit]}
                          for m in initial_messages if m.get("role") != "system"],
                         ensure_ascii=False,
                     )

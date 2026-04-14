@@ -115,6 +115,7 @@ class TestSchemaPatch:
         assert dumped["gateway"]["console"]["enabled"] is True
         assert dumped["tools"]["exec"]["autoVenv"] is True
         assert dumped["tools"]["claudeCode"]["model"] == "claude-sonnet-4-20250514"
+        assert dumped["token_stats"]["snapshot_content_max_chars"] == 3000
         assert dumped["token_stats"]["record_full_request_payload"] is False
 
     def test_idempotent(self):

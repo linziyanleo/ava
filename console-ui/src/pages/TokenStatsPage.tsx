@@ -1626,7 +1626,7 @@ function RecordRow({
               </div>
               {r.conversation_history && (
                 <div>
-                  <p className="text-[var(--text-secondary)] mb-1">对话历史:</p>
+                  <p className="text-[var(--text-secondary)] mb-1">请求上下文（发送给模型前的快照）:</p>
                   <div className="bg-[var(--bg-primary)] rounded-lg p-3">
                     <ConversationHistoryView historyJson={r.conversation_history} />
                   </div>
@@ -1915,7 +1915,7 @@ function TurnCallEntry({ record }: { record: TokenRecord }) {
 
           {record.conversation_history && (
             <div>
-              <p className="text-[var(--text-secondary)] mb-1 text-xs">对话历史</p>
+              <p className="text-[var(--text-secondary)] mb-1 text-xs">请求上下文（发送给模型前的快照）</p>
               <div className="bg-[var(--bg-secondary)] rounded-lg p-3">
                 <ConversationHistoryView historyJson={record.conversation_history} />
               </div>
