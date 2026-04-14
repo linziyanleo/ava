@@ -6,6 +6,10 @@ __pycache__/
 *.egg-info/
 .coverage
 htmlcov/
+.specanchor/
+anchor.yaml
+ava/.specanchor/
+ava/AGENTS.md
 console-ui/dist/
 console-ui/node_modules/
 bridge/node_modules/
