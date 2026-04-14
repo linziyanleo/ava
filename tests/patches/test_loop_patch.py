@@ -118,6 +118,37 @@ class TestLoopPatch:
         finally:
             loop_patch_module._agent_loop_ref = original_ref
 
+    @pytest.mark.asyncio
+    async def test_process_message_preserves_upstream_kwargs(self):
+        """T3.6b: patched _process_message forwards pending_queue and future kwargs."""
+        from ava.patches.loop_patch import apply_loop_patch
+
+        captured: dict[str, object] = {}
+
+        async def original_process_message(self, msg, **kwargs):
+            captured["msg"] = msg
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(content="ok")
+
+        AgentLoop._process_message = original_process_message
+        apply_loop_patch()
+
+        pending_queue = object()
+        loop = SimpleNamespace(bg_tasks=None, token_stats=None, bus=None)
+        msg = SimpleNamespace(content="hello", session_key="")
+
+        result = await AgentLoop._process_message(
+            loop,
+            msg,
+            pending_queue=pending_queue,
+            trace_context="future-compatible",
+        )
+
+        assert result.content == "ok"
+        assert captured["msg"] is msg
+        assert captured["kwargs"]["pending_queue"] is pending_queue
+        assert captured["kwargs"]["trace_context"] == "future-compatible"
+
 
 class TestTokenStatsRecordId:
     """token_stats_service.record() 返回 record_id 和 update_record() 测试。"""

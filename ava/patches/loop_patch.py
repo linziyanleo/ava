@@ -714,6 +714,8 @@ def apply_loop_patch() -> str:
         on_progress=None,
         on_stream=None,
         on_stream_end=None,
+        pending_queue=None,
+        **kwargs,
     ):
         sk = session_key or getattr(msg, "session_key", "")
         raw = (getattr(msg, "content", "") or "").strip()
@@ -767,6 +769,8 @@ def apply_loop_patch() -> str:
                 on_progress=on_progress,
                 on_stream=on_stream,
                 on_stream_end=on_stream_end,
+                pending_queue=pending_queue,
+                **kwargs,
             )
         except BaseException as exc:
             phase0_id = getattr(self, "_phase0_record_id", None)
