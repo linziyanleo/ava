@@ -134,8 +134,6 @@ class ImageGenTool(Tool):
     ) -> str:
         import asyncio
 
-        from google.genai import types
-
         record_id = uuid.uuid4().hex[:12]
         record = {
             "id": record_id,
@@ -150,6 +148,8 @@ class ImageGenTool(Tool):
         }
 
         try:
+            from google.genai import types
+
             client = self._get_client()
 
             contents: list[Any] = []
@@ -255,6 +255,13 @@ class ImageGenTool(Tool):
 
             return "\n".join(result_parts)
 
+        except ModuleNotFoundError as e:
+            error_msg = f"Missing image generation dependency: {e}"
+            record["status"] = "error"
+            record["error"] = error_msg
+            self._write_record(record)
+            logger.error("Image generation failed: {}", error_msg)
+            return f"Error generating image: {error_msg}"
         except Exception as e:
             error_msg = str(e)
             record["status"] = "error"
