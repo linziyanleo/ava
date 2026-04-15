@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from ava.console.mock_bundle_runtime import (
+    LOCAL_ADMIN_DEFAULT_PASSWORD,
     LOCAL_ADMIN_PASSWORD_FILE,
     LOCAL_ADMIN_USERNAME,
     MockBackgroundTaskStore,
@@ -28,6 +29,7 @@ def test_ensure_local_accounts_creates_local_password_files(tmp_path):
     assert (console_dir / "local-secrets" / LOCAL_ADMIN_PASSWORD_FILE).is_file()
     assert (console_dir / "local-secrets" / MOCK_TESTER_PASSWORD_FILE).is_file()
     assert users.get_user(LOCAL_ADMIN_USERNAME) is not None
+    assert users.verify_password(LOCAL_ADMIN_USERNAME, LOCAL_ADMIN_DEFAULT_PASSWORD) is not None
     assert users.get_user(MOCK_TESTER_USERNAME) is not None
     assert users.get_user(MOCK_TESTER_USERNAME).role == "mock_tester"
 
