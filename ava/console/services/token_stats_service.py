@@ -62,6 +62,7 @@ class TokenStatsCollector:
         self._dirty = False
         self._file = data_dir / "token_stats.json"
         self._last_mtime: float = 0.0
+        self._iteration_backfilled: set[str] = set()
         if not self._use_db:
             self._load()
 
@@ -196,6 +197,43 @@ class TokenStatsCollector:
         if callable(backfill):
             backfill(session_key=session_key)
 
+    def _ensure_iteration(self, session_key: str | None, conversation_id: str | None = None) -> None:
+        if not self._use_db or not session_key:
+            return
+
+        scope_key = session_key if conversation_id is None else f"{session_key}::{conversation_id}"
+        if scope_key in self._iteration_backfilled or session_key in self._iteration_backfilled:
+            return
+
+        self._ensure_turn_seq(session_key)
+
+        clauses = ["session_key = ?", "turn_seq IS NOT NULL"]
+        params: list[Any] = [session_key]
+        if conversation_id is not None:
+            clauses.append("conversation_id = ?")
+            params.append(conversation_id)
+
+        row = self._db.fetchone(
+            f"""
+            SELECT 1 AS needs_backfill
+              FROM token_usage
+             WHERE {" AND ".join(clauses)}
+             GROUP BY conversation_id, turn_seq
+            HAVING COUNT(*) > 1 AND COALESCE(MAX(iteration), 0) = 0
+             LIMIT 1
+            """,
+            tuple(params),
+        )
+        if not row:
+            self._iteration_backfilled.add(scope_key)
+            return
+
+        backfill = getattr(self._db, "backfill_iteration", None)
+        if callable(backfill):
+            updated = backfill(session_key=session_key)
+            logger.info("Backfilled iteration for {} token_usage records in session {}", updated, session_key)
+        self._iteration_backfilled.add(session_key)
+
     def _build_filter(
         self,
         session_key: str | None = None,
@@ -211,9 +249,9 @@ class TokenStatsCollector:
         clauses: list[str] = []
         params: list = []
         if session_key:
-            clauses.append("session_key LIKE ?")
-            params.append(f"%{session_key}%")
-        if conversation_id:
+            clauses.append("session_key = ?")
+            params.append(session_key)
+        if conversation_id is not None:
             clauses.append("conversation_id = ?")
             params.append(conversation_id)
         if model:
@@ -264,6 +302,7 @@ class TokenStatsCollector:
     ) -> list[dict[str, Any]]:
         if self._use_db:
             self._ensure_turn_seq(session_key)
+            self._ensure_iteration(session_key, conversation_id)
             where, params = self._build_filter(session_key, conversation_id, model, provider, start_time, end_time, turn_seq, model_role)
             rows = self._db.fetchall(
                 f"SELECT * FROM token_usage{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
@@ -275,8 +314,8 @@ class TokenStatsCollector:
         with self._lock:
             filtered = self._records
             if session_key:
-                filtered = [r for r in filtered if session_key.lower() in getattr(r, "session_key", "").lower()]
-            if conversation_id:
+                filtered = [r for r in filtered if getattr(r, "session_key", "") == session_key]
+            if conversation_id is not None:
                 filtered = [r for r in filtered if getattr(r, "conversation_id", "") == conversation_id]
             if model:
                 filtered = [r for r in filtered if model.lower() in getattr(r, "model", "").lower()]
@@ -312,6 +351,7 @@ class TokenStatsCollector:
     ) -> int:
         if self._use_db:
             self._ensure_turn_seq(session_key)
+            self._ensure_iteration(session_key, conversation_id)
             where, params = self._build_filter(session_key, conversation_id, model, provider, start_time, end_time, turn_seq, model_role)
             row = self._db.fetchone(f"SELECT COUNT(*) as cnt FROM token_usage{where}", tuple(params))
             return row["cnt"] if row else 0
@@ -320,8 +360,8 @@ class TokenStatsCollector:
         with self._lock:
             filtered = self._records
             if session_key:
-                filtered = [r for r in filtered if session_key.lower() in getattr(r, "session_key", "").lower()]
-            if conversation_id:
+                filtered = [r for r in filtered if getattr(r, "session_key", "") == session_key]
+            if conversation_id is not None:
                 filtered = [r for r in filtered if getattr(r, "conversation_id", "") == conversation_id]
             if model:
                 filtered = [r for r in filtered if model.lower() in getattr(r, "model", "").lower()]
@@ -460,9 +500,10 @@ class TokenStatsCollector:
         """Per-turn token aggregation for a given session."""
         if self._use_db:
             self._ensure_turn_seq(session_key)
+            self._ensure_iteration(session_key, conversation_id)
             where = "WHERE session_key = ?"
             params: list[Any] = [session_key]
-            if conversation_id:
+            if conversation_id is not None:
                 where += " AND conversation_id = ?"
                 params.append(conversation_id)
             rows = self._db.fetchall(
@@ -488,7 +529,7 @@ class TokenStatsCollector:
             for r in self._records:
                 if r.session_key != session_key:
                     continue
-                if conversation_id and getattr(r, "conversation_id", "") != conversation_id:
+                if conversation_id is not None and getattr(r, "conversation_id", "") != conversation_id:
                     continue
                 bucket_key = (getattr(r, "conversation_id", ""), r.turn_seq)
                 d = buckets[bucket_key]
@@ -510,9 +551,10 @@ class TokenStatsCollector:
         """Per-iteration token records for a given session (no aggregation)."""
         if self._use_db:
             self._ensure_turn_seq(session_key)
+            self._ensure_iteration(session_key, conversation_id)
             where = "WHERE session_key = ?"
             params: list[Any] = [session_key]
-            if conversation_id:
+            if conversation_id is not None:
                 where += " AND conversation_id = ?"
                 params.append(conversation_id)
             rows = self._db.fetchall(
@@ -533,7 +575,7 @@ class TokenStatsCollector:
             for r in self._records:
                 if r.session_key != session_key:
                     continue
-                if conversation_id and getattr(r, "conversation_id", "") != conversation_id:
+                if conversation_id is not None and getattr(r, "conversation_id", "") != conversation_id:
                     continue
                 results.append({
                     "conversation_id": getattr(r, "conversation_id", ""),
@@ -556,6 +598,7 @@ class TokenStatsCollector:
         if self._use_db:
             self._db.execute("DELETE FROM token_usage")
             self._db.commit()
+            self._iteration_backfilled.clear()
             return
 
         with self._lock:

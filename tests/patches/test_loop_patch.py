@@ -333,9 +333,9 @@ class TestTokenStatsRecordId:
         conn.commit()
 
         per_turn = collector.get_by_session("telegram:1")
-        assert [row["turn_seq"] for row in per_turn] == [0, 1]
+        assert [row["turn_seq"] for row in per_turn] == [0, 2]
 
-        filtered = collector.get_records(limit=10, session_key="telegram:1", turn_seq=1)
+        filtered = collector.get_records(limit=10, session_key="telegram:1", turn_seq=2)
         assert len(filtered) == 1
         assert filtered[0]["model"] == "model-b"
 
@@ -376,6 +376,109 @@ class TestTokenStatsRecordId:
         )
         assert len(filtered) == 1
         assert filtered[0]["model"] == "current-model"
+
+    def test_explicit_empty_conversation_id_filters_legacy_records(self, tmp_path):
+        from ava.storage import Database
+        db = Database(tmp_path / "test.db")
+        from ava.console.services.token_stats_service import TokenStatsCollector
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+
+        collector.record(
+            model="legacy-model",
+            provider="provider",
+            usage={"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12},
+            session_key="telegram:1",
+            conversation_id="",
+            turn_seq=0,
+            finish_reason="stop",
+            model_role="chat",
+        )
+        collector.record(
+            model="current-model",
+            provider="provider",
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            session_key="telegram:1",
+            conversation_id="conv_current",
+            turn_seq=0,
+            finish_reason="stop",
+            model_role="chat",
+        )
+
+        legacy_records = collector.get_records(
+            limit=10,
+            session_key="telegram:1",
+            conversation_id="",
+        )
+        assert len(legacy_records) == 1
+        assert legacy_records[0]["model"] == "legacy-model"
+
+        legacy_turns = collector.get_by_session("telegram:1", conversation_id="")
+        assert len(legacy_turns) == 1
+        assert legacy_turns[0]["conversation_id"] == ""
+
+    def test_session_query_backfills_legacy_iteration_and_is_idempotent(self, tmp_path):
+        from ava.storage import Database
+        db = Database(tmp_path / "test.db")
+        from ava.console.services.token_stats_service import TokenStatsCollector
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+
+        conn = db._get_conn()
+        rows = [
+            ("2026-04-05T20:00:01", "telegram:1", "", 0, 0, "legacy-a"),
+            ("2026-04-05T20:00:02", "telegram:1", "", 0, 0, "legacy-b"),
+            ("2026-04-05T20:00:03", "telegram:1", "", 0, 0, "legacy-c"),
+            ("2026-04-05T20:01:01", "telegram:1", "conv_keep", 1, 0, "keep-a"),
+            ("2026-04-05T20:01:02", "telegram:1", "conv_keep", 1, 1, "keep-b"),
+        ]
+        for timestamp, session_key, conversation_id, turn_seq, iteration, model in rows:
+            conn.execute(
+                """INSERT INTO token_usage
+                   (timestamp, model, provider, prompt_tokens, completion_tokens, total_tokens,
+                    session_key, conversation_id, turn_seq, iteration, user_message, output_content,
+                    system_prompt_preview, conversation_history, full_request_payload, finish_reason,
+                    model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
+                    tool_names)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    timestamp,
+                    model,
+                    "provider",
+                    10,
+                    5,
+                    15,
+                    session_key,
+                    conversation_id,
+                    turn_seq,
+                    iteration,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "stop",
+                    "chat",
+                    0,
+                    0,
+                    0.0,
+                    0,
+                    "",
+                ),
+            )
+        conn.commit()
+
+        legacy_details = collector.get_by_session_detailed("telegram:1", conversation_id="")
+        assert [row["iteration"] for row in legacy_details] == [0, 1, 2]
+
+        preserved = conn.execute(
+            """SELECT iteration
+                 FROM token_usage
+                WHERE session_key = ? AND conversation_id = ? AND turn_seq = ?
+                ORDER BY timestamp, id""",
+            ("telegram:1", "conv_keep", 1),
+        ).fetchall()
+        assert [row["iteration"] for row in preserved] == [0, 1]
+
+        assert db.backfill_iteration(session_key="telegram:1") == 0
 
     @pytest.mark.asyncio
     async def test_new_rotates_conversation_id_and_keeps_turn_zero_separate(self, tmp_path):

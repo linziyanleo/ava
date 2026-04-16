@@ -51,6 +51,13 @@ metadata: {"nanobot":{"emoji":"🔍"}}
 - 只有颜色、布局、图片、Canvas、SVG 等 DOM 难以表达的问题才升级到 `vision`
 - 不要把 `vision` 当默认主判据
 
+## 浏览器持久化
+
+- `userDataDir` 使用固定路径 `/Users/fanghu/.nanobot/browser-profile`
+- 登录态（cookie/session）会跨会话持久化，无需每次重新登录
+- 首次使用需要以 `headless: false` 模式手动登录一次目标网站
+- 目录不存在时由 runner 自动创建
+
 ## 边界
 
 - pass/fail 仍然是 best-effort，不等于 CI 级验收
