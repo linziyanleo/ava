@@ -3,6 +3,8 @@ import type { TurnGroup as TurnGroupType, TurnTokenStats, IterationTokenStats } 
 import { MessageBubble } from './MessageBubble'
 import { ToolCallBlock } from './ToolCallBlock'
 import { SubagentResultBlock, isSubagentMessage } from './SubagentResultBlock'
+import { BackgroundTaskResultBlock } from './BackgroundTaskResultBlock'
+import { isBackgroundTaskMessage } from './backgroundTask'
 import { getContentText } from './utils'
 
 interface TurnGroupProps {
@@ -27,7 +29,12 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
   return (
     <div className="space-y-2" id={index != null ? `turn-${index}` : undefined}>
       {/* User message */}
-      {(turn.userMessage.metadata?.subagent_announce === true || isSubagentMessage(turn.userMessage.content))
+      {isBackgroundTaskMessage(turn.userMessage.content)
+        ? <BackgroundTaskResultBlock
+            content={typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''}
+            timestamp={turn.userMessage.timestamp}
+          />
+        : (turn.userMessage.metadata?.subagent_announce === true || isSubagentMessage(turn.userMessage.content))
         ? <SubagentResultBlock
             content={typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''}
             metadata={turn.userMessage.metadata}
@@ -37,7 +44,13 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
 
       {/* Intermediate assistant messages with content before tool calls */}
       {intermediateAssistants.map((msg, i) => (
-        <MessageBubble key={`intermediate-${i}`} message={msg} isUser={false} />
+        isBackgroundTaskMessage(msg.content)
+          ? <BackgroundTaskResultBlock
+              key={`intermediate-${i}`}
+              content={typeof msg.content === 'string' ? msg.content : ''}
+              timestamp={msg.timestamp}
+            />
+          : <MessageBubble key={`intermediate-${i}`} message={msg} isUser={false} />
       ))}
 
       {/* Tool calls — each rendered at the same level as message bubbles */}
@@ -80,13 +93,19 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
           }
         }
         return (
-          <MessageBubble
-            key={`final-${i}`}
-            message={msg}
-            isUser={false}
-            tokenStats={bubbleStats}
-            sessionKey={sessionKey}
-          />
+          isBackgroundTaskMessage(msg.content)
+            ? <BackgroundTaskResultBlock
+                key={`final-${i}`}
+                content={typeof msg.content === 'string' ? msg.content : ''}
+                timestamp={msg.timestamp}
+              />
+            : <MessageBubble
+                key={`final-${i}`}
+                message={msg}
+                isUser={false}
+                tokenStats={bubbleStats}
+                sessionKey={sessionKey}
+              />
         )
       })}
 
