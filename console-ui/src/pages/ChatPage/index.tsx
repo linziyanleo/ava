@@ -10,6 +10,52 @@ import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
 
 const SESSION_LIST_POLL_MS = 30_000
+const OBSERVE_PENDING_META_KEY = '__avaObservePending'
+
+function isObservePendingTurn(turn: TurnGroup): boolean {
+  return turn.userMessage.metadata?.[OBSERVE_PENDING_META_KEY] === true
+}
+
+function appendObservePendingTurn(
+  turns: TurnGroup[],
+  data: { content?: string; timestamp?: string; conversation_id?: string | null; turn_seq?: unknown },
+): TurnGroup[] {
+  const turnSeq = typeof data.turn_seq === 'number' ? data.turn_seq : getNextTurnSeq(turns)
+  if (typeof data.turn_seq === 'number' && turns.some((turn) => turn.turnSeq === data.turn_seq)) {
+    return turns
+  }
+
+  const lastTurn = turns[turns.length - 1]
+  if (lastTurn && isObservePendingTurn(lastTurn) && lastTurn.userMessage.content === (data.content ?? '')) {
+    return turns
+  }
+
+  const pendingMsg: RawMessage = {
+    role: 'user',
+    content: data.content ?? '',
+    timestamp: data.timestamp,
+    metadata: {
+      [OBSERVE_PENDING_META_KEY]: true,
+      conversation_id: data.conversation_id ?? '',
+    },
+  }
+
+  return [...turns, {
+    turnSeq,
+    userMessage: pendingMsg,
+    assistantSteps: [],
+    isComplete: false,
+    startTime: pendingMsg.timestamp,
+    toolCalls: [],
+  }]
+}
+
+function dropObservePendingTurns(turns: TurnGroup[], turnSeq?: unknown): TurnGroup[] {
+  if (typeof turnSeq === 'number') {
+    return turns.filter((turn) => !(isObservePendingTurn(turn) && turn.turnSeq === turnSeq))
+  }
+  return turns.filter((turn) => !isObservePendingTurn(turn))
+}
 
 export default function ChatPage() {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
@@ -99,9 +145,6 @@ export default function ChatPage() {
     const meta = sessions.find((s) => s.key === sessionKey) || null
     return loadSessionMessagesWithMeta(sessionKey, meta, conversationId, silent)
   }, [sessions, loadSessionMessagesWithMeta])
-
-  const currentMetaRef = useRef<SessionMeta | null>(currentMeta)
-  currentMetaRef.current = currentMeta
 
   const activeConversationIdRef = useRef<string | null>(activeConversationId)
   activeConversationIdRef.current = activeConversationId
@@ -203,35 +246,43 @@ export default function ChatPage() {
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data)
       if (data.type === 'message_arrived') {
-        if (activeConversationIdRef.current !== currentMetaRef.current?.conversation_id) {
+        const eventConversationId = typeof data.conversation_id === 'string' ? data.conversation_id : ''
+        if (
+          eventConversationId
+          && activeConversationIdRef.current
+          && activeConversationIdRef.current !== eventConversationId
+        ) {
           return
         }
-        const pendingMsg: RawMessage = {
-          role: 'user',
-          content: data.content,
-          timestamp: data.timestamp,
-        }
-        setTurns((prev) => [...prev, {
-          turnSeq: getNextTurnSeq(prev),
-          userMessage: pendingMsg,
-          assistantSteps: [],
-          isComplete: false,
-          startTime: data.timestamp,
-          toolCalls: [],
-        }])
+        setTurns((prev) => appendObservePendingTurn(prev, data))
         setProcessing(true)
       } else if (data.type === 'processing_started') {
-        if (activeConversationIdRef.current === currentMetaRef.current?.conversation_id) {
+        const eventConversationId = typeof data.conversation_id === 'string' ? data.conversation_id : ''
+        if (
+          !eventConversationId
+          || !activeConversationIdRef.current
+          || activeConversationIdRef.current === eventConversationId
+        ) {
           setProcessing(true)
         }
       } else if (data.type === 'conversation_rotated') {
         setProcessing(false)
+        setTurns((prev) => dropObservePendingTurns(prev))
         void refreshSessionViewRef.current(sessionKey, {
           preferredConversationId: data.new_conversation_id ?? null,
           silent: true,
         })
       } else if (data.type === 'turn_completed') {
+        const eventConversationId = typeof data.conversation_id === 'string' ? data.conversation_id : ''
+        if (
+          eventConversationId
+          && activeConversationIdRef.current
+          && activeConversationIdRef.current !== eventConversationId
+        ) {
+          return
+        }
         setProcessing(false)
+        setTurns((prev) => dropObservePendingTurns(prev, data.turn_seq))
         void refreshSessionViewRef.current(sessionKey, {
           preferredConversationId: activeConversationIdRef.current,
           silent: true,

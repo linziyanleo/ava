@@ -500,6 +500,8 @@ def apply_loop_patch() -> str:
                 bus.dispatch_observe_event(sk, {
                     "type": "message_arrived",
                     "session_key": sk,
+                    "conversation_id": conversation_id,
+                    "turn_seq": turn_seq,
                     "role": "user",
                     "content": user_msg[:500],
                     "timestamp": _dt.now().isoformat(),
@@ -543,6 +545,8 @@ def apply_loop_patch() -> str:
                 bus.dispatch_observe_event(sk, {
                     "type": "processing_started",
                     "session_key": sk,
+                    "conversation_id": conversation_id,
+                    "turn_seq": turn_seq,
                     "model": self.model,
                 })
 
@@ -718,6 +722,17 @@ def apply_loop_patch() -> str:
         corrected = getattr(self_loop, "_last_build_msg_count", None)
         if corrected is not None:
             skip = 1 + corrected  # 1 for system + compressed history (excl. user)
+            current_user_idx = skip
+            if (
+                current_user_idx < len(messages)
+                and session.messages
+                and messages[current_user_idx].get("role") == "user"
+                and session.messages[-1].get("role") == "user"
+                and session.messages[-1].get("content") == messages[current_user_idx].get("content")
+            ):
+                # Upstream may have already persisted the current user message
+                # before _run_agent_loop starts. Preserve that extra skip.
+                skip += 1
         original_save_turn(self_loop, session, messages, skip)
 
     fixed_save_turn._ava_loop_patched = True
@@ -876,6 +891,8 @@ def apply_loop_patch() -> str:
                     bus.dispatch_observe_event(sk, {
                         "type": "turn_completed",
                         "session_key": sk,
+                        "conversation_id": self._current_conversation_id,
+                        "turn_seq": self._current_turn_seq,
                         "message_count": len(session.messages) if session else 0,
                     })
                 except Exception:

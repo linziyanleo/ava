@@ -494,3 +494,103 @@ class TestTokenStatsRecordId:
         )
         assert len(filtered) == 1
         assert filtered[0]["model"] == "model-new"
+
+    @pytest.mark.asyncio
+    async def test_turn_completed_event_includes_conversation_and_turn_identity(self):
+        from ava.patches.loop_patch import apply_loop_patch
+
+        class DummySession:
+            def __init__(self):
+                self.key = "telegram:1"
+                self.metadata = {"conversation_id": "conv_live"}
+                self.messages = []
+
+            def clear(self):
+                self.messages = []
+
+        class DummySessions:
+            def __init__(self, session):
+                self._session = session
+
+            def get_or_create(self, key):
+                assert key == self._session.key
+                return self._session
+
+            def save(self, session):
+                self._session = session
+
+        observe_events: list[dict] = []
+
+        class DummyBus:
+            def dispatch_observe_event(self, session_key, event):
+                observe_events.append({"session_key": session_key, **event})
+
+        async def original_process_message(self, msg, **kwargs):
+            live_session = self.sessions.get_or_create(kwargs.get("session_key") or msg.session_key)
+            live_session.messages.append({"role": "user", "content": msg.content})
+            live_session.messages.append({"role": "assistant", "content": "reply"})
+            self.sessions.save(live_session)
+            return SimpleNamespace(content="reply")
+
+        AgentLoop._process_message = original_process_message
+        apply_loop_patch()
+
+        session = DummySession()
+        loop = SimpleNamespace(
+            sessions=DummySessions(session),
+            bg_tasks=None,
+            token_stats=None,
+            bus=DummyBus(),
+        )
+
+        await AgentLoop._process_message(loop, SimpleNamespace(content="fresh question", session_key=session.key))
+
+        completed = next(event for event in observe_events if event["type"] == "turn_completed")
+
+        assert completed["session_key"] == session.key
+        assert completed["conversation_id"] == "conv_live"
+        assert completed["turn_seq"] == 0
+
+    @pytest.mark.asyncio
+    async def test_run_agent_loop_observe_events_include_conversation_and_turn_identity(self):
+        from ava.patches.loop_patch import apply_loop_patch
+
+        observe_events: list[dict] = []
+
+        class DummyBus:
+            def dispatch_observe_event(self, session_key, event):
+                observe_events.append({"session_key": session_key, **event})
+
+        class DummyProvider:
+            async def chat_with_retry(self, *args, **kwargs):
+                return SimpleNamespace(content="reply", usage={}, finish_reason="stop")
+
+            async def chat_stream_with_retry(self, *args, **kwargs):
+                return SimpleNamespace(content="reply", usage={}, finish_reason="stop")
+
+        async def original_run_agent_loop(self, initial_messages, **kwargs):
+            return SimpleNamespace(content="reply")
+
+        AgentLoop._run_agent_loop = original_run_agent_loop
+        apply_loop_patch()
+
+        loop = SimpleNamespace(
+            bus=DummyBus(),
+            token_stats=None,
+            provider=DummyProvider(),
+            model="test-model",
+            _current_session_key="telegram:1",
+            _current_conversation_id="conv_live",
+            _current_user_message="fresh question",
+            _current_turn_seq=0,
+        )
+
+        await AgentLoop._run_agent_loop(loop, initial_messages=[])
+
+        arrived = next(event for event in observe_events if event["type"] == "message_arrived")
+        started = next(event for event in observe_events if event["type"] == "processing_started")
+
+        for event in (arrived, started):
+            assert event["session_key"] == "telegram:1"
+            assert event["conversation_id"] == "conv_live"
+            assert event["turn_seq"] == 0
