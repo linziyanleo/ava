@@ -102,7 +102,7 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
 
       if (msg.role === 'assistant' && msg.tool_calls?.length) {
         for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc })
+          current.toolCalls.push({ call: tc, callTimestamp: msg.timestamp })
         }
       }
     } else {
@@ -110,7 +110,7 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
 
       if (msg.role === 'assistant' && msg.tool_calls?.length) {
         for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc })
+          current.toolCalls.push({ call: tc, callTimestamp: msg.timestamp })
         }
       }
 

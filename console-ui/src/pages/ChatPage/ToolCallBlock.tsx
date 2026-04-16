@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, Wrench, Loader2, Image, Eye, Mic, Globe, ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronRight, Wrench, Loader2, Image, Eye, Mic, Globe, ExternalLink, Clock } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ToolCallWithResult, TurnTokenStats, IterationTokenStats } from './types'
-import { getContentText, imageUrl, extractImagePaths, formatTokenCount } from './utils'
+import { getContentText, imageUrl, extractImagePaths, formatTokenCount, formatTimestamp, calcDuration } from './utils'
 import { ImageCarousel } from './ImageCarousel'
 import { api } from '../../api/client'
 
@@ -26,6 +26,8 @@ interface ToolCallBlockProps {
   sessionKey?: string
   conversationId?: string
   turnSeq?: number | null
+  callTimestamp?: string
+  resultTimestamp?: string
 }
 
 const MEDIA_TOOLS: Record<string, { icon: typeof Image; label: string; color: string }> = {
@@ -136,7 +138,33 @@ export function ToolCallBlock({
   sessionKey,
   conversationId,
   turnSeq,
+  callTimestamp,
+  resultTimestamp,
 }: ToolCallBlockProps) {
+  const callDuration = calcDuration(callTimestamp, resultTimestamp)
+
+  const metaBar = (callTimestamp || callDuration || iterationStats) ? (
+    <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-[var(--text-secondary)]">
+      {callTimestamp && (
+        <span className="inline-flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          {formatTimestamp(callTimestamp)}
+        </span>
+      )}
+      {callDuration && (
+        <span className="text-[var(--accent)]">({callDuration})</span>
+      )}
+      {iterationStats && (
+        <span className="font-mono" title={`In: ${formatTokenCount(iterationStats.prompt_tokens)} / Out: ${formatTokenCount(iterationStats.completion_tokens)}${iterationStats.cached_tokens ? ` / Cache: ${formatTokenCount(iterationStats.cached_tokens)}` : ''}`}>
+          ⚡ {formatTokenCount(iterationStats.total_tokens)}
+        </span>
+      )}
+      {iterationStats?.model && (
+        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)]">{iterationStats.model}</span>
+      )}
+    </div>
+  ) : null
+
   const [expanded, setExpanded] = useState(false)
 
   const fnName = tc.call.function.name
@@ -206,10 +234,12 @@ export function ToolCallBlock({
     const isSuccess = ccResult?.status === 'SUCCESS'
 
     return (
-      <div className={cn(
-        'my-1.5 rounded-lg border text-xs overflow-hidden',
-        isSuccess ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
-      )}>
+      <div>
+        {metaBar}
+        <div className={cn(
+          'rounded-lg border text-xs overflow-hidden',
+          isSuccess ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
+        )}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 transition-colors"
@@ -240,11 +270,6 @@ export function ToolCallBlock({
           )}
           {!expanded && prompt && (
             <span className="text-[var(--text-secondary)] truncate ml-2">— {prompt.slice(0, 60)}{prompt.length > 60 ? '...' : ''}</span>
-          )}
-          {(iterationStats || tokenStats) && (
-            <span className="text-[10px] text-[var(--text-secondary)] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] ml-auto shrink-0" title={iterationStats ? `In: ${formatTokenCount(iterationStats.prompt_tokens)} / Out: ${formatTokenCount(iterationStats.completion_tokens)}${iterationStats.cached_tokens ? ` / Cache: ${formatTokenCount(iterationStats.cached_tokens)}` : ''}` : undefined}>
-              ⚡ {formatTokenCount(iterationStats?.total_tokens ?? tokenStats!.total_tokens)}
-            </span>
           )}
         </button>
 
@@ -330,6 +355,7 @@ export function ToolCallBlock({
             )}
           </div>
         )}
+        </div>
       </div>
     )
   }
@@ -341,12 +367,14 @@ export function ToolCallBlock({
     const isError = paResult?.status === 'ERROR' || paResult?.status === 'TIMEOUT'
 
     return (
-      <div className={cn(
-        'my-1.5 rounded-lg border text-xs overflow-hidden',
-        isSuccess ? 'border-emerald-500/30 bg-emerald-500/5'
-          : isError ? 'border-red-500/30 bg-red-500/5'
-          : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
-      )}>
+      <div>
+        {metaBar}
+        <div className={cn(
+          'rounded-lg border text-xs overflow-hidden',
+          isSuccess ? 'border-emerald-500/30 bg-emerald-500/5'
+            : isError ? 'border-red-500/30 bg-red-500/5'
+            : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
+        )}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 transition-colors"
@@ -384,11 +412,6 @@ export function ToolCallBlock({
           )}
           {!expanded && instruction && !isLoading && (
             <span className="text-[var(--text-secondary)] truncate ml-2">— {instruction.slice(0, 60)}{instruction.length > 60 ? '...' : ''}</span>
-          )}
-          {(iterationStats || tokenStats) && (
-            <span className="text-[10px] text-[var(--text-secondary)] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] ml-auto shrink-0" title={iterationStats ? `In: ${formatTokenCount(iterationStats.prompt_tokens)} / Out: ${formatTokenCount(iterationStats.completion_tokens)}${iterationStats.cached_tokens ? ` / Cache: ${formatTokenCount(iterationStats.cached_tokens)}` : ''}` : undefined}>
-              ⚡ {formatTokenCount(iterationStats?.total_tokens ?? tokenStats!.total_tokens)}
-            </span>
           )}
         </button>
 
@@ -485,6 +508,7 @@ export function ToolCallBlock({
             )}
           </div>
         )}
+        </div>
       </div>
     )
   }
@@ -493,10 +517,12 @@ export function ToolCallBlock({
     const ToolIcon = mediaTool.icon
     const displayPrompt = (parsedArgs.prompt || parsedArgs.query || '') as string
     return (
-      <div className={cn(
-        'my-1 rounded-lg border text-xs',
-        'border-[var(--border)] bg-[var(--bg-primary)]/50',
-      )}>
+      <div>
+        {metaBar}
+        <div className={cn(
+          'rounded-lg border text-xs',
+          'border-[var(--border)] bg-[var(--bg-primary)]/50',
+        )}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 rounded-lg transition-colors"
@@ -512,11 +538,6 @@ export function ToolCallBlock({
           <span className={cn('font-medium', mediaTool.color)}>{mediaTool.label}</span>
           {displayPrompt && !expanded && (
             <span className="text-[var(--text-secondary)] truncate ml-1">— {displayPrompt.slice(0, 60)}{displayPrompt.length > 60 ? '...' : ''}</span>
-          )}
-          {(iterationStats || tokenStats) && (
-            <span className="text-[10px] text-[var(--text-secondary)] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] ml-auto shrink-0" title={iterationStats ? `In: ${formatTokenCount(iterationStats.prompt_tokens)} / Out: ${formatTokenCount(iterationStats.completion_tokens)}${iterationStats.cached_tokens ? ` / Cache: ${formatTokenCount(iterationStats.cached_tokens)}` : ''}` : undefined}>
-              ⚡ {formatTokenCount(iterationStats?.total_tokens ?? tokenStats!.total_tokens)}
-            </span>
           )}
         </button>
 
@@ -568,67 +589,66 @@ export function ToolCallBlock({
             )}
           </div>
         )}
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="my-1 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)]/50 text-xs">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 rounded-lg transition-colors"
-      >
-        {isLoading ? (
-          <Loader2 className="w-3 h-3 shrink-0 text-[var(--warning)] animate-spin" />
-        ) : expanded ? (
-          <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
-        ) : (
-          <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
-        )}
-        <Wrench className="w-3 h-3 shrink-0 text-[var(--accent)]" />
-        <span className="font-mono text-[var(--accent)]">{fnName}</span>
-        {!expanded && resultPreview && (
-          <span className="text-[var(--text-secondary)] truncate ml-2">{resultPreview}</span>
-        )}
-        {(iterationStats || tokenStats) && (
-          <span className="text-[10px] text-[var(--text-secondary)] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] ml-auto shrink-0" title={iterationStats ? `In: ${formatTokenCount(iterationStats.prompt_tokens)} / Out: ${formatTokenCount(iterationStats.completion_tokens)}${iterationStats.cached_tokens ? ` / Cache: ${formatTokenCount(iterationStats.cached_tokens)}` : ''}` : undefined}>
-            ⚡ {formatTokenCount(iterationStats?.total_tokens ?? tokenStats!.total_tokens)}
-          </span>
-        )}
-      </button>
+    <div>
+      {metaBar}
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)]/50 text-xs">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 rounded-lg transition-colors"
+        >
+          {isLoading ? (
+            <Loader2 className="w-3 h-3 shrink-0 text-[var(--warning)] animate-spin" />
+          ) : expanded ? (
+            <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
+          ) : (
+            <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
+          )}
+          <Wrench className="w-3 h-3 shrink-0 text-[var(--accent)]" />
+          <span className="font-mono text-[var(--accent)]">{fnName}</span>
+          {!expanded && resultPreview && (
+            <span className="text-[var(--text-secondary)] truncate ml-2">{resultPreview}</span>
+          )}
+        </button>
 
-      {expanded && (
-        <div className="p-3 space-y-2">
-          <TokenStatsLink
-            sessionKey={sessionKey}
-            conversationId={effectiveConversationId}
-            turnSeq={turnSeq}
-          />
-          <div>
-            <div className="text-[var(--text-secondary)] mb-0.5 font-medium">Arguments</div>
-            <pre className="bg-[var(--bg-tertiary)] rounded p-2 overflow-x-auto whitespace-pre-wrap text-[var(--text-primary)] max-h-48 overflow-y-auto">
-              {args}
-            </pre>
-          </div>
-          {resultText !== null && (
+        {expanded && (
+          <div className="p-3 space-y-2">
+            <TokenStatsLink
+              sessionKey={sessionKey}
+              conversationId={effectiveConversationId}
+              turnSeq={turnSeq}
+            />
             <div>
-              <div className="text-[var(--text-secondary)] mb-0.5 font-medium">Result</div>
-              <pre className={cn(
-                'rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto',
-                'bg-[var(--bg-tertiary)] text-[var(--text-primary)]',
-              )}>
-                {resultText}
+              <div className="text-[var(--text-secondary)] mb-0.5 font-medium">Arguments</div>
+              <pre className="bg-[var(--bg-tertiary)] rounded p-2 overflow-x-auto whitespace-pre-wrap text-[var(--text-primary)] max-h-48 overflow-y-auto">
+                {args}
               </pre>
             </div>
-          )}
-          {isLoading && !resultText && (
-            <div className="flex items-center gap-1.5 text-[var(--warning)] py-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              <span>Waiting for result...</span>
-            </div>
-          )}
-        </div>
-      )}
+            {resultText !== null && (
+              <div>
+                <div className="text-[var(--text-secondary)] mb-0.5 font-medium">Result</div>
+                <pre className={cn(
+                  'rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto',
+                  'bg-[var(--bg-tertiary)] text-[var(--text-primary)]',
+                )}>
+                  {resultText}
+                </pre>
+              </div>
+            )}
+            {isLoading && !resultText && (
+              <div className="flex items-center gap-1.5 text-[var(--warning)] py-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Waiting for result...</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
