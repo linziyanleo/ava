@@ -22,6 +22,7 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [streaming, setStreaming] = useState('')
   const [thinkingStreaming, setThinkingStreaming] = useState('')
+  const [toolHintStreaming, setToolHintStreaming] = useState('')
   const [sending, setSending] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false)
@@ -142,10 +143,15 @@ export default function ChatPage() {
       if (data.type === 'thinking') {
         setThinkingStreaming((prev) => prev + data.content)
       } else if (data.type === 'progress') {
-        setStreaming((prev) => prev + data.content)
+        if (data.tool_hint) {
+          setToolHintStreaming(data.content)
+        } else {
+          setStreaming((prev) => prev + data.content)
+        }
       } else if (data.type === 'complete') {
         setStreaming('')
         setThinkingStreaming('')
+        setToolHintStreaming('')
         setSending(false)
         void refreshSessionViewRef.current(sessionKey, {
           forceActiveConversation: true,
@@ -596,6 +602,7 @@ export default function ChatPage() {
           isReadOnly={isReadOnlyConversation}
           streaming={streaming}
           thinkingStreaming={thinkingStreaming}
+          toolHintStreaming={toolHintStreaming}
           sending={sending}
           processing={processing}
           onSend={handleSend}

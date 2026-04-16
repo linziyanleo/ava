@@ -19,6 +19,7 @@ interface MessageAreaProps {
   isReadOnly?: boolean
   streaming: string
   thinkingStreaming: string
+  toolHintStreaming: string
   sending: boolean
   processing?: boolean
   onSend: (message: string) => void
@@ -27,7 +28,7 @@ interface MessageAreaProps {
   onToggleSessionPanel?: () => void
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, toolHintStreaming, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -252,6 +253,14 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
                   <pre className="whitespace-pre-wrap font-[inherit]">{streaming}</pre>
                   <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
+                </div>
+              </div>
+            )}
+            {toolHintStreaming && (
+              <div className="flex justify-start">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-xs text-[var(--text-secondary)]">
+                  <Loader2 className="w-3 h-3 animate-spin text-[var(--accent)]" />
+                  <span className="font-mono">{toolHintStreaming}</span>
                 </div>
               </div>
             )}
