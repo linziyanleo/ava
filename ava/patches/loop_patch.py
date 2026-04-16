@@ -569,6 +569,14 @@ def apply_loop_patch() -> str:
                 pass
             tool_names_str = ", ".join(tool_names_list)
 
+            # Extract text content from response for output_content
+            output_text = ""
+            try:
+                if response.content:
+                    output_text = response.content
+            except Exception:
+                pass
+
             sk_inner = getattr(self, "_current_session_key", "") or ""
             provider_name = type(self.provider).__name__.lower().replace("provider", "")
             iteration = self._turn_iteration
@@ -634,7 +642,7 @@ def apply_loop_patch() -> str:
                     turn_seq=turn_seq,
                     iteration=iteration,
                     user_message="",
-                    output_content="",
+                    output_content=output_text,
                     system_prompt=system_prompt_to_store,
                     conversation_history="",
                     finish_reason=finish_reason,
