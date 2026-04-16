@@ -28,7 +28,6 @@ interface TaskItem {
   task_type: string
   origin_session_key: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-  execution_mode?: 'async' | 'sync'
   prompt_preview: string
   started_at: number | null
   finished_at: number | null
@@ -163,11 +162,6 @@ function TaskCard({
             <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
               {TASK_TYPE_LABELS[task.task_type] || task.task_type}
             </span>
-            {task.execution_mode === 'sync' && (
-              <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-500/10 text-blue-400 font-medium">
-                sync
-              </span>
-            )}
           </div>
 
           <p
@@ -192,7 +186,7 @@ function TaskCard({
           </div>
         </div>
 
-        {isActive && task.execution_mode !== 'sync' && (
+        {isActive && (
           <button
             onClick={e => {
               e.stopPropagation();

@@ -5,20 +5,37 @@
 `console_ui_dev_loop` 的单次运行按以下阶段推进：
 
 1. `round0_planning`
-2. `coding`
-3. `regression`
-4. `final_verification`
+2. `coding` — 异步提交，输出 `round_status`（Turn A 结束）
+3. `coding_result` — 收到 `[Background Task Completed]`，解析结果（Turn B 开始）
+4. `regression` — 紧接 coding_result 执行，不拆 turn
+5. `final_verification`
 
 `round0_planning` 必须先于任何 coding 行为发生。
 
+`coding` 和 `coding_result` 分属不同 turn，通过 `round_status.task_id` 关联。
+
 ## Round Output
 
-每轮输出统一使用以下骨架：
+### coding 阶段（Turn A）使用精简格式
+
+```yaml
+round_status:
+  round: 1
+  phase: coding
+  action: submitted
+  task_id: "abc123"
+  coding_goal: "修复 config 页面标题缺失"
+  pending_regression: "impacted_subset"
+```
+
+这段输出是 Turn B 的**状态锚点**——continuation 到达时靠它恢复上下文。
+
+### regression / final_verification 阶段使用完整骨架
 
 ```yaml
 round_output:
   round: 1
-  phase: "round0_planning | coding | regression | final_verification"
+  phase: "coding_result | regression | final_verification"
   coding_summary: ""
   regression_scope:
     check_ids: []
