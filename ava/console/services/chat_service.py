@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import json
 import uuid
 from datetime import datetime, timezone
@@ -56,6 +57,102 @@ class ChatService:
         if isinstance(parsed, (dict, list)):
             return parsed
         return raw_content
+
+    @staticmethod
+    def _message_text(raw_content: Any) -> str:
+        decoded = ChatService._decode_message_content(raw_content)
+        if isinstance(decoded, str):
+            return decoded.strip()
+        if isinstance(decoded, list):
+            return "\n".join(
+                item.get("text", "").strip()
+                for item in decoded
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            ).strip()
+        return ""
+
+    @staticmethod
+    def _texts_equivalent(left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        if left == right:
+            return True
+        return SequenceMatcher(a=left, b=right).ratio() >= 0.995
+
+    def _repair_conversation_artifacts(
+        self,
+        session_id: int,
+        conversation_id: str,
+        msg_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not self._use_db or not msg_rows:
+            return msg_rows
+
+        working = [dict(row) for row in msg_rows]
+        delete_ids: list[int] = []
+        blank_assistant_ids: list[int] = []
+
+        idx = 0
+        while idx + 1 < len(working):
+            current = working[idx]
+            following = working[idx + 1]
+            if current["role"] == "user" and following["role"] == "user":
+                current_text = self._message_text(current["content"])
+                following_text = self._message_text(following["content"])
+                has_followup = any(row["role"] != "user" for row in working[idx + 2:])
+                if current_text and current_text == following_text and has_followup:
+                    delete_ids.append(following["id"])
+                    del working[idx + 1]
+                    continue
+            idx += 1
+
+        idx = 0
+        while idx < len(working):
+            current = working[idx]
+            current_text = self._message_text(current["content"])
+            if current["role"] == "assistant" and current.get("tool_calls") and current_text:
+                next_idx = idx + 1
+                saw_tool = False
+                while next_idx < len(working) and working[next_idx]["role"] == "tool":
+                    saw_tool = True
+                    next_idx += 1
+                if saw_tool and next_idx < len(working):
+                    final_row = working[next_idx]
+                    final_text = self._message_text(final_row["content"])
+                    if (
+                        final_row["role"] == "assistant"
+                        and not final_row.get("tool_calls")
+                        and self._texts_equivalent(current_text, final_text)
+                    ):
+                        blank_assistant_ids.append(current["id"])
+                        current["content"] = ""
+            idx += 1
+
+        if not delete_ids and not blank_assistant_ids:
+            return msg_rows
+
+        for row_id in delete_ids:
+            self._db.execute(
+                "DELETE FROM session_messages WHERE id = ?",
+                (row_id,),
+            )
+        for row_id in blank_assistant_ids:
+            self._db.execute(
+                "UPDATE session_messages SET content = '' WHERE id = ?",
+                (row_id,),
+            )
+        self._db.commit()
+
+        return self._db.fetchall(
+            """
+            SELECT id, seq, role, content, tool_calls, tool_call_id, name,
+                   reasoning_content, timestamp, conversation_id
+              FROM session_messages
+             WHERE session_id = ? AND conversation_id = ?
+             ORDER BY seq
+            """,
+            (session_id, conversation_id),
+        )
 
     def _resolve_active_conversation_id(
         self,
@@ -293,12 +390,17 @@ class ChatService:
                 else conversation_id
             )
             msg_rows = self._db.fetchall(
-                """SELECT role, content, tool_calls, tool_call_id, name,
+                """SELECT id, seq, role, content, tool_calls, tool_call_id, name,
                           reasoning_content, timestamp, conversation_id
                    FROM session_messages
                    WHERE session_id = ? AND conversation_id = ?
                    ORDER BY seq""",
                 (row["id"], resolved_conversation_id),
+            )
+            msg_rows = self._repair_conversation_artifacts(
+                row["id"],
+                resolved_conversation_id,
+                msg_rows,
             )
             messages: list[dict] = []
             for mr in msg_rows:
