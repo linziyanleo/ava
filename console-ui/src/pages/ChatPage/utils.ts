@@ -1,4 +1,5 @@
 import type { SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
+import { normalizeBackgroundTaskMessages } from './backgroundTask'
 
 export interface FileTreeNode {
   name: string
@@ -68,11 +69,12 @@ export function parseJsonl(content: string, filename: string): { meta: SessionMe
 }
 
 export function groupTurns(messages: RawMessage[]): TurnGroup[] {
+  const normalizedMessages = normalizeBackgroundTaskMessages(messages)
   const turns: TurnGroup[] = []
   let current: TurnGroup | null = null
   let nextTurnSeq = 0
 
-  for (const msg of messages) {
+  for (const msg of normalizedMessages) {
     if (msg.role === 'user') {
       if (current) {
         current.isComplete = checkTurnComplete(current)
