@@ -29,6 +29,8 @@ from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.agent.hook import AgentHook
+
 from ava.launcher import register_patch
 
 
@@ -194,10 +196,11 @@ def _sync_categorized_memory(consolidator, session_key: str | None, history_entr
         logger.warning("Failed to sync categorized memory for {}: {}", session_key, exc)
 
 
-class _ToolGuardHook:
+class _ToolGuardHook(AgentHook):
     """Track the current assistant tool-call summary so mutating tools can validate it."""
 
     def __init__(self, agent_loop):
+        super().__init__()
         self._loop = agent_loop
 
     async def before_iteration(self, context) -> None:
