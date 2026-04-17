@@ -22,6 +22,7 @@ Execution order note:
 
 from __future__ import annotations
 
+import re
 import weakref
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -35,6 +36,8 @@ from ava.launcher import register_patch
 _shared_db = None
 # Module-level reference to the most recently created AgentLoop (for console_patch)
 _agent_loop_ref: weakref.ReferenceType | None = None
+_MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
+_TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
 
 
 def set_shared_db(db) -> None:
@@ -125,6 +128,52 @@ def _get_snapshot_content_max_chars() -> int:
         return default_limit
 
 
+def _extract_declared_tool_name(content: str | None) -> str:
+    if not isinstance(content, str):
+        return ""
+    match = _TOOL_SUMMARY_RE.match(content)
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _tool_guard_error(
+    declared_tool: str,
+    actual_tool_names: list[str],
+    target_tool_name: str,
+) -> str | None:
+    if not declared_tool:
+        return None
+    if declared_tool in actual_tool_names:
+        return None
+    if target_tool_name not in actual_tool_names:
+        return None
+    return (
+        "Error: blocked tool execution because assistant content declared "
+        f"`Tool: {declared_tool}` while actual tool_calls are {', '.join(actual_tool_names)}"
+    )
+
+
+def _wrap_mutating_tool_execute(loop, tool_name: str, original_execute):
+    async def guarded_execute(*args, **kwargs):
+        guard = getattr(loop, "_pending_tool_guard", None) or {}
+        declared_tool = guard.get("declared_tool", "")
+        actual_tool_names = guard.get("actual_tool_names", [])
+        error = _tool_guard_error(declared_tool, actual_tool_names, tool_name)
+        if error:
+            logger.warning(
+                "Blocked {} due to assistant/tool mismatch: declared={}, actual={}",
+                tool_name,
+                declared_tool,
+                actual_tool_names,
+            )
+            return error
+        return await original_execute(*args, **kwargs)
+
+    guarded_execute._ava_tool_guard_wrapped = True
+    return guarded_execute
+
+
 def _sync_categorized_memory(consolidator, session_key: str | None, history_entry: str) -> None:
     if not session_key or not history_entry:
         return
@@ -143,6 +192,33 @@ def _sync_categorized_memory(consolidator, session_key: str | None, history_entr
         categorized_memory.on_consolidate(channel, chat_id, history_entry, "")
     except Exception as exc:
         logger.warning("Failed to sync categorized memory for {}: {}", session_key, exc)
+
+
+class _ToolGuardHook:
+    """Track the current assistant tool-call summary so mutating tools can validate it."""
+
+    def __init__(self, agent_loop):
+        self._loop = agent_loop
+
+    async def before_iteration(self, context) -> None:
+        self._loop._pending_tool_guard = None
+
+    async def before_execute_tools(self, context) -> None:
+        response = getattr(context, "response", None)
+        declared_tool = _extract_declared_tool_name(
+            getattr(response, "content", None) if response else None
+        )
+        actual_tool_names = [tc.name for tc in getattr(context, "tool_calls", []) if getattr(tc, "name", "")]
+        if not declared_tool or not actual_tool_names:
+            self._loop._pending_tool_guard = None
+            return
+        self._loop._pending_tool_guard = {
+            "declared_tool": declared_tool,
+            "actual_tool_names": actual_tool_names,
+        }
+
+    async def after_iteration(self, context) -> None:
+        self._loop._pending_tool_guard = None
 
 
 def _register_bg_task_commands(router, bg_store) -> None:
@@ -256,6 +332,14 @@ def apply_loop_patch() -> str:
         db = _get_or_create_db(self.workspace)
         self.db = db
         self._current_conversation_id = ""
+        self._pending_tool_guard = None
+
+        try:
+            extra_hooks = list(getattr(self, "_extra_hooks", []))
+            extra_hooks.append(_ToolGuardHook(self))
+            self._extra_hooks = extra_hooks
+        except Exception as exc:
+            logger.warning("Failed to register tool guard hook: {}", exc)
 
         # TokenStatsCollector
         try:
@@ -379,6 +463,16 @@ def apply_loop_patch() -> str:
             token_stats = getattr(self, "token_stats", None)
             media_service = getattr(self, "media_service", None)
             if hasattr(self, "tools"):
+                for tool_name in _MUTATING_FILE_TOOLS:
+                    tool = self.tools.get(tool_name)
+                    if not tool:
+                        continue
+                    original_execute = getattr(tool, "execute", None)
+                    if not callable(original_execute):
+                        continue
+                    if getattr(original_execute, "_ava_tool_guard_wrapped", False):
+                        continue
+                    tool.execute = _wrap_mutating_tool_execute(self, tool_name, original_execute)
                 if vision_tool := self.tools.get("vision"):
                     if hasattr(vision_tool, "_token_stats"):
                         vision_tool._token_stats = token_stats
@@ -910,7 +1004,7 @@ def apply_loop_patch() -> str:
     patched_process_message._ava_loop_patched = True
     AgentLoop._process_message = patched_process_message
 
-    return "AgentLoop patched: injected db/token_stats/media_service/categorized_memory/summarizer/compressor; _process_message records rich token usage"
+    return "AgentLoop patched: injected db/token_stats/media_service/categorized_memory/summarizer/compressor; _process_message records rich token usage; mutating tools guarded against assistant/tool mismatch"
 
 
 register_patch("agent_loop", apply_loop_patch)

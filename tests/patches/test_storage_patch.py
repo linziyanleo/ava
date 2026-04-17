@@ -198,6 +198,53 @@ class TestStoragePatch:
         assert loaded.messages[1]["tool_call_id"] == "tc1"
         assert loaded.messages[1]["name"] == "test"
 
+    def test_save_skips_duplicate_message_signature(self, patched_manager):
+        session = _make_session(messages=[
+            {
+                "role": "assistant",
+                "content": "calling tool",
+                "tool_calls": [{"id": "tc1", "function": {"name": "write_file"}}],
+                "timestamp": "2026-01-01T00:00:00",
+            },
+            {
+                "role": "tool",
+                "content": "Successfully wrote file",
+                "tool_call_id": "tc1",
+                "name": "write_file",
+                "timestamp": "2026-01-01T00:00:01",
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "timestamp": "2026-01-01T00:00:02",
+            },
+        ])
+        patched_manager.save(session)
+
+        session.messages.extend([
+            {
+                "role": "tool",
+                "content": "Successfully wrote file",
+                "tool_call_id": "tc1",
+                "name": "write_file",
+                "timestamp": "2026-01-01T00:00:01",
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "timestamp": "2026-01-01T00:00:02",
+            },
+        ])
+        patched_manager.save(session)
+
+        loaded = patched_manager._load("test:123")
+        assert loaded is not None
+        assert [(msg["role"], msg["content"]) for msg in loaded.messages] == [
+            ("assistant", "calling tool"),
+            ("tool", "Successfully wrote file"),
+            ("assistant", "done"),
+        ]
+
     def test_list_sessions(self, patched_manager):
         """T5.4: list_sessions returns saved sessions."""
         patched_manager.save(_make_session("sess:1"))

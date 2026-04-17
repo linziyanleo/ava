@@ -33,6 +33,45 @@ def _restore_agent_loop():
 
 
 class TestLoopPatch:
+    @pytest.mark.asyncio
+    async def test_mutating_tool_guard_blocks_mismatched_summary(self):
+        from ava.patches.loop_patch import _wrap_mutating_tool_execute
+
+        loop = SimpleNamespace(
+            _pending_tool_guard={
+                "declared_tool": "exec",
+                "actual_tool_names": ["write_file"],
+            }
+        )
+
+        async def original_execute(**kwargs):
+            return "should not run"
+
+        guarded = _wrap_mutating_tool_execute(loop, "write_file", original_execute)
+        result = await guarded(path="/tmp/x.md", content="x")
+
+        assert result.startswith("Error: blocked tool execution")
+        assert "Tool: exec" in result
+
+    @pytest.mark.asyncio
+    async def test_mutating_tool_guard_allows_matching_summary(self):
+        from ava.patches.loop_patch import _wrap_mutating_tool_execute
+
+        loop = SimpleNamespace(
+            _pending_tool_guard={
+                "declared_tool": "write_file",
+                "actual_tool_names": ["write_file"],
+            }
+        )
+
+        async def original_execute(**kwargs):
+            return "ok"
+
+        guarded = _wrap_mutating_tool_execute(loop, "write_file", original_execute)
+        result = await guarded(path="/tmp/x.md", content="x")
+
+        assert result == "ok"
+
     def test_set_shared_db(self):
         """T3.7: set_shared_db stores the db reference."""
         from ava.patches.loop_patch import set_shared_db, _get_or_create_db
@@ -86,6 +125,7 @@ class TestLoopPatch:
         assert "categorized_memory" in result
         assert "summarizer" in result
         assert "compressor" in result
+        assert "guarded" in result
 
     def test_idempotent(self):
         """T3.6: 连续应用两次不应重复包装。"""

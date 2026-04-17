@@ -102,6 +102,26 @@ def apply_storage_patch() -> str:
             return parsed
         return raw_content
 
+    def _message_signature(
+        *,
+        role: str,
+        content: str | None,
+        tool_calls_json: str | None,
+        tool_call_id: str | None,
+        name: str | None,
+        reasoning_content: str | None,
+        timestamp: str | None,
+    ) -> tuple[str, str | None, str | None, str | None, str | None, str | None, str | None]:
+        return (
+            role,
+            content,
+            tool_calls_json,
+            tool_call_id,
+            name,
+            reasoning_content,
+            timestamp,
+        )
+
     def patched_save(self: SessionManager, session: Session) -> None:
         """Save only the active conversation slice for a session."""
         conn = db._get_conn()
@@ -172,8 +192,28 @@ def apply_storage_patch() -> str:
                     (session_id, active_conversation_id),
                 )
                 start_seq = 0
+                existing_signatures: set[tuple[str, str | None, str | None, str | None, str | None, str | None, str | None]] = set()
             else:
                 start_seq = db_count
+                existing_signatures = {
+                    _message_signature(
+                        role=row["role"],
+                        content=row["content"],
+                        tool_calls_json=row["tool_calls"],
+                        tool_call_id=row["tool_call_id"],
+                        name=row["name"],
+                        reasoning_content=row["reasoning_content"],
+                        timestamp=row["timestamp"],
+                    )
+                    for row in conn.execute(
+                        """
+                        SELECT role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp
+                          FROM session_messages
+                         WHERE session_id = ? AND conversation_id = ?
+                        """,
+                        (session_id, active_conversation_id),
+                    ).fetchall()
+                }
 
             for seq in range(start_seq, mem_count):
                 msg = session.messages[seq]
@@ -184,6 +224,17 @@ def apply_storage_patch() -> str:
                 content = msg.get("content")
                 if content is not None and not isinstance(content, str):
                     content = json.dumps(content, ensure_ascii=False)
+                signature = _message_signature(
+                    role=msg.get("role", ""),
+                    content=content,
+                    tool_calls_json=tool_calls_json,
+                    tool_call_id=msg.get("tool_call_id"),
+                    name=msg.get("name"),
+                    reasoning_content=msg.get("reasoning_content"),
+                    timestamp=msg.get("timestamp"),
+                )
+                if signature in existing_signatures:
+                    continue
 
                 conn.execute(
                     """INSERT INTO session_messages
@@ -202,6 +253,7 @@ def apply_storage_patch() -> str:
                         msg.get("timestamp"),
                     ),
                 )
+                existing_signatures.add(signature)
 
         conn.commit()
         self._cache[session.key] = session

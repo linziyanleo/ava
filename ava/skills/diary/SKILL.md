@@ -12,7 +12,10 @@ license: MIT
    - 脚本会自动检查日记是否已存在，若存在则 stderr 提示并 exit 0，此时跳过
    - 脚本路径：优先查找 workspace 下的 `skills/diary/scripts/generate_diary.py`，其次是 builtin skills 目录下的同名脚本
    - 如需指定 workspace 路径：`python3 <path> --workspace <workspace_root>`，或设置环境变量 `NANOBOT_WORKSPACE`
+   - 只有在你**真的收到了 `exec` 工具结果**，并且结果里出现 `# 日记素材 — YYYY-MM-DD` 这类标题时，才算提取成功
+   - 如果没有真实 `exec` 结果，或者只看到了 assistant 文本里的 `Tool: exec → ...` 摘要而没有对应 tool 输出，必须停止并汇报，**不要调用 `write_file`**
 2. **写日记**: 基于素材 + 你的记忆（`memory recall`）+ 人设，以第一人称写一篇约 800-1200 字的日记
+   - `memory recall` 只能补充语气、关系、长期背景，**不能把长期记忆扩写成“今天发生的事实”**
 3. **保存**: 用 write_file 保存到 `diary/YYYY-MM-DD.md`
 
 ## 脚本路径查找
@@ -54,6 +57,8 @@ builtin_script = builtin_skills_dir / "diary" / "scripts" / "generate_diary.py"
 - 每天结尾一样（"明天又是新的一天。晚安啦主人🌙"）
 - 原封不动引用对话
 - 处理统计信息（"处理了 X 条消息"）
+- 在未看到真实 `exec` 工具结果时直接写日记
+- 把长期记忆、猜测或相邻日期碎片写成当天事实
 
 ## 隐私
 
