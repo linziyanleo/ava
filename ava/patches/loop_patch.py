@@ -533,11 +533,12 @@ def apply_loop_patch() -> str:
             )
         return result
 
-    async def patched_maybe_consolidate_by_tokens(self, session):
+    async def patched_maybe_consolidate_by_tokens(self, session, *args, **kwargs):
+        # 透传上游新增 kwarg（如 session_summary），避免签名漂移导致 TypeError
         previous_session_key = getattr(self, "_ava_current_session_key", None)
         self._ava_current_session_key = getattr(session, "key", None)
         try:
-            return await original_maybe_consolidate(self, session)
+            return await original_maybe_consolidate(self, session, *args, **kwargs)
         finally:
             self._ava_current_session_key = previous_session_key
 

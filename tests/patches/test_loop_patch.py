@@ -158,6 +158,26 @@ class TestLoopPatch:
         finally:
             loop_patch_module._agent_loop_ref = original_ref
 
+    @pytest.mark.asyncio
+    async def test_patched_maybe_consolidate_accepts_session_summary(self):
+        # 回归：上游 nanobot.agent.loop 升级后会以 kwarg 传入 session_summary；
+        # patched 版本若未透传，会抛 TypeError 并整条消息处理链中断，
+        # 导致 chat 页面出现部分 turn 缺失 model name / token cost 的半成品。
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        consolidator = Consolidator.__new__(Consolidator)
+        consolidator.context_window_tokens = 0  # 命中方法内早退分支，无需构造真实依赖
+
+        session = SimpleNamespace(key="telegram:999", messages=[])
+
+        await consolidator.maybe_consolidate_by_tokens(session, session_summary="hi")
+
+        assert getattr(consolidator, "_ava_current_session_key", None) is None
+
     def test_snapshot_content_limit_reads_config(self, monkeypatch):
         """snapshot_content_max_chars should come from config when available."""
         from ava.patches.loop_patch import _get_snapshot_content_max_chars
