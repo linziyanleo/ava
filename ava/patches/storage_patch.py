@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,15 @@ from loguru import logger
 
 from ava.launcher import register_patch
 from ava.storage import Database
+
+_FLOAT_TIMESTAMP_RE = re.compile(r"^\d+(?:\.\d+)?$")
+_BG_TASK_ASSISTANT_RE = re.compile(
+    r"^\[Background Task ([A-Za-z0-9_-]+) ([A-Z_]+)\]\nType: ([^|\n]+?) \| Duration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
+_BG_TASK_CONTINUATION_RE = re.compile(
+    r"^\[Background Task Completed — ([A-Z_]+)\]\nTask: ([^:\n]+):([A-Za-z0-9_-]+)\nDuration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
+_BG_TASK_CONTINUATION_TAIL = "请基于以上结果继续处理后续步骤。如果所有工作已完成，请总结。"
 
 
 def apply_storage_patch() -> str:
@@ -122,6 +132,81 @@ def apply_storage_patch() -> str:
             timestamp,
         )
 
+    def _message_logical_signature(
+        *,
+        role: str,
+        content: str | None,
+        tool_calls_json: str | None,
+        tool_call_id: str | None,
+        name: str | None,
+        reasoning_content: str | None,
+    ) -> tuple[str, ...] | None:
+        if role == "assistant" and tool_calls_json:
+            return (
+                "assistant_tool_call",
+                tool_calls_json,
+                content or "",
+                reasoning_content or "",
+            )
+
+        if role == "tool" and tool_call_id:
+            return (
+                "tool_result",
+                tool_call_id,
+                name or "",
+                content or "",
+            )
+
+        if not isinstance(content, str):
+            return None
+
+        assistant_match = _BG_TASK_ASSISTANT_RE.match(content)
+        if assistant_match:
+            return (
+                "bg_task_assistant",
+                assistant_match[1],
+                assistant_match[2],
+                (assistant_match[5] or "").strip(),
+            )
+
+        continuation_match = _BG_TASK_CONTINUATION_RE.match(content)
+        if continuation_match:
+            body = (continuation_match[5] or "").strip()
+            if body.endswith(_BG_TASK_CONTINUATION_TAIL):
+                body = body[: -len(_BG_TASK_CONTINUATION_TAIL)].rstrip()
+            return (
+                "bg_task_continuation",
+                continuation_match[3],
+                continuation_match[1],
+                body,
+            )
+
+        return None
+
+    def _stringify_timestamp_for_insert(timestamp: Any) -> str | None:
+        if timestamp is None:
+            return None
+        return timestamp if isinstance(timestamp, str) else str(timestamp)
+
+    def _normalize_loaded_timestamp(timestamp: Any) -> Any:
+        if isinstance(timestamp, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(timestamp)).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return str(timestamp)
+
+        if not isinstance(timestamp, str):
+            return timestamp
+
+        raw = timestamp.strip()
+        if not raw or not _FLOAT_TIMESTAMP_RE.fullmatch(raw):
+            return timestamp
+
+        try:
+            return datetime.fromtimestamp(float(raw)).isoformat()
+        except (OverflowError, OSError, ValueError):
+            return timestamp
+
     def patched_save(self: SessionManager, session: Session) -> None:
         """Save only the active conversation slice for a session."""
         conn = db._get_conn()
@@ -193,8 +278,17 @@ def apply_storage_patch() -> str:
                 )
                 start_seq = 0
                 existing_signatures: set[tuple[str, str | None, str | None, str | None, str | None, str | None, str | None]] = set()
+                existing_logical_signatures: set[tuple[str, ...]] = set()
             else:
                 start_seq = db_count
+                existing_rows = conn.execute(
+                    """
+                    SELECT role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp
+                      FROM session_messages
+                     WHERE session_id = ? AND conversation_id = ?
+                    """,
+                    (session_id, active_conversation_id),
+                ).fetchall()
                 existing_signatures = {
                     _message_signature(
                         role=row["role"],
@@ -205,14 +299,19 @@ def apply_storage_patch() -> str:
                         reasoning_content=row["reasoning_content"],
                         timestamp=row["timestamp"],
                     )
-                    for row in conn.execute(
-                        """
-                        SELECT role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp
-                          FROM session_messages
-                         WHERE session_id = ? AND conversation_id = ?
-                        """,
-                        (session_id, active_conversation_id),
-                    ).fetchall()
+                    for row in existing_rows
+                }
+                existing_logical_signatures = {
+                    logical_signature
+                    for row in existing_rows
+                    if (logical_signature := _message_logical_signature(
+                        role=row["role"],
+                        content=row["content"],
+                        tool_calls_json=row["tool_calls"],
+                        tool_call_id=row["tool_call_id"],
+                        name=row["name"],
+                        reasoning_content=row["reasoning_content"],
+                    )) is not None
                 }
 
             for seq in range(start_seq, mem_count):
@@ -231,9 +330,19 @@ def apply_storage_patch() -> str:
                     tool_call_id=msg.get("tool_call_id"),
                     name=msg.get("name"),
                     reasoning_content=msg.get("reasoning_content"),
-                    timestamp=msg.get("timestamp"),
+                    timestamp=_stringify_timestamp_for_insert(msg.get("timestamp")),
+                )
+                logical_signature = _message_logical_signature(
+                    role=msg.get("role", ""),
+                    content=content,
+                    tool_calls_json=tool_calls_json,
+                    tool_call_id=msg.get("tool_call_id"),
+                    name=msg.get("name"),
+                    reasoning_content=msg.get("reasoning_content"),
                 )
                 if signature in existing_signatures:
+                    continue
+                if logical_signature is not None and logical_signature in existing_logical_signatures:
                     continue
 
                 conn.execute(
@@ -250,10 +359,12 @@ def apply_storage_patch() -> str:
                         msg.get("tool_call_id"),
                         msg.get("name"),
                         msg.get("reasoning_content"),
-                        msg.get("timestamp"),
+                        _stringify_timestamp_for_insert(msg.get("timestamp")),
                     ),
                 )
                 existing_signatures.add(signature)
+                if logical_signature is not None:
+                    existing_logical_signatures.add(logical_signature)
 
         conn.commit()
         self._cache[session.key] = session
@@ -285,7 +396,7 @@ def apply_storage_patch() -> str:
             msg = {
                 "role": msg_row["role"],
                 "content": _decode_content(msg_row["content"]),
-                "timestamp": msg_row["timestamp"],
+                "timestamp": _normalize_loaded_timestamp(msg_row["timestamp"]),
             }
             if msg_row["tool_calls"]:
                 msg["tool_calls"] = json.loads(msg_row["tool_calls"])
