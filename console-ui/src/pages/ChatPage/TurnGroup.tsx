@@ -17,6 +17,7 @@ interface TurnGroupProps {
 
 export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, sessionKey }: TurnGroupProps) {
   const turnSeq = turn.turnSeq
+  const maxIteration = turn.toolCalls.reduce((max, tc) => Math.max(max, tc.iteration), -1)
 
   const finalAssistant = turn.assistantSteps.filter(
     (s) => s.role === 'assistant' && !s.tool_calls && s.content !== null,
@@ -55,7 +56,7 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
 
       {/* Tool calls — each rendered at the same level as message bubbles */}
       {turn.toolCalls.map((tc, i) => {
-        const iterKey = turnSeq != null ? `${tokenStats?.conversation_id || ''}:${turnSeq}:${i}` : null
+        const iterKey = turnSeq != null ? `${tokenStats?.conversation_id || ''}:${turnSeq}:${tc.iteration}` : null
         const iterStat = iterKey ? iterationStats?.get(iterKey) : undefined
         return (
           <ToolCallBlock
@@ -78,7 +79,7 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
         let bubbleStats = i === finalAssistant.length - 1 ? tokenStats : undefined
         // If we have iteration data, use the last iteration (final response after all tool calls)
         if (bubbleStats && iterationStats && turnSeq != null) {
-          const lastIterKey = `${bubbleStats.conversation_id || ''}:${turnSeq}:${turn.toolCalls.length}`
+          const lastIterKey = `${bubbleStats.conversation_id || ''}:${turnSeq}:${maxIteration + 1}`
           const lastIter = iterationStats.get(lastIterKey)
           if (lastIter) {
             bubbleStats = {

@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Awaitable
+
+_LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo or timezone.utc
+_BG_TASK_ASSISTANT_RE = re.compile(
+    r"^\[Background Task ([A-Za-z0-9_-]+) ([A-Z_]+)\]\nType: ([^|\n]+?) \| Duration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
+_BG_TASK_CONTINUATION_RE = re.compile(
+    r"^\[Background Task Completed — ([A-Z_]+)\]\nTask: ([^:\n]+):([A-Za-z0-9_-]+)\nDuration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
 
 
 class ChatService:
@@ -79,6 +88,98 @@ class ChatService:
             return True
         return SequenceMatcher(a=left, b=right).ratio() >= 0.995
 
+    @staticmethod
+    def _background_task_signature(content: Any) -> tuple[str, str, str, str] | None:
+        if not isinstance(content, str):
+            return None
+        assistant_match = _BG_TASK_ASSISTANT_RE.match(content)
+        if assistant_match:
+            return (
+                "assistant",
+                assistant_match[1],
+                assistant_match[2],
+                assistant_match[5].strip(),
+            )
+        continuation_match = _BG_TASK_CONTINUATION_RE.match(content)
+        if continuation_match:
+            body = (continuation_match[5] or "").strip()
+            tail = "请基于以上结果继续处理后续步骤。如果所有工作已完成，请总结。"
+            if body.endswith(tail):
+                body = body[: -len(tail)].rstrip()
+            return (
+                "continuation",
+                continuation_match[3],
+                continuation_match[1],
+                body,
+            )
+        return None
+
+    @staticmethod
+    def _timestamp_sort_key(raw_timestamp: Any) -> tuple[int, float, str]:
+        if raw_timestamp is None:
+            return (1, 0.0, "")
+        if isinstance(raw_timestamp, (int, float)):
+            numeric = float(raw_timestamp)
+            return (0, numeric / 1000 if abs(numeric) >= 1e12 else numeric, "")
+        if not isinstance(raw_timestamp, str):
+            return (1, 0.0, "")
+
+        trimmed = raw_timestamp.strip()
+        if not trimmed:
+            return (1, 0.0, "")
+
+        if re.fullmatch(r"\d+(?:\.\d+)?", trimmed):
+            numeric = float(trimmed)
+            return (0, numeric / 1000 if abs(numeric) >= 1e12 else numeric, "")
+
+        try:
+            parsed = datetime.fromisoformat(trimmed.replace("Z", "+00:00"))
+        except ValueError:
+            return (1, 0.0, trimmed)
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_LOCAL_TIMEZONE)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+        return (0, parsed.timestamp(), "")
+
+    def _canonicalize_conversation_rows(
+        self,
+        msg_rows: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if not msg_rows:
+            return msg_rows, False
+
+        canonical = sorted(
+            (dict(row) for row in msg_rows),
+            key=lambda row: (
+                *self._timestamp_sort_key(row.get("timestamp")),
+                row["seq"],
+                row["id"],
+            ),
+        )
+        has_duplicate_seq = len({row["seq"] for row in canonical}) != len(canonical)
+        order_changed = [row["id"] for row in canonical] != [row["id"] for row in msg_rows]
+        needs_resequence = has_duplicate_seq or order_changed
+        if not needs_resequence:
+            return [dict(row) for row in msg_rows], False
+
+        for seq, row in enumerate(canonical):
+            row["seq"] = seq
+        return canonical, True
+
+    def _load_conversation_rows(self, session_id: int, conversation_id: str) -> list[dict[str, Any]]:
+        return self._db.fetchall(
+            """
+            SELECT id, seq, role, content, tool_calls, tool_call_id, name,
+                   reasoning_content, timestamp, conversation_id
+              FROM session_messages
+             WHERE session_id = ? AND conversation_id = ?
+             ORDER BY seq, id
+            """,
+            (session_id, conversation_id),
+        )
+
     def _repair_conversation_artifacts(
         self,
         session_id: int,
@@ -88,9 +189,49 @@ class ChatService:
         if not self._use_db or not msg_rows:
             return msg_rows
 
-        working = [dict(row) for row in msg_rows]
+        working, needs_resequence = self._canonicalize_conversation_rows(msg_rows)
         delete_ids: list[int] = []
         blank_assistant_ids: list[int] = []
+
+        seen_tool_call_assistants: set[tuple[str, str, str, str]] = set()
+        seen_tool_results: set[tuple[str, str, str, str]] = set()
+        seen_bg_messages: set[tuple[str, str, str, str]] = set()
+
+        idx = 0
+        while idx < len(working):
+            current = working[idx]
+            bg_signature = self._background_task_signature(current["content"])
+            if bg_signature:
+                if bg_signature in seen_bg_messages:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_bg_messages.add(bg_signature)
+            if current["role"] == "assistant" and current.get("tool_calls"):
+                signature = (
+                    current["tool_calls"] or "",
+                    current["content"] or "",
+                    current.get("reasoning_content") or "",
+                    current["timestamp"] or "",
+                )
+                if signature in seen_tool_call_assistants:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_tool_call_assistants.add(signature)
+            elif current["role"] == "tool" and current.get("tool_call_id"):
+                signature = (
+                    current["tool_call_id"] or "",
+                    current.get("name") or "",
+                    current["content"] or "",
+                    current["timestamp"] or "",
+                )
+                if signature in seen_tool_results:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_tool_results.add(signature)
+            idx += 1
 
         idx = 0
         while idx + 1 < len(working):
@@ -128,7 +269,7 @@ class ChatService:
                         current["content"] = ""
             idx += 1
 
-        if not delete_ids and not blank_assistant_ids:
+        if not delete_ids and not blank_assistant_ids and not needs_resequence:
             return msg_rows
 
         for row_id in delete_ids:
@@ -141,18 +282,21 @@ class ChatService:
                 "UPDATE session_messages SET content = '' WHERE id = ?",
                 (row_id,),
             )
-        self._db.commit()
+        if delete_ids or blank_assistant_ids:
+            self._db.commit()
 
-        return self._db.fetchall(
-            """
-            SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                   reasoning_content, timestamp, conversation_id
-              FROM session_messages
-             WHERE session_id = ? AND conversation_id = ?
-             ORDER BY seq
-            """,
-            (session_id, conversation_id),
-        )
+        refreshed = self._load_conversation_rows(session_id, conversation_id)
+        canonical, needs_resequence = self._canonicalize_conversation_rows(refreshed)
+        if not needs_resequence:
+            return refreshed
+
+        for row in canonical:
+            self._db.execute(
+                "UPDATE session_messages SET seq = ? WHERE id = ?",
+                (row["seq"], row["id"]),
+            )
+        self._db.commit()
+        return self._load_conversation_rows(session_id, conversation_id)
 
     def _resolve_active_conversation_id(
         self,
@@ -390,11 +534,13 @@ class ChatService:
                 else conversation_id
             )
             msg_rows = self._db.fetchall(
-                """SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                          reasoning_content, timestamp, conversation_id
-                   FROM session_messages
-                   WHERE session_id = ? AND conversation_id = ?
-                   ORDER BY seq""",
+                """
+                SELECT id, seq, role, content, tool_calls, tool_call_id, name,
+                       reasoning_content, timestamp, conversation_id
+                  FROM session_messages
+                 WHERE session_id = ? AND conversation_id = ?
+                 ORDER BY seq, id
+                """,
                 (row["id"], resolved_conversation_id),
             )
             msg_rows = self._repair_conversation_artifacts(

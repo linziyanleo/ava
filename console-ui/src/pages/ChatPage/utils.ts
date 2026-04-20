@@ -73,6 +73,16 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
   const turns: TurnGroup[] = []
   let current: TurnGroup | null = null
   let nextTurnSeq = 0
+  let nextIteration = 0
+
+  const appendToolCalls = (turn: TurnGroup, msg: RawMessage) => {
+    if (msg.role !== 'assistant' || !msg.tool_calls?.length) return
+    const iteration = nextIteration
+    nextIteration += 1
+    for (const tc of msg.tool_calls) {
+      turn.toolCalls.push({ call: tc, callTimestamp: msg.timestamp, iteration })
+    }
+  }
 
   for (const msg of normalizedMessages) {
     if (msg.role === 'user') {
@@ -89,6 +99,7 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
         toolCalls: [],
       }
       nextTurnSeq += 1
+      nextIteration = 0
     } else if (!current) {
       // Orphan assistant/tool message without a preceding user message.
       // Create a turn with a synthetic user placeholder so it still renders.
@@ -101,20 +112,11 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
         toolCalls: [],
       }
       current.assistantSteps.push(msg)
-
-      if (msg.role === 'assistant' && msg.tool_calls?.length) {
-        for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc, callTimestamp: msg.timestamp })
-        }
-      }
+      nextIteration = 0
+      appendToolCalls(current, msg)
     } else {
       current.assistantSteps.push(msg)
-
-      if (msg.role === 'assistant' && msg.tool_calls?.length) {
-        for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc, callTimestamp: msg.timestamp })
-        }
-      }
+      appendToolCalls(current, msg)
 
       if (msg.role === 'tool' && msg.tool_call_id) {
         const match = current.toolCalls.find((tc) => tc.call.id === msg.tool_call_id)
@@ -170,33 +172,54 @@ export function getContentText(content: string | null | Array<{ type: string; te
   return String(content)
 }
 
-export function formatTimestamp(ts?: string): string {
-  if (!ts) return ''
-  try {
-    const d = new Date(ts)
-    return d.toLocaleString('zh-CN', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
-    return ts
+function parseTimestamp(ts?: string | number): Date | null {
+  if (ts === undefined || ts === null || ts === '') return null
+
+  if (typeof ts === 'number') {
+    const normalized = ts < 1e12 ? ts * 1000 : ts
+    const date = new Date(normalized)
+    return Number.isNaN(date.getTime()) ? null : date
   }
+
+  const trimmed = ts.trim()
+  if (!trimmed) return null
+
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numeric = Number(trimmed)
+    if (!Number.isNaN(numeric)) {
+      const normalized = numeric < 1e12 ? numeric * 1000 : numeric
+      const date = new Date(normalized)
+      return Number.isNaN(date.getTime()) ? null : date
+    }
+  }
+
+  const date = new Date(trimmed)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
-export function calcDuration(start?: string, end?: string): string {
+export function formatTimestamp(ts?: string | number): string {
+  if (!ts) return ''
+  const d = parseTimestamp(ts)
+  if (!d) return ''
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+export function calcDuration(start?: string | number, end?: string | number): string {
   if (!start || !end) return ''
-  try {
-    const ms = new Date(end).getTime() - new Date(start).getTime()
-    if (ms < 0) return ''
-    if (ms < 1000) return `${ms}ms`
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-    return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
-  } catch {
-    return ''
-  }
+  const startDate = parseTimestamp(start)
+  const endDate = parseTimestamp(end)
+  if (!startDate || !endDate) return ''
+  const ms = endDate.getTime() - startDate.getTime()
+  if (ms < 0) return ''
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
 export function extractSessionTitle(meta: SessionMeta, messages: RawMessage[]): string {

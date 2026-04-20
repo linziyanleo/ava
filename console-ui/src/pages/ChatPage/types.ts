@@ -48,6 +48,7 @@ export interface ToolCallWithResult {
   call: ToolCall
   result?: RawMessage
   callTimestamp?: string
+  iteration: number
 }
 
 export interface TurnTokenStats {

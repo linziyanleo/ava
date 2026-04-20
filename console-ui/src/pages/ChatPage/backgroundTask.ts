@@ -70,6 +70,7 @@ function isSameDisplayMessage(a: BackgroundTaskMessage, b: BackgroundTaskMessage
 
 export function normalizeBackgroundTaskMessages(messages: RawMessage[]): RawMessage[] {
   const normalized: RawMessage[] = []
+  const seenDisplayMessages = new Set<string>()
 
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i]
@@ -81,19 +82,29 @@ export function normalizeBackgroundTaskMessages(messages: RawMessage[]): RawMess
     }
 
     if (parsed.kind === 'assistant') {
+      const displayKey = `${parsed.kind}:${parsed.taskId}:${parsed.status}:${parsed.taskType}:${parsed.body}`
+      if (seenDisplayMessages.has(displayKey)) {
+        continue
+      }
       const nextParsed = parseBackgroundTaskMessage(messages[i + 1]?.content ?? null)
       if (nextParsed?.kind === 'continuation' && isSameEvent(parsed, nextParsed)) {
         continue
       }
+      seenDisplayMessages.add(displayKey)
       normalized.push(message)
       continue
     }
 
+    const displayKey = `${parsed.kind}:${parsed.taskId}:${parsed.status}:${parsed.taskType}:${parsed.body}`
+    if (seenDisplayMessages.has(displayKey)) {
+      continue
+    }
     const previousParsed = parseBackgroundTaskMessage(normalized[normalized.length - 1]?.content ?? null)
     if (previousParsed?.kind === 'continuation' && isSameDisplayMessage(previousParsed, parsed)) {
       continue
     }
 
+    seenDisplayMessages.add(displayKey)
     normalized.push(message)
   }
 

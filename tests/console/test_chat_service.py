@@ -256,3 +256,261 @@ def test_get_messages_repairs_retry_duplicate_and_toolcall_text_duplication(tmp_
         (3, "tool", "send_sticker, 👍"),
         (4, "assistant", "duplicate answer"),
     ]
+
+
+def test_get_messages_repairs_duplicate_tool_call_rows(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="telegram:5",
+        metadata={"conversation_id": "conv_live"},
+    )
+
+    tool_calls = [{
+        "id": "call_dup",
+        "type": "function",
+        "function": {"name": "send_sticker", "arguments": "{\"sticker_id\": 8}"},
+    }]
+
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=0,
+        role="user",
+        content="老板说okr周五之前交上来，你有什么想法吗",
+        timestamp="2026-04-20T20:19:51.444936",
+    )
+    for seq in (1, 1, 1):
+        _insert_message_row(
+            db,
+            session_id=session_id,
+            conversation_id="conv_live",
+            seq=seq,
+            role="assistant",
+            content="",
+            tool_calls=tool_calls,
+            timestamp="2026-04-20T20:20:17.659672",
+        )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=2,
+        role="tool",
+        content="send_sticker, 💡",
+        tool_call_id="call_dup",
+        name="send_sticker",
+        timestamp="2026-04-20T20:20:17.659675",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=3,
+        role="assistant",
+        content="哦这个，聊到工作了。",
+        timestamp="2026-04-20T20:20:17.659677",
+    )
+
+    messages = service.get_messages("telegram:5")
+
+    assert [(msg["role"], msg["content"]) for msg in messages] == [
+        ("user", "老板说okr周五之前交上来，你有什么想法吗"),
+        ("assistant", ""),
+        ("tool", "send_sticker, 💡"),
+        ("assistant", "哦这个，聊到工作了。"),
+    ]
+    assert len([msg for msg in messages if msg.get("tool_calls")]) == 1
+
+    rows = db.fetchall(
+        """
+        SELECT seq, role, content, tool_calls
+          FROM session_messages
+         WHERE session_id = ? AND conversation_id = ?
+         ORDER BY seq, id
+        """,
+        (session_id, "conv_live"),
+    )
+    assert [(row["seq"], row["role"], row["content"]) for row in rows] == [
+        (0, "user", "老板说okr周五之前交上来，你有什么想法吗"),
+        (1, "assistant", ""),
+        (2, "tool", "send_sticker, 💡"),
+        (3, "assistant", "哦这个，聊到工作了。"),
+    ]
+
+
+def test_get_messages_repairs_duplicate_background_task_rows(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="telegram:6",
+        metadata={"conversation_id": "conv_live"},
+    )
+
+    summary = (
+        "[Background Task c9031eb1e76d SUCCESS]\n"
+        "Type: codex | Duration: 554444ms\n\n"
+        "只读结论"
+    )
+    continuation = (
+        "[Background Task Completed — SUCCESS]\n"
+        "Task: codex:c9031eb1e76d\n"
+        "Duration: 554444ms\n\n"
+        "只读结论\n\n"
+        "请基于以上结果继续处理后续步骤。如果所有工作已完成，请总结。"
+    )
+
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=0,
+        role="user",
+        content="你让codex哥研究一下ava仓库",
+        timestamp="2026-04-20T20:22:49.463318",
+    )
+    for _ in range(4):
+        _insert_message_row(
+            db,
+            session_id=session_id,
+            conversation_id="conv_live",
+            seq=1,
+            role="assistant",
+            content=summary,
+            timestamp="1776688335.40905",
+        )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=2,
+        role="user",
+        content=continuation,
+        timestamp="2026-04-20T20:32:15.650320",
+    )
+
+    messages = service.get_messages("telegram:6")
+
+    assert [(msg["role"], msg["content"]) for msg in messages] == [
+        ("user", "你让codex哥研究一下ava仓库"),
+        ("assistant", summary),
+        ("user", continuation),
+    ]
+
+    rows = db.fetchall(
+        """
+        SELECT seq, role, content
+          FROM session_messages
+         WHERE session_id = ? AND conversation_id = ?
+         ORDER BY seq, id
+        """,
+        (session_id, "conv_live"),
+    )
+    assert [(row["seq"], row["role"], row["content"]) for row in rows] == [
+        (0, "user", "你让codex哥研究一下ava仓库"),
+        (1, "assistant", summary),
+        (2, "user", continuation),
+    ]
+
+
+def test_get_messages_resequences_colliding_seq_rows_by_timestamp(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="telegram:7",
+        metadata={"conversation_id": "conv_live"},
+    )
+
+    tool_calls = [{
+        "id": "call_old",
+        "type": "function",
+        "function": {"name": "send_sticker", "arguments": "{\"sticker_id\": 8}"},
+    }]
+
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=260,
+        role="user",
+        content="老板说okr周五之前交上来，你有什么想法吗",
+        timestamp="2026-04-20T20:19:51.444936",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=261,
+        role="assistant",
+        content="",
+        tool_calls=tool_calls,
+        timestamp="2026-04-20T20:20:17.659672",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=264,
+        role="tool",
+        content="send_sticker, 💡",
+        tool_call_id="call_old",
+        name="send_sticker",
+        timestamp="2026-04-20T20:20:17.659675",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=265,
+        role="assistant",
+        content="哦这个，聊到工作了。",
+        timestamp="2026-04-20T20:20:17.659677",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=260,
+        role="user",
+        content="前端果然在2026年死了。",
+        timestamp="2026-04-20T20:51:48.842226",
+    )
+    _insert_message_row(
+        db,
+        session_id=session_id,
+        conversation_id="conv_live",
+        seq=261,
+        role="assistant",
+        content="就这一个瞬间，我突然理解了为什么程序员也需要心理疏导。",
+        timestamp="2026-04-20T20:52:07.651410",
+    )
+
+    messages = service.get_messages("telegram:7")
+
+    assert [(msg["role"], msg["content"]) for msg in messages] == [
+        ("user", "老板说okr周五之前交上来，你有什么想法吗"),
+        ("assistant", ""),
+        ("tool", "send_sticker, 💡"),
+        ("assistant", "哦这个，聊到工作了。"),
+        ("user", "前端果然在2026年死了。"),
+        ("assistant", "就这一个瞬间，我突然理解了为什么程序员也需要心理疏导。"),
+    ]
+
+    rows = db.fetchall(
+        """
+        SELECT seq, role, content
+          FROM session_messages
+         WHERE session_id = ? AND conversation_id = ?
+         ORDER BY seq, id
+        """,
+        (session_id, "conv_live"),
+    )
+    assert [(row["seq"], row["role"], row["content"]) for row in rows] == [
+        (0, "user", "老板说okr周五之前交上来，你有什么想法吗"),
+        (1, "assistant", ""),
+        (2, "tool", "send_sticker, 💡"),
+        (3, "assistant", "哦这个，聊到工作了。"),
+        (4, "user", "前端果然在2026年死了。"),
+        (5, "assistant", "就这一个瞬间，我突然理解了为什么程序员也需要心理疏导。"),
+    ]
