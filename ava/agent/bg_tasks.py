@@ -304,7 +304,8 @@ class BackgroundTaskStore:
         ]
 
     def _sync_cancel_and_wait(self, task_id: str) -> None:
-        """Cancel a task and block briefly to let it settle (best-effort)."""
+        """Cancel a task for replace. Also handles the edge case where _run
+        hasn't started yet (task cancelled before first await)."""
         if task_id not in self._tasks:
             return
         atask = self._tasks[task_id]
@@ -312,6 +313,16 @@ class BackgroundTaskStore:
             return
         atask.cancel()
         logger.info("BackgroundTaskStore: cancelled task {} for replace", task_id)
+
+        snapshot = self._active.get(task_id)
+        if snapshot and snapshot.status == "queued":
+            snapshot.status = "cancelled"
+            snapshot.finished_at = time.time()
+            snapshot.error_message = "Replaced by new task"
+            self._record_event(task_id, "cancelled", "Replaced by new task")
+            self._update_task_status(task_id, "cancelled", snapshot)
+            self._finished[task_id] = self._active.pop(task_id)
+            self._tasks.pop(task_id, None)
 
     # ------------------------------------------------------------------
     # 读取接口
