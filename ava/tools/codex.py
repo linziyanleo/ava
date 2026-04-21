@@ -172,7 +172,12 @@ class CodexTool(Tool):
         if not prompt:
             raise ValueError("prompt is required")
 
-        cmd = self._build_command(prompt, project, mode)
+        cmd = self._build_command(
+            prompt,
+            project,
+            mode,
+            launcher=self._resolve_invocation_prefix(codex_bin),
+        )
         t0 = time.monotonic()
         stdout, stderr = await self._run_subprocess(cmd, project, self._timeout)
         duration_ms = int((time.monotonic() - t0) * 1000)
@@ -189,6 +194,10 @@ class CodexTool(Tool):
             )
 
         self._record_stats(parsed, prompt)
+        if parsed.get("is_error"):
+            raise RuntimeError(
+                parsed.get("error_message") or "Codex reported an error without details"
+            )
         return parsed
 
     async def cancel(self, task_id: str) -> str:
@@ -206,8 +215,11 @@ class CodexTool(Tool):
         prompt: str,
         project: str,
         mode: str,
+        *,
+        launcher: list[str] | None = None,
     ) -> list[str]:
-        cmd = ["codex", _CODEX_SUBCMD, prompt, "--json", "-C", project]
+        cmd = list(launcher or ["codex"])
+        cmd.extend([_CODEX_SUBCMD, prompt, "--json", "-C", project])
 
         if self._model:
             cmd.extend(["-m", self._model])
@@ -218,6 +230,28 @@ class CodexTool(Tool):
             cmd.append("--full-auto")
 
         return cmd
+
+    @staticmethod
+    def _resolve_invocation_prefix(codex_bin: str) -> list[str]:
+        """Pin npm-installed `codex` launchers to the sibling `node` binary.
+
+        This avoids mixed-arch shells where `/usr/bin/env node` resolves to a
+        different Node installation than the one that owns the global Codex package.
+        """
+        codex_path = Path(codex_bin)
+        try:
+            with codex_path.open("rb") as handle:
+                first_line = handle.readline(256)
+        except OSError:
+            return [codex_bin]
+
+        if b"node" not in first_line:
+            return [codex_bin]
+
+        node_bin = codex_path.with_name("node")
+        if node_bin.is_file():
+            return [str(node_bin), str(codex_path)]
+        return [codex_bin]
 
     async def _run_subprocess(
         self,
@@ -288,8 +322,8 @@ class CodexTool(Tool):
 
         thread_id = ""
         result_text = ""
-        is_error = False
-        error_message = ""
+        fatal_error_message = ""
+        transient_error_message = ""
         num_turns = 0
         total_input = 0
         total_cached_input = 0
@@ -317,31 +351,66 @@ class CodexTool(Tool):
                 total_output += int(usage.get("output_tokens", 0) or 0)
 
             elif etype == "turn.failed":
-                is_error = True
                 err_obj = event.get("error")
                 if isinstance(err_obj, dict):
-                    error_message = err_obj.get("message", "")
+                    fatal_error_message = err_obj.get("message", "")
                 else:
-                    error_message = str(err_obj or "")
+                    fatal_error_message = str(err_obj or "")
 
             elif etype == "item.completed":
                 item = event.get("item") or {}
                 if item.get("type") == "agent_message":
-                    result_text = item.get("text", "") or ""
+                    text = self._extract_agent_message_text(item)
+                    if text.strip():
+                        result_text = text
 
             elif etype == "error":
-                is_error = True
-                error_message = event.get("message", "") or str(event)
+                transient_error_message = event.get("message", "") or str(event)
 
-        if not result_text and not is_error:
+            elif etype == "agent_message":
+                text = self._extract_agent_message_text(event)
+                if text.strip():
+                    result_text = text
+
+        if fatal_error_message:
+            return {
+                "run_id": thread_id,
+                "thread_id": thread_id,
+                "result": result_text,
+                "is_error": True,
+                "error_message": fatal_error_message,
+                "num_turns": num_turns,
+                "usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cached_input,
+                    "output_tokens": total_output,
+                },
+            }
+
+        if not result_text and transient_error_message:
+            return {
+                "run_id": thread_id,
+                "thread_id": thread_id,
+                "result": "",
+                "is_error": True,
+                "error_message": transient_error_message,
+                "num_turns": num_turns,
+                "usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cached_input,
+                    "output_tokens": total_output,
+                },
+            }
+
+        if not result_text:
             return {"_parse_error": True}
 
         return {
             "run_id": thread_id,
             "thread_id": thread_id,
             "result": result_text,
-            "is_error": is_error,
-            "error_message": error_message,
+            "is_error": False,
+            "error_message": "",
             "num_turns": num_turns,
             "usage": {
                 "input_tokens": total_input,
@@ -349,6 +418,11 @@ class CodexTool(Tool):
                 "output_tokens": total_output,
             },
         }
+
+    @staticmethod
+    def _extract_agent_message_text(payload: dict[str, Any]) -> str:
+        text = payload.get("text") or payload.get("message") or ""
+        return text if isinstance(text, str) else ""
 
     def _record_stats(self, parsed: dict[str, Any], prompt: str = "") -> None:
         if not self._token_stats:

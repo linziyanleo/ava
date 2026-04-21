@@ -553,7 +553,7 @@ class BackgroundTaskStore:
 
         rebuild_info = await self._run_post_task_hooks(snapshot)
 
-        if snapshot.auto_continue:
+        if snapshot.auto_continue or snapshot.status == "failed":
             await self._trigger_continuation(snapshot, rebuild_info, result=result)
 
     # ------------------------------------------------------------------

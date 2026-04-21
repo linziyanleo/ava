@@ -138,6 +138,31 @@ async def test_codex_readonly_does_not_auto_continue(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_failed_task_continues_even_without_auto_continue():
+    loop = _FakeLoop()
+    store = BackgroundTaskStore(db=None)
+    store.set_agent_loop(loop)
+    store._run_post_task_hooks = AsyncMock(return_value="")
+    store._trigger_continuation = AsyncMock()
+
+    snapshot = TaskSnapshot(
+        task_id="fail123",
+        task_type="codex",
+        origin_session_key="console:mock-session-2",
+        status="failed",
+        prompt_preview="readonly review",
+        elapsed_ms=120,
+        error_message="Codex failed to start",
+        auto_continue=False,
+    )
+
+    await store._on_complete(snapshot, None)
+
+    assert loop.sessions.saved_session is loop.sessions._session
+    store._trigger_continuation.assert_awaited_once_with(snapshot, "", result=None)
+
+
+@pytest.mark.asyncio
 async def test_bg_tasks_persist_codex_thread_id_as_general_run_id(tmp_path: Path):
     db = Database(tmp_path / "bg-tasks.sqlite3")
     store = BackgroundTaskStore(db=db)
