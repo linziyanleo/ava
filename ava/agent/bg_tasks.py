@@ -50,6 +50,7 @@ class TaskSnapshot:
     last_tool_name: str = ""
     todo_summary: dict[str, int] | None = None
     project_path: str = ""
+    cli_run_id: str = ""
     cli_session_id: str = ""
     auto_continue: bool = False
 
@@ -166,7 +167,7 @@ class BackgroundTaskStore:
                 snapshot.elapsed_ms = int((snapshot.finished_at - snapshot.started_at) * 1000)
                 full_result_str = self._stringify_result_value(result.get("result"))
                 snapshot.result_preview = full_result_str
-                snapshot.cli_session_id = result.get("session_id", "")
+                snapshot.cli_run_id, snapshot.cli_session_id = self._resolve_cli_ids(result)
                 self._record_event(task_id, "succeeded", snapshot.result_preview[:100])
                 self._update_task_status(
                     task_id, "succeeded", snapshot, full_result=full_result_str,
@@ -338,6 +339,19 @@ class BackgroundTaskStore:
         if value is None:
             return ""
         return value if isinstance(value, str) else str(value)
+
+    @classmethod
+    def _resolve_cli_ids(cls, result: dict[str, Any] | None) -> tuple[str, str]:
+        if not result:
+            return "", ""
+
+        session_id = cls._stringify_result_value(result.get("session_id")).strip()
+        run_id = cls._stringify_result_value(result.get("run_id")).strip()
+        thread_id = cls._stringify_result_value(result.get("thread_id")).strip()
+
+        cli_run_id = run_id or session_id or thread_id
+        cli_session_id = session_id or cli_run_id
+        return cli_run_id, cli_session_id
 
     def _resolve_result_text(
         self,
@@ -569,6 +583,7 @@ class BackgroundTaskStore:
         try:
             import json
             extra: dict[str, Any] = {
+                "cli_run_id": snapshot.cli_run_id,
                 "cli_session_id": snapshot.cli_session_id,
             }
             if full_prompt:
@@ -613,6 +628,7 @@ class BackgroundTaskStore:
                         extra = _json.loads(row["extra"] or "{}")
                     except Exception:
                         pass
+                extra["cli_run_id"] = snapshot.cli_run_id
                 extra["cli_session_id"] = snapshot.cli_session_id
                 if full_result:
                     extra["full_result"] = full_result
@@ -709,7 +725,8 @@ class BackgroundTaskStore:
             result_preview=self._row_val(row, "result_preview"),
             error_message=self._row_val(row, "error_message"),
             project_path=self._row_val(row, "project_path"),
-            cli_session_id=extra.get("cli_session_id", ""),
+            cli_run_id=extra.get("cli_run_id", "") or extra.get("cli_session_id", ""),
+            cli_session_id=extra.get("cli_session_id", "") or extra.get("cli_run_id", ""),
         )
 
     @staticmethod

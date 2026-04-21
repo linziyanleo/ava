@@ -183,6 +183,14 @@
             "name": "claude_code",
             "arguments": "{\"mode\":\"standard\",\"project_path\":\"/mock/workspace\",\"prompt\":\"Document the missing mock_tester page coverage and add a token-stats jump from the chat session.\"}"
           }
+        },
+        {
+          "id": "mock-call-codex",
+          "type": "function",
+          "function": {
+            "name": "codex",
+            "arguments": "{\"mode\":\"standard\",\"project_path\":\"/mock/workspace\",\"prompt\":\"Review whether the mock-safe background task copy should mention both Claude Code and Codex.\"}"
+          }
         }
       ],
       "timestamp": "2026-04-07T09:10:04+08:00"
@@ -251,11 +259,21 @@
       "session_key": "console:mock-session-2",
       "seq": 8,
       "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-codex",
+      "name": "codex",
+      "content": "[Codex SUCCESS]\nTurns: 3 | Duration: 5400ms\nRun: mock-codex-thread-01\n\nUpdated background task copy so the mock-safe console refers to both Claude Code and Codex paths.",
+      "timestamp": "2026-04-07T09:10:34+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 9,
+      "conversation_id": "mock-conv-2",
       "role": "assistant",
       "content": [
         {
           "type": "text",
-          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, and `claude_code` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
+          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code and Codex.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
         }
       ],
       "timestamp": "2026-04-07T09:10:36+08:00"
@@ -539,6 +557,7 @@
         "done": 4
       },
       "project_path": "/mock/workspace",
+      "cli_run_id": "mock-cli-session-01",
       "cli_session_id": "mock-cli-session-01",
       "timeline": [
         {
@@ -579,7 +598,8 @@
         "done": 0
       },
       "project_path": "/mock/workspace",
-      "cli_session_id": "",
+      "cli_run_id": "mock-codex-thread-01",
+      "cli_session_id": "mock-codex-thread-01",
       "timeline": [
         {
           "timestamp": 1775527920,
@@ -607,6 +627,7 @@
       "last_tool_name": "write_file",
       "todo_summary": null,
       "project_path": "/mock/workspace",
+      "cli_run_id": "mock-cli-session-02",
       "cli_session_id": "mock-cli-session-02",
       "timeline": [
         {
@@ -643,6 +664,7 @@
       "last_tool_name": "page_agent",
       "todo_summary": null,
       "project_path": "/mock/workspace",
+      "cli_run_id": "mock-cli-session-03",
       "cli_session_id": "mock-cli-session-03",
       "timeline": [
         {
@@ -679,7 +701,8 @@
       "last_tool_name": "update_plan",
       "todo_summary": null,
       "project_path": "/mock/workspace",
-      "cli_session_id": "mock-cli-session-04",
+      "cli_run_id": "mock-codex-thread-02",
+      "cli_session_id": "mock-codex-thread-02",
       "timeline": [
         {
           "timestamp": 1775526000,

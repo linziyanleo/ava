@@ -39,6 +39,7 @@ interface TaskItem {
   last_tool_name: string
   todo_summary: Record<string, number> | null
   project_path: string
+  cli_run_id: string
   cli_session_id: string
 }
 
@@ -229,8 +230,8 @@ function TaskCard({
                   <span className="font-mono">{task.origin_session_key}</span>
                 </div>
                 <div>
-                  <span className="text-[var(--text-secondary)]">CLI Session: </span>
-                  <span className="font-mono">{task.cli_session_id || '-'}</span>
+                  <span className="text-[var(--text-secondary)]">CLI Run: </span>
+                  <span className="font-mono">{task.cli_run_id || task.cli_session_id || '-'}</span>
                 </div>
                 <div>
                   <span className="text-[var(--text-secondary)]">Phase: </span>
@@ -464,7 +465,7 @@ export default function BgTasksPage() {
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Clock className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p>暂无活跃任务</p>
-            <p className="text-xs mt-1">通过 Claude Code 工具提交的异步编程任务将显示在这里</p>
+            <p className="text-xs mt-1">通过 Claude Code 或 Codex 工具提交的异步编程任务将显示在这里</p>
             <button
               onClick={() => setShowHistory(true)}
               className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"

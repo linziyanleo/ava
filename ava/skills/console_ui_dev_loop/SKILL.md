@@ -97,7 +97,7 @@ regression_report:
 
 ### 异步 Coding 衔接模型
 
-`claude_code(mode="standard")` 是异步调用——提交后立即返回 `task_id`，coding 任务在后台运行。任务完成后系统会自动注入一条 `[Background Task Completed]` 消息并触发 continuation。
+`claude_code(mode="standard")` 或 `codex(mode="standard")` 都是异步调用——提交后立即返回 `task_id`，coding 任务在后台运行。任务完成后系统会自动注入一条 `[Background Task Completed]` 消息并触发 continuation。
 
 这意味着 dev_loop 的每个 coding round 会跨越**两个 turn**：
 
@@ -109,7 +109,7 @@ Turn B: 收到 [Background Task Completed] → 解析 coder 结果 → 立即进
 #### Turn A（提交 coding）的行为
 
 1. 构造 coder prompt（含 `goal`、`failed_checks`、`failure_taxonomy`、目录范围）
-2. 调用 `claude_code(mode="standard")`
+2. 调用 `claude_code(mode="standard")` 或 `codex(mode="standard")`
 3. 收到 task_id 后，输出当前 round 的**阶段小结**：
 
 ```yaml
@@ -144,7 +144,7 @@ round_status:
 
 ### 2. Coding Round
 
-使用 `claude_code(mode="standard")` 异步提交实现或修复。
+使用 `claude_code(mode="standard")` 或 `codex(mode="standard")` 异步提交实现或修复。
 
 给 coder 的输入至少包含：`goal`、`changed_files`、`failed_checks`、`failure_taxonomy`、只允许修改的目录范围。
 

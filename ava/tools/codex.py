@@ -135,7 +135,7 @@ class CodexTool(Tool):
             project_path=project,
             timeout=timeout,
             task_type="codex",
-            auto_continue=True,
+            auto_continue=mode in ("standard", "fast"),
             mode=mode,
             project=project,
         )
@@ -313,6 +313,7 @@ class CodexTool(Tool):
             return {"_parse_error": True}
 
         return {
+            "run_id": thread_id,
             "thread_id": thread_id,
             "result": result_text,
             "is_error": is_error,
@@ -335,7 +336,7 @@ class CodexTool(Tool):
         output_tokens = usage.get("output_tokens", 0)
         total_input = input_tokens + cached_input
 
-        thread_id = parsed.get("thread_id", "")
+        run_id = parsed.get("run_id", "") or parsed.get("thread_id", "")
         num_turns = parsed.get("num_turns", 0)
         duration_ms = parsed.get("duration_ms", 0)
         result_text = parsed.get("result", "")
@@ -344,7 +345,7 @@ class CodexTool(Tool):
         model_name = self._model or "codex-default"
 
         user_msg = (
-            f"[codex] thread={thread_id} turns={num_turns} "
+            f"[codex] run={run_id} turns={num_turns} "
             f"duration={duration_ms}ms\n\n--- Prompt ---\n{prompt}"
         )
 
@@ -375,7 +376,7 @@ class CodexTool(Tool):
         error_msg = parsed.get("error_message", "")
         num_turns = parsed.get("num_turns", 0)
         duration_ms = parsed.get("duration_ms", 0)
-        thread_id = parsed.get("thread_id", "")
+        run_id = parsed.get("run_id", "") or parsed.get("thread_id", "")
 
         status = "ERROR" if is_error else "SUCCESS"
 
@@ -384,8 +385,8 @@ class CodexTool(Tool):
             f"Turns: {num_turns} | Duration: {duration_ms}ms",
         ]
 
-        if thread_id:
-            parts.append(f"Thread: {thread_id}")
+        if run_id:
+            parts.append(f"Run: {run_id}")
 
         parts.append("")
 
