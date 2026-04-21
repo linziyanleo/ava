@@ -74,8 +74,8 @@ class ClaudeCodeTool(Tool):
             "or multi-file analysis, ALWAYS prefer this tool over manually "
             "reading/writing files one by one with read_file/write_file/edit_file. "
             "All runs are async (background, notifies when complete). "
-            "Modes: 'fast' (async, max 5 turns), 'standard' (async, default), "
-            "'readonly' (async, analysis only)."
+            "Modes: 'standard' (default, full tool access), "
+            "'readonly' (read-only analysis)."
         )
 
     @property
@@ -93,10 +93,9 @@ class ClaudeCodeTool(Tool):
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["fast", "standard", "readonly"],
+                    "enum": ["standard", "readonly"],
                     "description": (
-                        "fast: async, max 5 turns, 120s timeout; "
-                        "standard: async, max 15 turns (default); "
+                        "standard: async, full tool access (default); "
                         "readonly: async, analysis only"
                     ),
                 },
@@ -135,15 +134,14 @@ class ClaudeCodeTool(Tool):
             ws_id = f"{self._session_key}:{target.workspace_key}"
             workspace = make_inplace_workspace(target, workspace_id=ws_id)
 
-        timeout = 120 if mode == "fast" else self._timeout
         result = self._task_store.submit_coding_task(
             executor=self._execute_background,
             origin_session_key=self._session_key,
             prompt=prompt,
             project_path=project,
-            timeout=timeout,
+            timeout=self._timeout,
             task_type="claude_code",
-            auto_continue=mode in ("standard", "fast"),
+            auto_continue=mode == "standard",
             target=target,
             workspace=workspace,
             mode=mode,
@@ -197,7 +195,6 @@ class ClaudeCodeTool(Tool):
         mode: str,
         session_id: str | None,
     ) -> list[str]:
-        max_turns = 5 if mode == "fast" else self._max_turns
         allowed = "View,Read,Glob,Grep" if mode == "readonly" else self._allowed_tools
 
         cmd = [
@@ -205,7 +202,7 @@ class ClaudeCodeTool(Tool):
             "-p", prompt,
             "--output-format", "json",
             "--model", self._model,
-            "--max-turns", str(max_turns),
+            "--max-turns", str(self._max_turns),
             "--allowedTools", allowed,
         ]
 

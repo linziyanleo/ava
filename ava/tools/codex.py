@@ -72,7 +72,7 @@ class CodexTool(Tool):
             "refactoring, bug fixing, or multi-file analysis over manually "
             "reading/writing files with read_file/write_file/edit_file. "
             "All runs are async (background, notifies when complete). "
-            "Modes: 'fast' (shorter timeout), 'standard' (default), "
+            "Modes: 'standard' (default, full-auto sandbox), "
             "'readonly' (read-only sandbox)."
         )
 
@@ -91,10 +91,9 @@ class CodexTool(Tool):
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["fast", "standard", "readonly"],
+                    "enum": ["standard", "readonly"],
                     "description": (
-                        "fast: async, 120s timeout, full-auto sandbox; "
-                        "standard: async, default timeout, full-auto sandbox (default); "
+                        "standard: async, full-auto sandbox (default); "
                         "readonly: async, read-only sandbox"
                     ),
                 },
@@ -139,15 +138,14 @@ class CodexTool(Tool):
             ws_id = f"{self._session_key}:{target.workspace_key}"
             workspace = make_inplace_workspace(target, workspace_id=ws_id)
 
-        timeout = 120 if mode == "fast" else self._timeout
         result = self._task_store.submit_coding_task(
             executor=self._run_background,
             origin_session_key=self._session_key,
             prompt=prompt,
             project_path=project,
-            timeout=timeout,
+            timeout=self._timeout,
             task_type="codex",
-            auto_continue=mode in ("standard", "fast"),
+            auto_continue=mode == "standard",
             target=target,
             workspace=workspace,
             mode=mode,

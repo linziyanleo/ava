@@ -280,14 +280,11 @@ export function ToolCallBlock({
           )}
           <span className="text-base shrink-0">💻</span>
           <span className="font-medium text-cyan-400">Claude Code</span>
-          <span className={cn(
-            'px-1.5 py-0.5 rounded text-[10px] font-medium ml-1',
-            mode === 'fast' ? 'bg-amber-500/15 text-amber-400'
-              : mode === 'readonly' ? 'bg-blue-500/15 text-blue-400'
-              : 'bg-emerald-500/15 text-emerald-400',
-          )}>
-            {mode}
-          </span>
+          {mode === 'readonly' && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-blue-500/15 text-blue-400">
+              readonly
+            </span>
+          )}
           {ccResult && (
             <span className="flex items-center gap-2 ml-2 text-[var(--text-secondary)]">
               <span>{ccResult.turns} turns</span>
@@ -412,16 +409,13 @@ export function ToolCallBlock({
             ) : (
               <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
             )}
-            <span className="text-base shrink-0">⌘</span>
+            <span className="text-base shrink-0">💻</span>
             <span className="font-medium text-sky-400">Codex</span>
-            <span className={cn(
-              'px-1.5 py-0.5 rounded text-[10px] font-medium ml-1',
-              mode === 'fast' ? 'bg-amber-500/15 text-amber-400'
-                : mode === 'readonly' ? 'bg-blue-500/15 text-blue-400'
-                : 'bg-emerald-500/15 text-emerald-400',
-            )}>
-              {mode}
-            </span>
+            {mode === 'readonly' && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-blue-500/15 text-blue-400">
+                readonly
+              </span>
+            )}
             {codexResult && (
               <span className="flex items-center gap-2 ml-2 text-[var(--text-secondary)]">
                 <span>{codexResult.turns} turns</span>
