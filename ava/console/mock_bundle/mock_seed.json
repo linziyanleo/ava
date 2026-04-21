@@ -556,9 +556,17 @@
         "doing": 1,
         "done": 4
       },
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/nanobot",
       "cli_run_id": "mock-cli-session-01",
       "cli_session_id": "mock-cli-session-01",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/nanobot:.",
+      "workspace_id": "ws-mock-nanobot-root",
+      "execution_cwd": "/Users/fang/nanobot",
+      "isolation_mode": "inplace",
+      "branch_name": "main",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775527800,
@@ -580,6 +588,50 @@
       "full_result": ""
     },
     {
+      "task_id": "mock-task-run-2",
+      "task_type": "coding",
+      "origin_session_key": "console:mock-session-2",
+      "status": "running",
+      "prompt_preview": "Add workspace metadata display to background task cards.",
+      "started_at": 1775527850,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "editing",
+      "last_tool_name": "write_file",
+      "todo_summary": {
+        "todo": 1,
+        "doing": 1,
+        "done": 2
+      },
+      "project_path": "/Users/fang/nanobot",
+      "cli_run_id": "mock-cli-session-05",
+      "cli_session_id": "mock-cli-session-05",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/nanobot:.",
+      "workspace_id": "ws-mock-nanobot-root",
+      "execution_cwd": "/Users/fang/nanobot",
+      "isolation_mode": "inplace",
+      "branch_name": "main",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527850,
+          "event": "submitted",
+          "detail": "Add workspace metadata display to background task cards."
+        },
+        {
+          "timestamp": 1775527855,
+          "event": "started",
+          "detail": ""
+        }
+      ],
+      "full_prompt": "Add workspace metadata display to background task cards.",
+      "full_result": ""
+    },
+    {
       "task_id": "mock-task-queue-1",
       "task_type": "codex",
       "origin_session_key": "console:mock-session-3",
@@ -597,9 +649,17 @@
         "doing": 0,
         "done": 0
       },
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/ava",
       "cli_run_id": "mock-codex-thread-01",
       "cli_session_id": "mock-codex-thread-01",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": "console-ui",
+      "workspace_key": "/Users/fang/ava:console-ui",
+      "workspace_id": "ws-mock-ava-console",
+      "execution_cwd": "/Users/fang/ava/console-ui",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775527920,
@@ -626,9 +686,17 @@
       "phase": "completed",
       "last_tool_name": "write_file",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/ava",
       "cli_run_id": "mock-cli-session-02",
       "cli_session_id": "mock-cli-session-02",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/ava:.",
+      "workspace_id": "ws-mock-ava-root",
+      "execution_cwd": "/Users/fang/ava",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775524200,
@@ -663,9 +731,17 @@
       "phase": "blocked",
       "last_tool_name": "page_agent",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/nanobot",
       "cli_run_id": "mock-cli-session-03",
       "cli_session_id": "mock-cli-session-03",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": "src/plugins",
+      "workspace_key": "/Users/fang/nanobot:src/plugins",
+      "workspace_id": "ws-mock-nanobot-plugins",
+      "execution_cwd": "/Users/fang/nanobot/src/plugins",
+      "isolation_mode": "worktree",
+      "branch_name": "feat/browser-preview",
+      "worktree_path": "/Users/fang/nanobot-wt-browser",
       "timeline": [
         {
           "timestamp": 1775525100,
@@ -700,9 +776,17 @@
       "phase": "cancelled",
       "last_tool_name": "update_plan",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/ava",
       "cli_run_id": "mock-codex-thread-02",
       "cli_session_id": "mock-codex-thread-02",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": "console-ui",
+      "workspace_key": "/Users/fang/ava:console-ui",
+      "workspace_id": "ws-mock-ava-console",
+      "execution_cwd": "/Users/fang/ava/console-ui",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775526000,
