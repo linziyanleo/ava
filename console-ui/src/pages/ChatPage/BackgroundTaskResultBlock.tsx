@@ -103,7 +103,7 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
           'shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium',
           isSuccess
             ? 'bg-emerald-500/15 text-emerald-400'
-            : 'bg-amber-500/15 text-amber-300',
+            : 'bg-rose-500/15 text-rose-400',
         )}>
           {isSuccess
             ? <CheckCircle className="w-3 h-3" />
