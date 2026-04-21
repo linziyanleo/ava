@@ -1,5 +1,6 @@
 """Monkey patch to inject sidecar custom tools into AgentLoop."""
 
+import os
 import shutil
 
 from loguru import logger
@@ -57,10 +58,13 @@ def apply_tools_patch() -> str:
         cc_allowed_tools = cc_cfg.allowed_tools if cc_cfg else "Read,Edit,Bash,Glob,Grep"
         cc_timeout = cc_cfg.timeout if cc_cfg else 600
 
+        cwd = os.getcwd()
+        cc_default_project = (cc_cfg.default_project if cc_cfg and cc_cfg.default_project else cwd)
+
         self.tools.register(ClaudeCodeTool(
             workspace=self.workspace,
             token_stats=getattr(self, 'token_stats', None),
-            default_project=str(self.workspace),
+            default_project=cc_default_project,
             model=cc_model,
             max_turns=cc_max_turns,
             allowed_tools=cc_allowed_tools,
@@ -69,7 +73,7 @@ def apply_tools_patch() -> str:
             task_store=getattr(self, 'bg_tasks', None),
             cc_config=cc_cfg,
         ))
-        
+
         # Codex tool: conditional on providers.openai_codex having an api_key,
         # or codex CLI being available (uses its own auth).
         codex_cfg = getattr(config.providers, "openai_codex", None)
@@ -78,7 +82,7 @@ def apply_tools_patch() -> str:
             self.tools.register(CodexTool(
                 workspace=self.workspace,
                 token_stats=getattr(self, 'token_stats', None),
-                default_project=str(self.workspace),
+                default_project=cwd,
                 model=getattr(codex_cfg, "model", "") if codex_cfg else "",
                 timeout=600,
                 task_store=getattr(self, 'bg_tasks', None),
