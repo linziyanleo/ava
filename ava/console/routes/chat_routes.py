@@ -47,6 +47,25 @@ async def get_history(
 ):
     return _get_chat_service(user).get_history(session_id)
 
+
+@router.get("/sessions/{session_key:path}/context-preview")
+async def get_context_preview(
+    session_key: str,
+    full: bool = Query(False, description="Return full content instead of truncated preview"),
+    reveal: bool = Query(False, description="Disable redaction for preview text"),
+    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+):
+    try:
+        return _get_chat_service(user).get_context_preview(
+            session_key,
+            full=full,
+            reveal=reveal,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
 @router.get("/messages")
 async def get_messages(
     session_key: str = Query(..., description="Session key (e.g. telegram:12345)"),

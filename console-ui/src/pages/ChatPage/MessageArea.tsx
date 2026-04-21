@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink } from 'lucide-react'
+import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
 import type { SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats } from './types';
 import { SCENE_LABELS } from './types'
 import { TurnGroupComponent } from './TurnGroup'
 import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
+import { ContextInspector } from './ContextInspector'
 import { formatTokenCount } from './utils'
 import { api } from '../../api/client';
 
@@ -40,6 +41,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
   const [keyCopied, setKeyCopied] = useState(false)
   const [showScrollDown, setShowScrollDown] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
+  const [showInspector, setShowInspector] = useState(false)
 
   useEffect(() => {
     if (!session?.key) {
@@ -108,6 +110,10 @@ export function MessageArea({ session, conversation, conversationId, turns, load
   useEffect(() => {
     isInitialScroll.current = true
   }, [session?.key])
+
+  useEffect(() => {
+    setShowInspector(false)
+  }, [session?.key, conversationId])
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -198,6 +204,14 @@ export function MessageArea({ session, conversation, conversationId, turns, load
             title="Search"
           >
             <Search className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setShowInspector(true)}
+            disabled={!session?.key || isReadOnly}
+            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            title={isReadOnly ? '只对当前活跃会话开放 Context Inspector' : 'Context Inspector'}
+          >
+            <FileText className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -301,6 +315,13 @@ export function MessageArea({ session, conversation, conversationId, turns, load
       {showSearch && (
         <SearchModal turns={turns} onClose={() => setShowSearch(false)} />
       )}
+
+      <ContextInspector
+        open={showInspector}
+        sessionKey={session?.key || null}
+        disabled={!!isReadOnly}
+        onClose={() => setShowInspector(false)}
+      />
     </div>
   );
 }

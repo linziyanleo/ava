@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
+from ava.console.services.context_preview_service import build_context_preview
+
 _LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo or timezone.utc
 _BG_TASK_ASSISTANT_RE = re.compile(
     r"^\[Background Task ([A-Za-z0-9_-]+) ([A-Z_]+)\]\nType: ([^|\n]+?) \| Duration: (\d+)ms(?:\n\n([\s\S]*))?$"
@@ -29,6 +31,17 @@ class ChatService:
     @property
     def _use_db(self) -> bool:
         return self._db is not None
+
+    def _session_exists(self, session_key: str) -> bool:
+        if self._use_db:
+            row = self._db.fetchone(
+                "SELECT 1 AS ok FROM sessions WHERE key = ?",
+                (session_key,),
+            )
+            return row is not None
+
+        safe_key = session_key.replace(":", "_")
+        return (self._sessions_dir / f"{safe_key}.jsonl").exists()
 
     @staticmethod
     def _derive_scene(key: str) -> str:
@@ -587,6 +600,31 @@ class ChatService:
             except json.JSONDecodeError:
                 continue
         return messages
+
+    def get_context_preview(
+        self,
+        session_key: str,
+        *,
+        full: bool = False,
+        reveal: bool = False,
+    ) -> dict[str, Any]:
+        if not self._agent:
+            raise RuntimeError("Context preview is unavailable while the gateway is offline")
+        if not self._session_exists(session_key):
+            raise KeyError(session_key)
+
+        sessions = getattr(self._agent, "sessions", None)
+        if sessions is None or not hasattr(sessions, "get_or_create"):
+            raise RuntimeError("Agent session manager is unavailable")
+
+        session = sessions.get_or_create(session_key)
+        return build_context_preview(
+            loop=self._agent,
+            session=session,
+            session_key=session_key,
+            full=full,
+            reveal=reveal,
+        )
 
     def create_session(self, user_id: str, title: str = "") -> dict[str, str]:
         sid = uuid.uuid4().hex[:8]
