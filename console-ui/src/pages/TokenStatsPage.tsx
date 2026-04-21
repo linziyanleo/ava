@@ -1545,6 +1545,52 @@ function CopyablePre({ children, className }: { children: string; className?: st
   );
 }
 
+function TraceIdField({ traceId, label = 'Trace ID' }: { traceId: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!traceId) return null;
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(traceId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[var(--text-secondary)] text-xs">{label}:</span>
+      <span
+        className="font-mono text-xs text-[var(--text-primary)] break-all select-all"
+        title={traceId}
+      >
+        {traceId}
+      </span>
+      <button
+        onClick={handleCopy}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        title="复制 Trace ID"
+      >
+        {copied ? (
+          <>
+            <Check className="w-3 h-3 text-[var(--success)]" />
+            已复制
+          </>
+        ) : (
+          <>
+            <Copy className="w-3 h-3" />
+            复制
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
 function ClaudeCodeMeta({ record }: { record: TokenRecord }) {
   const { user_message, cost_usd, prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens } = record;
   const parsed: Record<string, string> = {};
@@ -1702,6 +1748,7 @@ function RecordRow({
         <tr className="bg-[var(--bg-tertiary)]/20 border-b border-[var(--border)]/50">
           <td colSpan={11} className="px-4 py-3 overflow-hidden">
             <div className="space-y-2 text-xs min-w-0">
+              {r.conversation_id && <TraceIdField traceId={r.conversation_id} />}
               <div>
                 <span className="text-[var(--text-secondary)]">Session:</span>{' '}
                 <span className="font-mono">{r.session_key || '—'}</span>
@@ -1905,6 +1952,7 @@ function TurnClusterList({
 
             {expanded && (
               <div className="border-t border-[var(--border)] bg-[var(--bg-tertiary)]/15 px-4 py-4 space-y-4">
+                {summary.conversation_id && <TraceIdField traceId={summary.conversation_id} />}
                 <div className="text-[11px] text-[var(--text-secondary)]">
                   Session: <span className="font-mono text-[var(--text-primary)] break-all">{sessionKey}</span>
                 </div>

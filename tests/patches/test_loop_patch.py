@@ -1,5 +1,6 @@
 """Tests for loop_patch — AgentLoop attribute injection + token stats."""
 
+import asyncio
 import gc
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -757,3 +758,97 @@ class TestTokenStatsRecordId:
             assert event["session_key"] == "telegram:1"
             assert event["conversation_id"] == "conv_live"
             assert event["turn_seq"] == 0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_turns_do_not_double_record_token_usage(self, tmp_path):
+        from ava.patches.loop_patch import apply_loop_patch
+        from ava.storage import Database
+        from ava.console.services.token_stats_service import TokenStatsCollector
+
+        first_waiting = asyncio.Event()
+        second_wrapped = asyncio.Event()
+
+        class DummySession:
+            def __init__(self, key: str):
+                self.key = key
+                self.metadata = {"conversation_id": f"conv_{key.split(':', 1)[1]}"}
+                self.messages = []
+
+        class DummySessions:
+            def __init__(self):
+                self._sessions: dict[str, DummySession] = {}
+
+            def get_or_create(self, key):
+                return self._sessions.setdefault(key, DummySession(key))
+
+            def save(self, session):
+                self._sessions[session.key] = session
+
+        class DummyProvider:
+            async def chat_with_retry(self, *args, messages=None, **kwargs):
+                prompt = messages[-1]["content"]
+                await asyncio.sleep(0)
+                return SimpleNamespace(
+                    content=f"reply:{prompt}",
+                    usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                    finish_reason="stop",
+                )
+
+            async def chat_stream_with_retry(self, *args, messages=None, **kwargs):
+                return await self.chat_with_retry(*args, messages=messages, **kwargs)
+
+        async def original_run_agent_loop(self, initial_messages, **kwargs):
+            prompt = initial_messages[-1]["content"]
+            if prompt == "first":
+                first_waiting.set()
+                await second_wrapped.wait()
+            else:
+                await first_waiting.wait()
+                second_wrapped.set()
+            return await self.provider.chat_with_retry(messages=initial_messages)
+
+        async def original_process_message(self, msg, **kwargs):
+            key = kwargs.get("session_key") or msg.session_key
+            session = self.sessions.get_or_create(key)
+            session.messages.append({"role": "user", "content": msg.content})
+            result = await AgentLoop._run_agent_loop(
+                self,
+                initial_messages=[{"role": "user", "content": msg.content}],
+            )
+            session.messages.append({"role": "assistant", "content": result.content})
+            self.sessions.save(session)
+            return result
+
+        AgentLoop._run_agent_loop = original_run_agent_loop
+        AgentLoop._process_message = original_process_message
+        apply_loop_patch()
+
+        db = Database(tmp_path / "test.db")
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+        loop = SimpleNamespace(
+            sessions=DummySessions(),
+            bg_tasks=None,
+            token_stats=collector,
+            bus=None,
+            provider=DummyProvider(),
+            model="test-model",
+        )
+
+        await asyncio.gather(
+            AgentLoop._process_message(loop, SimpleNamespace(content="first", session_key="telegram:1")),
+            AgentLoop._process_message(loop, SimpleNamespace(content="second", session_key="telegram:2")),
+        )
+
+        rows = db.fetchall(
+            """SELECT session_key, conversation_id, turn_seq, iteration, output_content
+                 FROM token_usage
+                ORDER BY session_key, id""",
+        )
+
+        assert [
+            (row["session_key"], row["conversation_id"], row["turn_seq"], row["iteration"], row["output_content"])
+            for row in rows
+        ] == [
+            ("telegram:1", "conv_1", 0, 0, "reply:first"),
+            ("telegram:2", "conv_2", 0, 0, "reply:second"),
+        ]
