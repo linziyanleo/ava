@@ -270,8 +270,14 @@ class TokenStatsCollector:
             clauses.append("turn_seq = ?")
             params.append(turn_seq)
         if model_role:
-            if model_role == "claude_code":
-                # claude_code: model_role=claude_code OR provider=claude-code-cli
+            if model_role == "coder":
+                # coder: any background coding tool (claude_code + codex)
+                clauses.append(
+                    "(model_role IN (?, ?) OR provider IN (?, ?))"
+                )
+                params.extend(["claude_code", "codex", "claude-code-cli", "codex-cli"])
+            elif model_role == "claude_code":
+                # legacy: claude_code only (kept for backwards deep-link compatibility)
                 clauses.append("(model_role = ? OR provider = ?)")
                 params.append("claude_code")
                 params.append("claude-code-cli")
@@ -328,7 +334,9 @@ class TokenStatsCollector:
             if turn_seq is not None:
                 filtered = [r for r in filtered if getattr(r, "turn_seq", None) == turn_seq]
             if model_role:
-                if model_role == "claude_code":
+                if model_role == "coder":
+                    filtered = [r for r in filtered if getattr(r, "model_role", "") in ("claude_code", "codex") or getattr(r, "provider", "") in ("claude-code-cli", "codex-cli")]
+                elif model_role == "claude_code":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") == "claude_code" or getattr(r, "provider", "") == "claude-code-cli"]
                 elif model_role == "chat":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") in ("chat", "main", "default")]
@@ -374,7 +382,9 @@ class TokenStatsCollector:
             if turn_seq is not None:
                 filtered = [r for r in filtered if getattr(r, "turn_seq", None) == turn_seq]
             if model_role:
-                if model_role == "claude_code":
+                if model_role == "coder":
+                    filtered = [r for r in filtered if getattr(r, "model_role", "") in ("claude_code", "codex") or getattr(r, "provider", "") in ("claude-code-cli", "codex-cli")]
+                elif model_role == "claude_code":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") == "claude_code" or getattr(r, "provider", "") == "claude-code-cli"]
                 elif model_role == "chat":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") in ("chat", "main", "default")]

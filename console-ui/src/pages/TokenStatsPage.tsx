@@ -246,6 +246,7 @@ const MODEL_ROLE_CONFIG: Record<string, { icon: string; label: string }> = {
   voice: { icon: '🎙️', label: '语音模型' },
   imageGen: { icon: '🎨', label: '图像生成' },
   claude_code: { icon: '💻', label: 'Claude Code' },
+  codex: { icon: '💻', label: 'Codex' },
   'page-agent': { icon: '🌐', label: 'Page Agent' },
   pending: { icon: '⏳', label: 'Processing...' },
   error: { icon: '❌', label: '异常终止' },
@@ -387,11 +388,11 @@ function getPresetRange(preset: TimePreset): { start?: string; end?: string } {
   return {};
 }
 
-type ModelRoleFilter = 'all' | 'claude_code' | 'chat' | 'page-agent' | 'mini' | 'voice' | 'vision' | 'error';
+type ModelRoleFilter = 'all' | 'coder' | 'chat' | 'page-agent' | 'mini' | 'voice' | 'vision' | 'error';
 
 const MODEL_ROLE_FILTER_OPTIONS: { value: ModelRoleFilter; label: string; icon: string }[] = [
   { value: 'all', label: '全部', icon: '📊' },
-  { value: 'claude_code', label: 'Claude Code', icon: '💻' },
+  { value: 'coder', label: 'Coder', icon: '💻' },
   { value: 'chat', label: '主模型', icon: '🤖' },
   { value: 'page-agent', label: 'Page Agent', icon: '🌐' },
   { value: 'mini', label: 'Mini', icon: '⚡' },
