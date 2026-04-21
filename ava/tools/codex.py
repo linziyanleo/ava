@@ -16,7 +16,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
-    from ava.agent.bg_tasks import BackgroundTaskStore
+    from ava.agent.bg_tasks import BackgroundTaskStore, SubmitResult
 
 _MAX_OUTPUT_CHARS = 32000
 _HEAD_CHARS = 8000
@@ -127,8 +127,20 @@ class CodexTool(Tool):
             except Exception as e:
                 return f"Error: {e}"
 
+        from ava.agent.worktree_manager import resolve_target, make_inplace_workspace
+
+        try:
+            target = resolve_target(project)
+        except ValueError:
+            target = None
+
+        workspace = None
+        if target:
+            ws_id = f"{self._session_key}:{target.workspace_key}"
+            workspace = make_inplace_workspace(target, workspace_id=ws_id)
+
         timeout = 120 if mode == "fast" else self._timeout
-        task_id = self._task_store.submit_coding_task(
+        result = self._task_store.submit_coding_task(
             executor=self._run_background,
             origin_session_key=self._session_key,
             prompt=prompt,
@@ -136,10 +148,12 @@ class CodexTool(Tool):
             timeout=timeout,
             task_type="codex",
             auto_continue=mode in ("standard", "fast"),
+            target=target,
+            workspace=workspace,
             mode=mode,
             project=project,
         )
-        return f"Codex task started (id: {task_id}). Use /task to check progress."
+        return self._format_submit_result(result)
 
     async def _run_background(
         self,
@@ -250,6 +264,16 @@ class CodexTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 return "", f"Codex timed out after {timeout}s"
+            except asyncio.CancelledError:
+                logger.info("codex: subprocess cancelled, killing child process pid={}", process.pid)
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+                raise
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return "", f"Failed to start Codex: {e}"
 
@@ -369,6 +393,18 @@ class CodexTool(Tool):
             model_name, input_tokens, cached_input, output_tokens,
             num_turns, duration_ms,
         )
+
+    @staticmethod
+    def _format_submit_result(result: SubmitResult) -> str:
+        parts = [f"Codex task started (id: {result.task_id})."]
+        if result.replaced_task_id:
+            parts.append(f" Replaced previous task {result.replaced_task_id}.")
+        if result.active_in_session:
+            parts.append(
+                f" ({len(result.active_in_session)} other active task(s) in this session)"
+            )
+        parts.append(" Use /task to check progress.")
+        return "".join(parts)
 
     def _format_output(self, parsed: dict[str, Any], mode: str) -> str:
         is_error = parsed.get("is_error", False)

@@ -97,6 +97,14 @@ class MockBackgroundTaskStore:
         task.setdefault("timeline", [])
         task.setdefault("full_prompt", "")
         task.setdefault("full_result", "")
+        task.setdefault("repo_root", "")
+        task.setdefault("workdir_relpath", "")
+        task.setdefault("workspace_key", "")
+        task.setdefault("workspace_id", "")
+        task.setdefault("execution_cwd", task.get("project_path", ""))
+        task.setdefault("isolation_mode", "inplace")
+        task.setdefault("branch_name", "")
+        task.setdefault("worktree_path", "")
         return task
 
     @staticmethod
