@@ -427,6 +427,19 @@ function TaskCard({
                 {task.phase}
               </span>
             )}
+            {task.repo_root && (
+              <span className="inline-flex items-center gap-1 font-mono truncate max-w-[240px]" title={task.workspace_key}>
+                <FolderOpen className="w-3 h-3 shrink-0" />
+                {repoBasename(task.repo_root)}
+                {task.workdir_relpath && task.workdir_relpath !== '.' && <>:{task.workdir_relpath}</>}
+              </span>
+            )}
+            {task.branch_name && (
+              <span className="inline-flex items-center gap-1" title={task.branch_name}>
+                <GitBranch className="w-3 h-3 shrink-0" />
+                {task.branch_name}
+              </span>
+            )}
           </div>
 
           {/* Module C: progress bar */}
