@@ -23,12 +23,22 @@ def _get_bg_store(user: UserInfo | None = None):
 @router.get("")
 async def list_tasks(
     session_key: str | None = None,
+    workspace_id: str | None = None,
+    workspace_key: str | None = None,
     include_finished: bool = True,
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"running": 0, "total": 0, "tasks": []}
+
+    if workspace_id:
+        tasks = bg_store.find_active_by_workspace(workspace_id)
+        return {"running": len(tasks), "total": len(tasks), "tasks": [t.to_dict() for t in tasks]}
+    if workspace_key:
+        tasks = bg_store.find_active_by_target(workspace_key)
+        return {"running": len(tasks), "total": len(tasks), "tasks": [t.to_dict() for t in tasks]}
+
     return bg_store.get_status(
         session_key=session_key,
         include_finished=include_finished,
@@ -61,13 +71,25 @@ async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role("adm
 
 @router.get("/{task_id}/detail")
 async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
-    """获取任务的完整 prompt 和 result。"""
+    """获取任务的完整 prompt、result 和 workspace metadata。"""
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"error": "BackgroundTaskStore not initialized"}
     detail = bg_store.get_task_detail(task_id)
     if not detail:
         return {"error": f"Task {task_id} not found"}
+
+    status = bg_store.get_status(task_id=task_id)
+    if status["tasks"]:
+        task_dict = status["tasks"][0]
+        detail["workspace"] = {
+            "workspace_id": task_dict.get("workspace_id", ""),
+            "workspace_key": task_dict.get("workspace_key", ""),
+            "execution_cwd": task_dict.get("execution_cwd", ""),
+            "isolation_mode": task_dict.get("isolation_mode", "inplace"),
+            "branch_name": task_dict.get("branch_name", ""),
+            "worktree_path": task_dict.get("worktree_path", ""),
+        }
     return detail
 
 
