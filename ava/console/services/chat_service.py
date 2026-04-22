@@ -715,6 +715,7 @@ class ChatService:
         user_id: str,
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
         response = await self._agent.process_direct(
@@ -723,6 +724,7 @@ class ChatService:
             channel="console",
             chat_id=user_id,
             on_progress=on_progress,
+            on_stream=on_stream,
             media=media,
         )
         return response or ""

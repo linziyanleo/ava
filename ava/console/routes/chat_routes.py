@@ -7,12 +7,33 @@ import json
 
 from loguru import logger
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from nanobot.bus.events import OutboundMessage
 
 from ava.console import auth
 from ava.console.middleware import get_client_ip
 from ava.console.models import ChatSessionCreateRequest, UserInfo
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+_EMPTY_LISTENER_CONTENTS = {"(empty)", "[empty message]"}
+
+
+def _listener_message_to_payload(msg: OutboundMessage) -> dict[str, object]:
+    metadata = msg.metadata or {}
+    payload: dict[str, object] = {
+        "type": metadata.get("event_type", "async_result"),
+        "content": msg.content,
+    }
+    if metadata.get("tool_hint"):
+        payload["tool_hint"] = True
+    return payload
+
+
+def _should_skip_listener_message(msg: OutboundMessage) -> bool:
+    event_type = (msg.metadata or {}).get("event_type", "async_result")
+    if event_type == "complete":
+        return False
+    return not msg.content or msg.content in _EMPTY_LISTENER_CONTENTS
 
 def _get_chat_service(user: UserInfo):
     from ava.console.app import get_services_for_user
@@ -192,14 +213,25 @@ async def chat_ws(websocket: WebSocket, session_id: str):
         try:
             while True:
                 msg = await listener_queue.get()
-                if not msg.content or msg.content in ("(empty)", "[empty message]"):
+                if _should_skip_listener_message(msg):
                     continue
+                payload = _listener_message_to_payload(msg)
                 try:
-                    await websocket.send_json({
-                        "type": "async_result",
-                        "content": msg.content,
-                    })
-                except Exception:
+                    await websocket.send_json(payload)
+                except Exception as exc:
+                    try:
+                        listener_queue.put_nowait(msg)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Console WS listener queue full while replaying {} for {}",
+                            payload.get("type"),
+                            session_id,
+                        )
+                    logger.debug(
+                        "Console WS listener push failed for {}: {}",
+                        session_id,
+                        exc,
+                    )
                     break
         except asyncio.CancelledError:
             pass
@@ -231,12 +263,38 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 target=session_id, detail={"preview": content[:100], "media_count": len(media)},
             )
 
+            async def _dispatch_listener_event(
+                chunk: str,
+                *,
+                event_type: str,
+                tool_hint: bool = False,
+            ):
+                metadata = {
+                    "session_key": session_key,
+                    "event_type": event_type,
+                }
+                if tool_hint:
+                    metadata["tool_hint"] = True
+                await bus.dispatch_to_console_listener(
+                    session_key,
+                    OutboundMessage(
+                        channel="console",
+                        chat_id=user.username,
+                        content=chunk,
+                        metadata=metadata,
+                    ),
+                )
+
             async def on_progress(chunk: str, *, tool_hint: bool = False, is_thinking: bool = False):
                 msg_type = "thinking" if is_thinking else "progress"
-                try:
-                    await websocket.send_json({"type": msg_type, "content": chunk, "tool_hint": tool_hint})
-                except Exception:
-                    pass  # Client disconnected mid-stream; agent loop will still finish.
+                await _dispatch_listener_event(
+                    chunk,
+                    event_type=msg_type,
+                    tool_hint=tool_hint,
+                )
+
+            async def on_stream(chunk: str):
+                await _dispatch_listener_event(chunk, event_type="progress")
 
             response = await svc_chat.send_message(
                 session_id=session_id,
@@ -244,14 +302,17 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 user_id=user.username,
                 media=media,
                 on_progress=on_progress,
+                on_stream=on_stream,
             )
-            try:
-                await websocket.send_json({"type": "complete", "content": response})
-            except Exception:
-                logger.debug("WS send complete failed for {} (client disconnected)", session_id)
+            await _dispatch_listener_event(response, event_type="complete")
 
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        logger.debug(
+            "Console WS disconnected for {}: code={} reason={}",
+            session_id,
+            getattr(exc, "code", None),
+            getattr(exc, "reason", ""),
+        )
     except Exception:
         try:
             await websocket.close()

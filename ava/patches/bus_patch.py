@@ -2,10 +2,11 @@
 
 Adds two sets of methods to MessageBus:
 
-Console listeners (OutboundMessage, 覆盖式注册, 用于 Console WS 双向会话):
+Console listeners (OutboundMessage, 粘性 queue, 用于 Console WS 双向会话):
   - register_console_listener(session_key) -> asyncio.Queue
   - unregister_console_listener(session_key)
   - dispatch_to_console_listener(session_key, msg)
+  - reap_idle_console_listeners(now=None, idle_seconds=300.0)
 
 Observe listeners (dict 生命周期事件, 追加式注册, 用于非 Console 会话只读订阅):
   - register_observe_listener(session_key) -> asyncio.Queue
@@ -16,6 +17,7 @@ Observe listeners (dict 生命周期事件, 追加式注册, 用于非 Console �
 from __future__ import annotations
 
 import asyncio
+import time
 
 from loguru import logger
 from nanobot.bus.events import OutboundMessage
@@ -34,23 +36,73 @@ def apply_bus_patch() -> str:
         return "bus_patch already applied (skipped)"
 
     # --- register_console_listener ---
+    def _ensure_console_listener_reaper(self: MessageBus) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        existing_task = getattr(self, "_console_listener_reaper_task", None)
+        if existing_task is not None and not existing_task.done():
+            return
+
+        async def _reaper():
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    self.reap_idle_console_listeners()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Console listener reaper error: {}", exc)
+
+        self._console_listener_reaper_task = loop.create_task(_reaper())
+
     def register_console_listener(self: MessageBus, session_key: str) -> asyncio.Queue:
         """Register a queue-based listener for console WebSocket events on a session.
 
         Returns an asyncio.Queue that receives OutboundMessage objects.
-        Replaces any existing listener for the same session_key.
+        Reuses the same queue across reconnects so detached events can be replayed.
         """
         if not hasattr(self, "_console_listeners"):
             self._console_listeners: dict[str, asyncio.Queue] = {}
-        queue: asyncio.Queue = asyncio.Queue(maxsize=256)
-        self._console_listeners[session_key] = queue
+        queue = self._console_listeners.get(session_key)
+        if queue is None:
+            queue = asyncio.Queue(maxsize=256)
+            self._console_listeners[session_key] = queue
+        queue._ava_consumer_detached = False
+        queue._ava_detached_at = None
+        _ensure_console_listener_reaper(self)
         return queue
 
     # --- unregister_console_listener ---
     def unregister_console_listener(self: MessageBus, session_key: str) -> None:
-        """Remove the console listener queue for a session."""
+        """Mark the console listener queue as detached so it can be reused on reconnect."""
         listeners = getattr(self, "_console_listeners", {})
-        listeners.pop(session_key, None)
+        queue = listeners.get(session_key)
+        if queue is None:
+            return
+        queue._ava_consumer_detached = True
+        queue._ava_detached_at = time.monotonic()
+
+    def reap_idle_console_listeners(
+        self: MessageBus,
+        now: float | None = None,
+        idle_seconds: float = 300.0,
+    ) -> list[str]:
+        """Drop detached console listener queues after the idle timeout."""
+        listeners = getattr(self, "_console_listeners", {})
+        current = time.monotonic() if now is None else now
+        reaped: list[str] = []
+        for session_key, queue in list(listeners.items()):
+            detached_at = getattr(queue, "_ava_detached_at", None)
+            if not getattr(queue, "_ava_consumer_detached", False):
+                continue
+            if detached_at is None or current - detached_at < idle_seconds:
+                continue
+            listeners.pop(session_key, None)
+            reaped.append(session_key)
+        return reaped
 
     # --- dispatch_to_console_listener ---
     async def dispatch_to_console_listener(
@@ -102,6 +154,7 @@ def apply_bus_patch() -> str:
     MessageBus.register_console_listener = register_console_listener
     MessageBus.unregister_console_listener = unregister_console_listener
     MessageBus.dispatch_to_console_listener = dispatch_to_console_listener
+    MessageBus.reap_idle_console_listeners = reap_idle_console_listeners
 
     # --- observe listener（生命周期事件，追加式注册，支持多 WS 同时观察同一 session）---
     def register_observe_listener(self: MessageBus, session_key: str) -> asyncio.Queue:

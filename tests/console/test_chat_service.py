@@ -25,6 +25,7 @@ class _FakeAgentLoop:
         channel: str,
         chat_id: str,
         on_progress=None,
+        on_stream=None,
         media=None,
     ):
         self.calls.append({
@@ -33,6 +34,7 @@ class _FakeAgentLoop:
             "channel": channel,
             "chat_id": chat_id,
             "on_progress": on_progress,
+            "on_stream": on_stream,
             "media": media,
         })
         return "ok"
@@ -194,7 +196,35 @@ async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
         "channel": "console",
         "chat_id": "tester",
         "on_progress": None,
+        "on_stream": None,
         "media": ["/tmp/example.png"],
+    }]
+
+
+@pytest.mark.asyncio
+async def test_send_message_passes_on_stream_to_agent_loop(tmp_path):
+    agent_loop = _FakeAgentLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    async def on_stream(_chunk: str):
+        return None
+
+    result = await service.send_message(
+        session_id="abc123",
+        message="stream this",
+        user_id="tester",
+        on_stream=on_stream,
+    )
+
+    assert result == "ok"
+    assert agent_loop.calls == [{
+        "content": "stream this",
+        "session_key": "console:abc123",
+        "channel": "console",
+        "chat_id": "tester",
+        "on_progress": None,
+        "on_stream": on_stream,
+        "media": None,
     }]
 
 
