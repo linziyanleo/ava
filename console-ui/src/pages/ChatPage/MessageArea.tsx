@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
-import type { SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
+import type { ChatComposePayload, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
 import { TurnGroupComponent } from './TurnGroup'
@@ -26,7 +26,7 @@ interface MessageAreaProps {
   activeTransport: ActiveChatTransport
   sending: boolean
   processing?: boolean
-  onSend: (message: string) => void
+  onSend: (payload: ChatComposePayload) => Promise<void> | void
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void

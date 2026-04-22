@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
-import type { SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
+import type { ChatComposePayload, ChatImageUpload, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
 import { SceneTabs } from './SceneTabs'
@@ -637,28 +637,59 @@ export default function ChatPage() {
   const refreshSessionViewRef = useRef(refreshSessionView)
   refreshSessionViewRef.current = refreshSessionView
 
-  const handleSend = (message: string) => {
+  const handleSend = async ({ text, attachments }: ChatComposePayload) => {
     if (mockMode) return
     if (!wsRef.current || sending || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
+    setError('')
     setStreaming('')
     setThinkingStreaming('')
+    setToolHintStreaming('')
     setSending(true)
+    try {
+      let uploads: ChatImageUpload[] = []
+      if (attachments.length > 0) {
+        const formData = new FormData()
+        for (const attachment of attachments) {
+          formData.append('files', attachment, attachment.name)
+        }
+        const response = await api<{ uploads: ChatImageUpload[] }>('/chat/uploads', {
+          method: 'POST',
+          body: formData,
+        })
+        uploads = response.uploads || []
+      }
 
-    const userMsg: RawMessage = {
-      role: 'user',
-      content: message,
-      timestamp: new Date().toISOString(),
+      const optimisticContent = uploads.length > 0
+        ? [
+            ...uploads.map((upload) => ({ type: 'text', text: `[image: ${upload.media_path}]` })),
+            ...(text ? [{ type: 'text', text }] : []),
+          ]
+        : text
+
+      const userMsg: RawMessage = {
+        role: 'user',
+        content: optimisticContent,
+        timestamp: new Date().toISOString(),
+      }
+      setTurns((prev) => [...prev, {
+        turnSeq: getNextTurnSeq(prev),
+        userMessage: userMsg,
+        assistantSteps: [],
+        isComplete: false,
+        startTime: userMsg.timestamp,
+        toolCalls: [],
+      }])
+
+      wsRef.current.send(JSON.stringify({
+        content: text,
+        media: uploads.map((upload) => upload.media_path),
+      }))
+    } catch (err) {
+      setSending(false)
+      const msg = err instanceof Error ? err.message : 'Failed to send message'
+      setError(msg)
+      throw err
     }
-    setTurns((prev) => [...prev, {
-      turnSeq: getNextTurnSeq(prev),
-      userMessage: userMsg,
-      assistantSteps: [],
-      isComplete: false,
-      startTime: userMsg.timestamp,
-      toolCalls: [],
-    }])
-
-    wsRef.current.send(JSON.stringify({ content: message }))
   }
 
   const isConsole = activeScene === 'console' && !mockMode

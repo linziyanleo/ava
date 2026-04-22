@@ -2,6 +2,26 @@ export type SceneType = 'telegram' | 'cron' | 'heartbeat' | 'console' | 'cli' | 
 export type ChatStreamStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'
 export type ActiveChatTransport = 'console' | 'observe' | 'none'
 
+export interface MessageContentBlock {
+  type: string
+  text?: string
+  [key: string]: unknown
+}
+
+export interface ChatComposePayload {
+  text: string
+  attachments: File[]
+}
+
+export interface ChatImageUpload {
+  filename: string
+  media_path: string
+  path: string
+  mime_type: string
+  size_bytes: number
+  preview_url: string
+}
+
 export interface SessionMeta {
   key: string
   scene: SceneType
@@ -37,7 +57,7 @@ export interface ToolCall {
 
 export interface RawMessage {
   role: 'user' | 'assistant' | 'tool' | 'system'
-  content: string | null | Array<{ type: string; text?: string }>
+  content: string | null | MessageContentBlock[]
   timestamp?: string
   tool_calls?: ToolCall[]
   tool_call_id?: string

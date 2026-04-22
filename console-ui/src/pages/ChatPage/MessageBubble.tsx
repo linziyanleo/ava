@@ -5,7 +5,8 @@ import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer';
 import { cn } from '../../lib/utils';
 import { useResponsiveMode } from '../../hooks/useResponsiveMode';
 import type { RawMessage, TurnTokenStats } from './types';
-import { getContentText, formatTimestamp, formatTokenCount } from './utils';
+import { extractMessageImages, getContentText, formatTimestamp, formatTokenCount } from './utils';
+import { ImageCarousel } from './ImageCarousel';
 import { TokenInfoPopover } from './TokenInfoPopover';
 
 interface MediaBlock {
@@ -63,6 +64,41 @@ function MediaBlockIndicator({ block }: { block: MediaBlock }) {
   )
 }
 
+function AttachmentPreview({ urls, paths, isUser }: { urls: string[]; paths: string[]; isUser: boolean }) {
+  if (urls.length === 0) return null
+
+  return (
+    <div
+      className={cn(
+        'rounded-2xl overflow-hidden border',
+        isUser
+          ? 'border-[var(--accent)]/30 bg-[var(--accent)]/10'
+          : 'border-[var(--border)] bg-[var(--bg-secondary)]',
+      )}
+    >
+      <div className="p-2.5">
+        <ImageCarousel urls={urls} alt="Chat attachment" maxHeight={180} />
+      </div>
+      <div className={cn(
+        'border-t px-3 py-2 space-y-1',
+        isUser ? 'border-[var(--accent)]/20 bg-black/10' : 'border-[var(--border)] bg-[var(--bg-tertiary)]/70',
+      )}>
+        {paths.map((path, index) => (
+          <div
+            key={`${path}-${index}`}
+            className={cn(
+              'font-mono text-[11px] break-all',
+              isUser ? 'text-white/85' : 'text-[var(--text-secondary)]',
+            )}
+          >
+            {path}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 interface MessageBubbleProps {
   message: RawMessage;
   isUser: boolean;
@@ -79,6 +115,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
   const mobilePopoverRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useResponsiveMode();
   const navigate = useNavigate();
+  const { text: textWithoutImages, images } = extractMessageImages(message.content);
   const text = getContentText(message.content);
   const reasoning = message.reasoning_content;
   useEffect(() => {
@@ -95,10 +132,10 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
     return () => document.removeEventListener('mousedown', handler);
   }, [showTokenInfo, showMobileTokenInfo]);
 
-  if (!text && !reasoning) return null;
+  if (!textWithoutImages && !reasoning && images.length === 0) return null;
 
-  const { mainText, blocks: mediaBlocks } = isUser ? parseMediaBlocks(text) : { mainText: text, blocks: [] }
-  const displayText = isUser ? mainText : text
+  const { mainText, blocks: mediaBlocks } = isUser ? parseMediaBlocks(textWithoutImages) : { mainText: textWithoutImages, blocks: [] }
+  const displayText = isUser ? mainText : textWithoutImages
 
   const handleCopy = () => {
     navigator.clipboard.writeText(text);
@@ -138,6 +175,16 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
                 </pre>
               </div>
             )}
+          </div>
+        )}
+
+        {images.length > 0 && (
+          <div className={displayText || mediaBlocks.length > 0 ? 'mb-2' : ''}>
+            <AttachmentPreview
+              urls={images.map((image) => image.previewUrl)}
+              paths={images.map((image) => image.displayPath)}
+              isUser={isUser}
+            />
           </div>
         )}
 

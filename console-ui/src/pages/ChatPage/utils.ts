@@ -1,4 +1,4 @@
-import type { SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
+import type { MessageContentBlock, SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
 import { normalizeBackgroundTaskMessages } from './backgroundTask'
 
 export interface FileTreeNode {
@@ -7,6 +7,14 @@ export interface FileTreeNode {
   type: 'file' | 'directory'
   children?: FileTreeNode[]
 }
+
+export interface MessageImageRef {
+  rawPath: string
+  displayPath: string
+  previewUrl: string
+}
+
+const IMAGE_PLACEHOLDER_RE = /\[image:\s*([^\]]+?)\]/gi
 
 export function parseScene(filename: string): SceneType {
   const name = filename.replace(/\.jsonl$/, '')
@@ -160,7 +168,7 @@ function checkTurnComplete(turn: TurnGroup): boolean {
   return false
 }
 
-export function getContentText(content: string | null | Array<{ type: string; text?: string }>): string {
+export function getContentText(content: string | null | MessageContentBlock[]): string {
   if (content === null || content === undefined) return ''
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -267,6 +275,43 @@ export function formatTokenCount(n: number): string {
 export function imageUrl(path: string): string {
   const filename = path.split('/').pop() || path
   return `/api/media/images/${filename}`
+}
+
+export function displayImagePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const filename = normalized.split('/').pop() || path
+  for (const marker of ['chat-uploads', 'generated', 'screenshots']) {
+    const token = `/${marker}/`
+    if (normalized.includes(token)) {
+      return `${marker}/${filename}`
+    }
+  }
+  return filename
+}
+
+export function extractMessageImages(
+  content: string | null | MessageContentBlock[],
+): { text: string; images: MessageImageRef[] } {
+  const source = getContentText(content)
+  const seen = new Set<string>()
+  const images: MessageImageRef[] = []
+
+  const text = source
+    .replace(IMAGE_PLACEHOLDER_RE, (_match, rawPath: string) => {
+      const trimmed = rawPath.trim()
+      if (!trimmed || seen.has(trimmed)) return ''
+      seen.add(trimmed)
+      images.push({
+        rawPath: trimmed,
+        displayPath: displayImagePath(trimmed),
+        previewUrl: imageUrl(trimmed),
+      })
+      return ''
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return { text, images }
 }
 
 const GENERATED_RE = /Generated image\(s\):\s*(.+)/
