@@ -77,6 +77,42 @@ def _insert_message_row(
     db.commit()
 
 
+def _insert_token_usage(
+    db: Database,
+    *,
+    session_key: str,
+    conversation_id: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    turn_seq: int,
+    iteration: int = 0,
+):
+    db.execute(
+        """
+        INSERT INTO token_usage
+            (timestamp, model, provider, prompt_tokens, completion_tokens, total_tokens,
+             session_key, conversation_id, turn_seq, iteration, finish_reason, model_role)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-04-07T00:00:00+00:00",
+            "test-model",
+            "test-provider",
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            session_key,
+            conversation_id,
+            turn_seq,
+            iteration,
+            "stop",
+            "chat",
+        ),
+    )
+    db.commit()
+
+
 def test_get_messages_defaults_to_active_conversation(tmp_path):
     service, db = _create_service(tmp_path)
     session_id = _insert_session(
@@ -169,6 +205,82 @@ def test_get_messages_supports_explicit_legacy_conversation_id(tmp_path):
 
     legacy_messages = service.get_messages("telegram:3", conversation_id="")
     assert [msg["content"] for msg in legacy_messages] == ["legacy question"]
+
+
+def test_list_sessions_uses_live_token_usage_for_active_conversation_when_cached_stats_are_stale(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_key = "console:1"
+    _insert_session(
+        db,
+        key=session_key,
+        metadata={
+            "conversation_id": "conv_live",
+            "token_stats": {
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
+                "total_tokens": 0,
+                "llm_calls": 0,
+            },
+        },
+    )
+    db.execute(
+        "UPDATE sessions SET token_stats = ? WHERE key = ?",
+        (
+            json.dumps(
+                {
+                    "total_prompt_tokens": 0,
+                    "total_completion_tokens": 0,
+                    "total_tokens": 0,
+                    "llm_calls": 0,
+                },
+                ensure_ascii=False,
+            ),
+            session_key,
+        ),
+    )
+    db.commit()
+
+    _insert_token_usage(
+        db,
+        session_key=session_key,
+        conversation_id="conv_live",
+        prompt_tokens=10,
+        completion_tokens=2,
+        total_tokens=12,
+        turn_seq=0,
+        iteration=0,
+    )
+    _insert_token_usage(
+        db,
+        session_key=session_key,
+        conversation_id="conv_live",
+        prompt_tokens=5,
+        completion_tokens=3,
+        total_tokens=8,
+        turn_seq=1,
+        iteration=0,
+    )
+    _insert_token_usage(
+        db,
+        session_key=session_key,
+        conversation_id="conv_old",
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        turn_seq=0,
+        iteration=0,
+    )
+
+    sessions = service.list_sessions()
+
+    assert len(sessions) == 1
+    assert sessions[0]["conversation_id"] == "conv_live"
+    assert sessions[0]["token_stats"] == {
+        "total_prompt_tokens": 15,
+        "total_completion_tokens": 5,
+        "total_tokens": 20,
+        "llm_calls": 2,
+    }
 
 
 def test_get_messages_repairs_retry_duplicate_and_toolcall_text_duplication(tmp_path):

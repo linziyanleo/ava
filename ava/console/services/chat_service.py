@@ -338,6 +338,46 @@ class ChatService:
         value = latest["conversation_id"]
         return value if isinstance(value, str) else ""
 
+    @staticmethod
+    def _normalize_token_stats(stats: dict[str, Any] | None) -> dict[str, int]:
+        data = stats or {}
+        return {
+            "total_prompt_tokens": int(data.get("total_prompt_tokens", 0) or 0),
+            "total_completion_tokens": int(data.get("total_completion_tokens", 0) or 0),
+            "total_tokens": int(data.get("total_tokens", 0) or 0),
+            "llm_calls": int(data.get("llm_calls", 0) or 0),
+        }
+
+    def _resolve_session_token_stats(
+        self,
+        session_key: str,
+        conversation_id: str,
+        fallback: dict[str, Any] | None,
+    ) -> dict[str, int]:
+        fallback_stats = self._normalize_token_stats(fallback)
+        if not self._use_db:
+            return fallback_stats
+
+        try:
+            row = self._db.fetchone(
+                """
+                SELECT COALESCE(SUM(prompt_tokens), 0) AS total_prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0) AS total_completion_tokens,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                       COUNT(*) AS llm_calls
+                  FROM token_usage
+                 WHERE session_key = ? AND conversation_id = ?
+                """,
+                (session_key, conversation_id),
+            )
+        except Exception:
+            return fallback_stats
+
+        live_stats = self._normalize_token_stats(dict(row) if row else None)
+        if live_stats["llm_calls"] == 0 and fallback_stats["llm_calls"] > 0:
+            return fallback_stats
+        return live_stats
+
     def list_sessions(self, user_id: str | None = None) -> list[dict]:
         if self._use_db:
             rows = self._db.fetchall(
@@ -361,18 +401,14 @@ class ChatService:
                         ts = json.loads(r["token_stats"])
                     except json.JSONDecodeError:
                         pass
+                active_conversation_id = self._resolve_active_conversation_id(r["id"], meta)
                 sessions.append({
                     "key": key,
                     "scene": self._derive_scene(key),
                     "created_at": r["created_at"] or "",
                     "updated_at": r["updated_at"] or "",
-                    "conversation_id": self._resolve_active_conversation_id(r["id"], meta),
-                    "token_stats": {
-                        "total_prompt_tokens": ts.get("total_prompt_tokens", 0),
-                        "total_completion_tokens": ts.get("total_completion_tokens", 0),
-                        "total_tokens": ts.get("total_tokens", 0),
-                        "llm_calls": ts.get("llm_calls", 0),
-                    },
+                    "conversation_id": active_conversation_id,
+                    "token_stats": self._resolve_session_token_stats(key, active_conversation_id, ts),
                     "message_count": r["msg_count"],
                 })
             return sessions

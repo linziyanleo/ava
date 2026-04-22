@@ -133,6 +133,17 @@ export function MessageArea({ session, conversation, conversationId, turns, load
     )
   }
 
+  let headerTotalTokens = session.token_stats.total_tokens
+  let headerLlmCalls = session.token_stats.llm_calls
+  if (turnTokenStats.size > 0) {
+    headerTotalTokens = 0
+    headerLlmCalls = 0
+    for (const stats of turnTokenStats.values()) {
+      headerTotalTokens += stats.total_tokens
+      headerLlmCalls += stats.llm_calls
+    }
+  }
+
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-[var(--bg-primary)] relative">
       {/* Session header */}
@@ -176,10 +187,10 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 if (conversationId) params.set('conversation_id', conversationId)
                 navigate(`/tokens?${params.toString()}`)
               }}
-              className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
-              title="查看当前会话的 Token 统计"
-            >
-              <span>⚡ {formatTokenCount(session.token_stats.total_tokens)} tokens · {session.token_stats.llm_calls} calls</span>
+            className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
+            title="查看当前会话的 Token 统计"
+          >
+              <span>⚡ {formatTokenCount(headerTotalTokens)} tokens · {headerLlmCalls} calls</span>
               <ExternalLink className="w-3 h-3" />
             </button>
           </div>
