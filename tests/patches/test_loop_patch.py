@@ -11,6 +11,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
+from nanobot.session.manager import Session
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +116,44 @@ class TestLoopPatch:
         apply_loop_patch()
 
         assert AgentLoop._process_message is not original
+
+    def test_save_turn_skips_pre_persisted_multimodal_user_text(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+        from nanobot.config.schema import AgentDefaults
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
+        loop._last_build_msg_count = 0
+
+        session = Session(key="test:duplicate-user")
+        session.messages.append({
+            "role": "user",
+            "content": "你看这是什么",
+            "timestamp": "2026-04-22T00:00:00+00:00",
+        })
+
+        loop._save_turn(
+            session,
+            [
+                {"role": "system", "content": "system"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "[image: /tmp/example.png]"},
+                        {"type": "text", "text": "你看这是什么"},
+                    ],
+                },
+                {"role": "assistant", "content": "这是一张图"},
+            ],
+            skip=999,
+        )
+
+        assert [item["role"] for item in session.messages] == ["user", "assistant"]
+        assert session.messages[-1]["content"] == "这是一张图"
 
     def test_patch_result_mentions_new_modules(self):
         """New attributes mentioned in patch result string."""

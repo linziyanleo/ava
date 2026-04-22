@@ -45,6 +45,7 @@ _token_record_context: contextvars.ContextVar[dict | None] = contextvars.Context
 )
 _MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
 _TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
+_IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image(?:: .+)?\]$")
 
 
 def set_shared_db(db) -> None:
@@ -119,6 +120,47 @@ def _get_latest_history_entry(store, previous_cursor: int | None) -> str:
 
     content = last_entry.get("content")
     return content if isinstance(content, str) else ""
+
+
+def _normalize_user_text_block(text: object) -> str:
+    from nanobot.agent.context import ContextBuilder
+
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    if normalized.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+        parts = normalized.split("\n\n", 1)
+        normalized = parts[1].strip() if len(parts) > 1 else ""
+    return normalized
+
+
+def _extract_user_text_candidates(content: object) -> set[str]:
+    if isinstance(content, str):
+        normalized = _normalize_user_text_block(content)
+        return {normalized} if normalized else set()
+    if not isinstance(content, list):
+        return set()
+
+    candidates: set[str] = set()
+    combined_text_parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        normalized = _normalize_user_text_block(block.get("text", ""))
+        if not normalized:
+            continue
+        candidates.add(normalized)
+        if not _IMAGE_PLACEHOLDER_RE.fullmatch(normalized):
+            combined_text_parts.append(normalized)
+    if combined_text_parts:
+        candidates.add("\n".join(combined_text_parts))
+    return candidates
+
+
+def _user_contents_match(existing: object, candidate: object) -> bool:
+    existing_texts = _extract_user_text_candidates(existing)
+    candidate_texts = _extract_user_text_candidates(candidate)
+    return bool(existing_texts and candidate_texts and existing_texts.intersection(candidate_texts))
 
 
 def _get_snapshot_content_max_chars() -> int:
@@ -861,7 +903,10 @@ def apply_loop_patch() -> str:
                 and session.messages
                 and messages[current_user_idx].get("role") == "user"
                 and session.messages[-1].get("role") == "user"
-                and session.messages[-1].get("content") == messages[current_user_idx].get("content")
+                and _user_contents_match(
+                    session.messages[-1].get("content"),
+                    messages[current_user_idx].get("content"),
+                )
             ):
                 # Upstream may have already persisted the current user message
                 # before _run_agent_loop starts. Preserve that extra skip.
