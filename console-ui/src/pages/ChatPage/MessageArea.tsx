@@ -9,6 +9,7 @@ import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
 import { ContextInspector } from './ContextInspector'
 import { formatTokenCount } from './utils'
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { api } from '../../api/client';
 
 interface MessageAreaProps {
@@ -283,12 +284,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
             {streaming && (
               <div className="flex justify-start">
                 <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
-                  <pre
-                    className="whitespace-pre-wrap font-[inherit]"
-                    style={{ lineHeight: 'var(--cjk-line-height)' }}
-                  >
-                    {streaming}
-                  </pre>
+                  <MarkdownRenderer content={streaming} />
                   <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
                 </div>
               </div>
