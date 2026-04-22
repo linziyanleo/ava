@@ -1,7 +1,6 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, RefreshCw, FileText } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { api } from '../../api/client'
 import type { ContextPreview } from './types'
 import { formatTokenCount } from './utils'
@@ -58,62 +57,6 @@ const CATEGORY_META: Record<
     heading: 'Tool Schema',
     activeClass: 'border-fuchsia-500/40 bg-fuchsia-500/10',
     headingClass: 'text-fuchsia-400',
-  },
-}
-
-const MARKDOWN_COMPONENTS = {
-  code({
-    className,
-    children,
-    ...props
-  }: {
-    className?: string
-    children?: ReactNode
-    [key: string]: unknown
-  }) {
-    const isInline = !className?.includes('language-') && !String(children).includes('\n')
-    if (isInline) {
-      return (
-        <code className="rounded bg-black/20 px-1 py-0.5 text-[0.85em] text-[var(--accent)]" {...props}>
-          {children}
-        </code>
-      )
-    }
-
-    return (
-      <pre className="my-2 overflow-x-auto rounded-md bg-[var(--bg-tertiary)] p-3">
-        <code {...props}>{children}</code>
-      </pre>
-    )
-  },
-  a({ children, href }: { children?: ReactNode; href?: string }) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[var(--accent)] underline hover:opacity-80"
-      >
-        {children}
-      </a>
-    )
-  },
-  table({ children }: { children?: ReactNode }) {
-    return (
-      <div className="my-2 overflow-x-auto">
-        <table className="min-w-full border-collapse text-sm">{children}</table>
-      </div>
-    )
-  },
-  th({ children }: { children?: ReactNode }) {
-    return (
-      <th className="border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-left font-semibold">
-        {children}
-      </th>
-    )
-  },
-  td({ children }: { children?: ReactNode }) {
-    return <td className="border border-[var(--border)] px-3 py-1.5">{children}</td>
   },
 }
 
@@ -193,11 +136,7 @@ function MarkdownContent({
           )}
         </div>
       )}
-      <div className="markdown-body w-full min-w-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS as never}>
-          {content || ''}
-        </ReactMarkdown>
-      </div>
+      <MarkdownRenderer content={content || ''} />
     </div>
   )
 }

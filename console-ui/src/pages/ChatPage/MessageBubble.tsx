@@ -1,18 +1,12 @@
 import { Copy, Check, Brain, ChevronDown, ChevronRight, Info, Eye, Mic } from 'lucide-react';
-import React, { useState, useRef, useEffect, useMemo, Suspense } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer';
 import { cn } from '../../lib/utils';
 import { useResponsiveMode } from '../../hooks/useResponsiveMode';
 import type { RawMessage, TurnTokenStats } from './types';
 import { getContentText, formatTimestamp, formatTokenCount } from './utils';
 import { TokenInfoPopover } from './TokenInfoPopover';
-
-const SyntaxHighlighter = React.lazy(() =>
-  import('react-syntax-highlighter').then(m => ({ default: m.Prism }))
-);
 
 interface MediaBlock {
   type: 'vision' | 'voice'
@@ -57,7 +51,10 @@ function MediaBlockIndicator({ block }: { block: MediaBlock }) {
       </button>
       {expanded && (
         <div className="px-2.5 pb-1.5 border-t border-white/10">
-          <pre className="whitespace-pre-wrap font-[inherit] text-[11px] text-white/70 leading-relaxed mt-1 break-words max-h-[200px] overflow-y-auto">
+          <pre
+            className="whitespace-pre-wrap font-[inherit] text-[11px] text-white/70 leading-relaxed mt-1 break-words max-h-[200px] overflow-y-auto"
+            style={{ lineHeight: 'var(--cjk-line-height)' }}
+          >
             {block.content}
           </pre>
         </div>
@@ -65,85 +62,6 @@ function MediaBlockIndicator({ block }: { block: MediaBlock }) {
     </div>
   )
 }
-
-const MarkdownRenderer = React.memo(function MarkdownRenderer({ content }: { content: string }) {
-  const components = useMemo(() => ({
-    code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
-      const match = /language-(\w+)/.exec(className || '');
-      const isInline = !match && !String(children).includes('\n');
-      const codeString = String(children).replace(/\n$/, '');
-      return isInline ? (
-        <code className="px-1 py-0.5 rounded text-[0.85em] font-mono bg-black/20 text-[var(--accent)]" {...props}>
-          {children}
-        </code>
-      ) : (
-        <Suspense
-          fallback={
-            <pre className="p-3 rounded-lg bg-[#282c34] text-sm overflow-x-auto my-2">
-              <code>{codeString}</code>
-            </pre>
-          }
-        >
-          <SyntaxHighlighter
-            style={oneDark}
-            language={match ? match[1] : 'text'}
-            PreTag="div"
-            customStyle={{
-              margin: '0.5em 0',
-              borderRadius: '0.5rem',
-              fontSize: '0.8rem',
-              overflowX: 'auto',
-              maxWidth: '100%',
-            }}
-          >
-            {codeString}
-          </SyntaxHighlighter>
-        </Suspense>
-      );
-    },
-    a({ children, href }: { children?: React.ReactNode; href?: string }) {
-      return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] underline hover:opacity-80"
-        >
-          {children}
-        </a>
-      );
-    },
-    table({ children }: { children?: React.ReactNode }) {
-      return (
-        <div className="overflow-x-auto my-2">
-          <table className="min-w-full border-collapse text-sm">
-            {children}
-          </table>
-        </div>
-      );
-    },
-    th({ children }: { children?: React.ReactNode }) {
-      return (
-        <th className="border border-[var(--border)] px-3 py-1.5 bg-[var(--bg-tertiary,var(--bg-secondary))] font-semibold text-left">
-          {children}
-        </th>
-      );
-    },
-    td({ children }: { children?: React.ReactNode }) {
-      return (
-        <td className="border border-[var(--border)] px-3 py-1.5">
-          {children}
-        </td>
-      );
-    },
-  }), [])
-
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components as never}>
-      {content}
-    </ReactMarkdown>
-  )
-})
 
 interface MessageBubbleProps {
   message: RawMessage;
@@ -212,7 +130,10 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
             </button>
             {reasoningExpanded && (
               <div className="px-3 pb-2 border-t border-[var(--border)]">
-                <pre className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[300px] overflow-y-auto mt-1.5 break-words">
+                <pre
+                  className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[300px] overflow-y-auto mt-1.5 break-words"
+                  style={{ lineHeight: 'var(--cjk-line-height)' }}
+                >
                   {reasoning}
                 </pre>
               </div>
@@ -235,9 +156,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
                 (isUser ? (
                   <pre className="whitespace-pre-wrap font-[inherit] break-words">{displayText}</pre>
                 ) : (
-                  <div className="markdown-body">
-                    <MarkdownRenderer content={displayText} />
-                  </div>
+                  <MarkdownRenderer content={displayText} />
                 ))}
               {mediaBlocks.map((block, i) => (
                 <MediaBlockIndicator key={i} block={block} />

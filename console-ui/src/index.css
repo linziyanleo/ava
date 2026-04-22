@@ -58,6 +58,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+:root {
+  --cjk-line-height: 1.6;
+}
+
+:lang(zh),
+:lang(zh-CN),
+:lang(zh-TW),
+:lang(zh-HK),
+:lang(ja),
+:lang(ko) {
+  --cjk-line-height: 1.8;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -82,7 +95,7 @@ body {
 
 /* Markdown body styles for assistant messages */
 .markdown-body {
-  line-height: 1.6;
+  line-height: var(--cjk-line-height);
   word-break: break-words;
   min-width: 0;
 }
@@ -94,7 +107,11 @@ body {
 }
 
 .markdown-body code {
-  word-break: break-all;
+  word-break: break-word;
+}
+
+.markdown-body pre code {
+  word-break: normal;
 }
 
 .markdown-body > *:first-child {
@@ -140,6 +157,17 @@ body {
   border: none;
   border-top: 1px solid var(--border);
   margin: 0.75em 0;
+}
+
+.markdown-body .katex-display {
+  margin: 0.75em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.25rem;
+}
+
+.markdown-body .katex {
+  max-width: 100%;
 }
 
 /* Mobile optimizations */

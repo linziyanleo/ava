@@ -1,8 +1,6 @@
-import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock3, XCircle } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { cn } from '../../lib/utils'
 import { formatTimestamp } from './utils'
 import { parseBackgroundTaskMessage } from './backgroundTask'
@@ -35,56 +33,6 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
   const parsed = parseBackgroundTaskMessage(content)
   const [expanded, setExpanded] = useState(() => (parsed?.body.length || 0) <= 220)
   const preview = useMemo(() => getBackgroundTaskPreview(content), [content])
-  const markdownComponents = useMemo(() => ({
-    code({ className, children, ...props }: { className?: string; children?: ReactNode; [key: string]: unknown }) {
-      const isInline = !className?.includes('language-') && !String(children).includes('\n')
-      if (isInline) {
-        return (
-          <code className="rounded bg-black/20 px-1 py-0.5 text-[0.85em] text-[var(--accent)]" {...props}>
-            {children}
-          </code>
-        )
-      }
-      return (
-        <pre className="my-2 overflow-x-auto rounded-md bg-[var(--bg-secondary)] p-3">
-          <code {...props}>{children}</code>
-        </pre>
-      )
-    },
-    a({ children, href }: { children?: ReactNode; href?: string }) {
-      return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] underline hover:opacity-80"
-        >
-          {children}
-        </a>
-      )
-    },
-    table({ children }: { children?: ReactNode }) {
-      return (
-        <div className="my-2 overflow-x-auto">
-          <table className="min-w-full border-collapse text-sm">{children}</table>
-        </div>
-      )
-    },
-    th({ children }: { children?: ReactNode }) {
-      return (
-        <th className="border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-1.5 text-left font-semibold">
-          {children}
-        </th>
-      )
-    },
-    td({ children }: { children?: ReactNode }) {
-      return (
-        <td className="border border-[var(--border)] px-3 py-1.5">
-          {children}
-        </td>
-      )
-    },
-  }), [])
 
   if (!parsed) return null
 
@@ -139,14 +87,7 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
 
             {expanded && (
               <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]">
-                <div className="markdown-body">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={markdownComponents as never}
-                  >
-                    {parsed.body}
-                  </ReactMarkdown>
-                </div>
+                <MarkdownRenderer content={parsed.body} />
               </div>
             )}
           </div>
