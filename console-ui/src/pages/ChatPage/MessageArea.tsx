@@ -136,6 +136,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
 
   let headerTotalTokens = session.token_stats.total_tokens
   let headerLlmCalls = session.token_stats.llm_calls
+  const hasVisibleStreamingOutput = Boolean(streaming || thinkingStreaming)
   if (turnTokenStats.size > 0) {
     headerTotalTokens = 0
     headerLlmCalls = 0
@@ -248,6 +249,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 tokenStats={turn.turnSeq != null ? turnTokenStats.get(turn.turnSeq) : undefined}
                 iterationStats={iterationStats}
                 sessionKey={session?.key}
+                suppressLoadingIndicator={isConsole && i === turns.length - 1 && hasVisibleStreamingOutput}
               />
             ))}
             {thinkingStreaming && (

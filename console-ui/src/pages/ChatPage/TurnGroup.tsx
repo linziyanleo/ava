@@ -13,9 +13,17 @@ interface TurnGroupProps {
   tokenStats?: TurnTokenStats
   iterationStats?: Map<string, IterationTokenStats>
   sessionKey?: string
+  suppressLoadingIndicator?: boolean
 }
 
-export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, sessionKey }: TurnGroupProps) {
+export function TurnGroupComponent({
+  turn,
+  index,
+  tokenStats,
+  iterationStats,
+  sessionKey,
+  suppressLoadingIndicator = false,
+}: TurnGroupProps) {
   const turnSeq = turn.turnSeq
   const maxIteration = turn.toolCalls.reduce((max, tc) => Math.max(max, tc.iteration), -1)
 
@@ -111,7 +119,7 @@ export function TurnGroupComponent({ turn, index, tokenStats, iterationStats, se
       })}
 
       {/* Loading indicator for incomplete turns */}
-      {!turn.isComplete && (
+      {!turn.isComplete && !suppressLoadingIndicator && (
         <div className="flex justify-start">
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm text-[var(--text-secondary)]">
             <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)]" />
