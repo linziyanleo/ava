@@ -1,4 +1,7 @@
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from ava.console.services.chat_service import ChatService
 from ava.storage import Database
@@ -8,6 +11,31 @@ def _create_service(tmp_path):
     db = Database(tmp_path / "chat.db")
     service = ChatService(agent_loop=None, workspace=tmp_path, db=db)
     return service, db
+
+
+class _FakeAgentLoop:
+    def __init__(self):
+        self.calls: list[dict[str, object]] = []
+
+    async def process_direct(
+        self,
+        content: str,
+        *,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+        on_progress=None,
+        media=None,
+    ):
+        self.calls.append({
+            "content": content,
+            "session_key": session_key,
+            "channel": channel,
+            "chat_id": chat_id,
+            "on_progress": on_progress,
+            "media": media,
+        })
+        return "ok"
 
 
 def _insert_session(db: Database, *, key: str, metadata: dict):
@@ -145,6 +173,29 @@ def test_get_messages_defaults_to_active_conversation(tmp_path):
 
     assert [msg["content"] for msg in active_messages] == ["current question"]
     assert [msg["content"] for msg in old_messages] == ["old question"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
+    agent_loop = _FakeAgentLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    result = await service.send_message(
+        session_id="abc123",
+        message="describe this",
+        user_id="tester",
+        media=["/tmp/example.png"],
+    )
+
+    assert result == "ok"
+    assert agent_loop.calls == [{
+        "content": "describe this",
+        "session_key": "console:abc123",
+        "channel": "console",
+        "chat_id": "tester",
+        "on_progress": None,
+        "media": ["/tmp/example.png"],
+    }]
 
 
 def test_list_conversations_returns_active_and_synthetic_empty_active(tmp_path):

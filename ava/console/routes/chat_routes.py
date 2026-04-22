@@ -6,9 +6,10 @@ import asyncio
 import json
 
 from loguru import logger
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 
 from ava.console import auth
+from ava.console.middleware import get_client_ip
 from ava.console.models import ChatSessionCreateRequest, UserInfo
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -74,6 +75,45 @@ async def get_messages(
 ):
     """Full message history for any session, including tool_calls and reasoning."""
     return _get_chat_service(user).get_messages(session_key, conversation_id=conversation_id)
+
+
+@router.post("/uploads")
+async def upload_chat_images(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+    if len(files) > 4:
+        raise HTTPException(status_code=400, detail="At most 4 images can be uploaded at once")
+
+    from ava.console.app import get_services_for_user
+
+    svc = get_services_for_user(user)
+    uploads: list[dict[str, object]] = []
+    try:
+        for upload in files:
+            data = await upload.read()
+            uploads.append(
+                svc.media.save_chat_upload(
+                    filename=upload.filename,
+                    mime_type=upload.content_type,
+                    data=data,
+                )
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    svc.audit.log(
+        user=user.username,
+        role=user.role,
+        action="chat.upload",
+        target="chat-input",
+        detail={"count": len(uploads)},
+        ip=get_client_ip(request),
+    )
+    return {"uploads": uploads}
 
 
 @router.get("/conversations")
@@ -172,15 +212,23 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             try:
                 msg = json.loads(data)
                 content = msg.get("content", "")
+                media = msg.get("media") or []
             except json.JSONDecodeError:
                 content = data
+                media = []
 
-            if not content:
+            if not isinstance(content, str):
+                content = str(content or "")
+            if not isinstance(media, list):
+                media = []
+            media = [item for item in media if isinstance(item, str) and item]
+
+            if not content and not media:
                 continue
 
             svc.audit.log(
                 user=user.username, role=user.role, action="chat.send",
-                target=session_id, detail={"preview": content[:100]},
+                target=session_id, detail={"preview": content[:100], "media_count": len(media)},
             )
 
             async def on_progress(chunk: str, *, tool_hint: bool = False, is_thinking: bool = False):
@@ -194,6 +242,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 session_id=session_id,
                 message=content,
                 user_id=user.username,
+                media=media,
                 on_progress=on_progress,
             )
             try:

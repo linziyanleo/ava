@@ -13,6 +13,7 @@ from typing import Any, Callable, Awaitable
 from ava.console.services.context_preview_service import build_context_preview
 
 _LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo or timezone.utc
+_IMAGE_PLACEHOLDER_RE = re.compile(r"\[image:\s*([^\]]+?)\]", re.IGNORECASE)
 _BG_TASK_ASSISTANT_RE = re.compile(
     r"^\[Background Task ([A-Za-z0-9_-]+) ([A-Z_]+)\]\nType: ([^|\n]+?) \| Duration: (\d+)ms(?:\n\n([\s\S]*))?$"
 )
@@ -92,6 +93,15 @@ class ChatService:
                 if isinstance(item, dict) and isinstance(item.get("text"), str)
             ).strip()
         return ""
+
+    @staticmethod
+    def _preview_text(raw_content: Any) -> str:
+        text = ChatService._message_text(raw_content)
+        if not text:
+            return ""
+        text = _IMAGE_PLACEHOLDER_RE.sub("[image]", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
     @staticmethod
     def _texts_equivalent(left: str, right: str) -> bool:
@@ -506,17 +516,7 @@ class ChatService:
                 if timestamp:
                     group["updated_at"] = timestamp
                 if not group["first_message_preview"]:
-                    preview = self._decode_message_content(message_row["content"])
-                    if isinstance(preview, str):
-                        preview_text = preview.strip()
-                    elif isinstance(preview, list):
-                        preview_text = " ".join(
-                            item.get("text", "")
-                            for item in preview
-                            if isinstance(item, dict) and isinstance(item.get("text"), str)
-                        ).strip()
-                    else:
-                        preview_text = ""
+                    preview_text = self._preview_text(message_row["content"])
                     if preview_text:
                         group["first_message_preview"] = preview_text[:60]
 
@@ -548,9 +548,9 @@ class ChatService:
         last_timestamp = messages[-1].get("timestamp", "")
         preview = ""
         for message in messages:
-            content = message.get("content")
-            if isinstance(content, str) and content.strip():
-                preview = content.strip()[:60]
+            preview_text = self._preview_text(message.get("content"))
+            if preview_text:
+                preview = preview_text[:60]
                 break
         return [{
             "conversation_id": "",
@@ -713,6 +713,7 @@ class ChatService:
         session_id: str,
         message: str,
         user_id: str,
+        media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
@@ -722,6 +723,7 @@ class ChatService:
             channel="console",
             chat_id=user_id,
             on_progress=on_progress,
+            media=media,
         )
         return response or ""
 
