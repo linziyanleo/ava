@@ -12,18 +12,23 @@ import { MessageArea } from './MessageArea'
 const SESSION_LIST_POLL_MS = 30_000
 const OBSERVE_PENDING_META_KEY = '__avaObservePending'
 const MAX_RECONNECT_DELAY_MS = 15_000
+const SEND_WATCHDOG_MS = 120_000
 
 function getReconnectDelay(attempt: number): number {
   return Math.min(500 * 2 ** attempt, MAX_RECONNECT_DELAY_MS)
 }
 
-function disposeSocket(socket: WebSocket | null) {
-  if (!socket) return
+function disposeSocket(socket: WebSocket | null, onDispose?: () => void) {
+  if (!socket) {
+    onDispose?.()
+    return
+  }
   socket.onopen = null
   socket.onmessage = null
   socket.onerror = null
   socket.onclose = null
   socket.close()
+  onDispose?.()
 }
 
 function isObservePendingTurn(turn: TurnGroup): boolean {
@@ -88,10 +93,12 @@ export default function ChatPage() {
   const [transportStatus, setTransportStatus] = useState<ChatStreamStatus>('idle')
   const [activeTransport, setActiveTransport] = useState<ActiveChatTransport>('none')
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false)
+  const [error, setError] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
   const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wsReconnectAttempts = useRef(0)
   const wsSessionId = useRef<string>('')
+  const sendWatchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const observeWsRef = useRef<WebSocket | null>(null)
   const observeReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const observeReconnectAttempts = useRef(0)
@@ -102,6 +109,34 @@ export default function ChatPage() {
   const mockMode = isMockTester()
   const activeTransportRef = useRef<ActiveChatTransport>(activeTransport)
   activeTransportRef.current = activeTransport
+  const sendingRef = useRef(sending)
+  sendingRef.current = sending
+
+  const clearSendWatchdog = useCallback(() => {
+    if (sendWatchdogTimer.current) {
+      clearTimeout(sendWatchdogTimer.current)
+      sendWatchdogTimer.current = null
+    }
+  }, [])
+
+  const resetConsoleTransientState = useCallback(() => {
+    clearSendWatchdog()
+    setSending(false)
+    setProcessing(false)
+    setStreaming('')
+    setThinkingStreaming('')
+    setToolHintStreaming('')
+  }, [clearSendWatchdog])
+
+  const armSendWatchdog = useCallback(() => {
+    clearSendWatchdog()
+    sendWatchdogTimer.current = setTimeout(() => {
+      if (!sendingRef.current) return
+      resetConsoleTransientState()
+      setTransportStatus('error')
+      setError('响应超时，请检查连接后重试')
+    }, SEND_WATCHDOG_MS)
+  }, [clearSendWatchdog, resetConsoleTransientState])
 
   const loadConversations = useCallback(async (sessionKey: string) => {
     try {
@@ -201,25 +236,26 @@ export default function ChatPage() {
     const socket = wsRef.current
     wsRef.current = null
     wsSessionId.current = ''
-    disposeSocket(socket)
+    disposeSocket(socket, resetConsoleTransientState)
     if (activeTransportRef.current === 'console') {
       setActiveTransport('none')
       setTransportStatus(nextStatus)
     }
-  }, [])
+  }, [resetConsoleTransientState])
 
   const connectWs = useCallback((sid: string, isReconnect = false) => {
     if (wsReconnectTimer.current) {
       clearTimeout(wsReconnectTimer.current)
       wsReconnectTimer.current = null
     }
-    disposeSocket(wsRef.current)
+    disposeSocket(wsRef.current, resetConsoleTransientState)
     wsRef.current = null
     wsSessionId.current = sid
     const sessionKey = `console:${sid}`
     setActiveTransport('console')
     setTransportStatus(isReconnect ? 'reconnecting' : 'connecting')
     const ws = new WebSocket(wsUrl(`/chat/ws/${sid}`))
+    const wsStartedAt = Date.now()
     ws.onopen = () => {
       if (wsRef.current !== ws) return
       wsReconnectAttempts.current = 0
@@ -229,18 +265,17 @@ export default function ChatPage() {
       if (wsRef.current !== ws) return
       const data = JSON.parse(e.data)
       if (data.type === 'thinking') {
+        armSendWatchdog()
         setThinkingStreaming((prev) => prev + data.content)
       } else if (data.type === 'progress') {
+        armSendWatchdog()
         if (data.tool_hint) {
           setToolHintStreaming(data.content)
         } else {
           setStreaming((prev) => prev + data.content)
         }
       } else if (data.type === 'complete') {
-        setStreaming('')
-        setThinkingStreaming('')
-        setToolHintStreaming('')
-        setSending(false)
+        resetConsoleTransientState()
         void refreshSessionViewRef.current(sessionKey, {
           forceActiveConversation: true,
         })
@@ -250,15 +285,33 @@ export default function ChatPage() {
         })
       }
     }
-    ws.onerror = () => {
+    ws.onerror = (event) => {
       if (wsRef.current !== ws) return
-      setSending(false)
+      console.warn('[chat-ws] console socket error', {
+        sessionKey,
+        sid,
+        isReconnect,
+        lifetimeMs: Date.now() - wsStartedAt,
+        readyState: ws.readyState,
+        eventType: event.type,
+      })
+      resetConsoleTransientState()
       setTransportStatus('error')
     }
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (wsRef.current !== ws) return
+      console.warn('[chat-ws] console socket closed', {
+        sessionKey,
+        sid,
+        isReconnect,
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+        lifetimeMs: Date.now() - wsStartedAt,
+        readyState: ws.readyState,
+      })
       wsRef.current = null
-      setSending(false)
+      resetConsoleTransientState()
       // Reload messages on disconnect — the LLM may have finished while ws was down.
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
       // Auto-reconnect if this is still the active session
@@ -520,8 +573,6 @@ export default function ChatPage() {
     }
   }
 
-  const [error, setError] = useState('')
-
   const handleCreateConsole = async () => {
     setError('')
     try {
@@ -684,7 +735,9 @@ export default function ChatPage() {
         content: text,
         media: uploads.map((upload) => upload.media_path),
       }))
+      armSendWatchdog()
     } catch (err) {
+      clearSendWatchdog()
       setSending(false)
       const msg = err instanceof Error ? err.message : 'Failed to send message'
       setError(msg)
