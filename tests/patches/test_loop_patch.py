@@ -155,6 +155,54 @@ class TestLoopPatch:
         assert [item["role"] for item in session.messages] == ["user", "assistant"]
         assert session.messages[-1]["content"] == "这是一张图"
 
+    def test_save_turn_upgrades_pre_persisted_user_to_multimodal_content(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+        from nanobot.config.schema import AgentDefaults
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
+        loop._last_build_msg_count = 0
+
+        session = Session(key="test:upgrade-user-image")
+        session.messages.append({
+            "role": "user",
+            "content": "你怎么看这个spec anchor的新logo？",
+            "timestamp": "2026-04-22T00:00:00+00:00",
+        })
+
+        loop._save_turn(
+            session,
+            [
+                {"role": "system", "content": "system"},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,abc"},
+                            "_meta": {"path": "/Users/fanghu/.nanobot/media/chat-uploads/chat-b14f11c46c1d-image.png"},
+                        },
+                        {"type": "text", "text": "你怎么看这个spec anchor的新logo？"},
+                    ],
+                },
+                {"role": "assistant", "content": "这个 logo 概念挺完整的。"},
+            ],
+            skip=999,
+        )
+
+        assert [item["role"] for item in session.messages] == ["user", "assistant"]
+        assert session.messages[0]["content"] == [
+            {
+                "type": "text",
+                "text": "[image: /Users/fanghu/.nanobot/media/chat-uploads/chat-b14f11c46c1d-image.png]",
+            },
+            {"type": "text", "text": "你怎么看这个spec anchor的新logo？"},
+        ]
+
     def test_patch_result_mentions_new_modules(self):
         """New attributes mentioned in patch result string."""
         from ava.patches.a_schema_patch import apply_schema_patch

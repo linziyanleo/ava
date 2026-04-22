@@ -46,6 +46,7 @@ _token_record_context: contextvars.ContextVar[dict | None] = contextvars.Context
 _MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
 _TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
 _IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image(?:: .+)?\]$")
+_IMAGE_PLACEHOLDER_INLINE_RE = re.compile(r"\[image(?:: ([^\]]+))?\]")
 
 
 def set_shared_db(db) -> None:
@@ -161,6 +162,40 @@ def _user_contents_match(existing: object, candidate: object) -> bool:
     existing_texts = _extract_user_text_candidates(existing)
     candidate_texts = _extract_user_text_candidates(candidate)
     return bool(existing_texts and candidate_texts and existing_texts.intersection(candidate_texts))
+
+
+def _persist_user_content_for_history(loop, content: object) -> object:
+    if not isinstance(content, list):
+        return content
+    try:
+        filtered = loop._sanitize_persisted_blocks(content, drop_runtime=True)
+    except Exception:
+        return content
+    return filtered if filtered else content
+
+
+def _image_placeholder_signature(content: object) -> tuple[int, int]:
+    total = 0
+    with_path = 0
+
+    def _scan_text(text: object) -> None:
+        nonlocal total, with_path
+        if not isinstance(text, str):
+            return
+        for match in _IMAGE_PLACEHOLDER_INLINE_RE.finditer(_normalize_user_text_block(text)):
+            total += 1
+            if (match.group(1) or "").strip():
+                with_path += 1
+
+    if isinstance(content, str):
+        _scan_text(content)
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                continue
+            _scan_text(block.get("text"))
+
+    return total, with_path
 
 
 def _get_snapshot_content_max_chars() -> int:
@@ -908,6 +943,13 @@ def apply_loop_patch() -> str:
                     messages[current_user_idx].get("content"),
                 )
             ):
+                existing_content = session.messages[-1].get("content")
+                candidate_content = _persist_user_content_for_history(
+                    self_loop,
+                    messages[current_user_idx].get("content"),
+                )
+                if _image_placeholder_signature(candidate_content) > _image_placeholder_signature(existing_content):
+                    session.messages[-1]["content"] = candidate_content
                 # Upstream may have already persisted the current user message
                 # before _run_agent_loop starts. Preserve that extra skip.
                 skip += 1
