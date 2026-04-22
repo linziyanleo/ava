@@ -690,7 +690,7 @@ export default function ChatPage() {
 
   const handleSend = async ({ text, attachments }: ChatComposePayload) => {
     if (mockMode) return
-    if (!wsRef.current || sending || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
+    if (!wsRef.current || sending || processing || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
     setError('')
     setStreaming('')
     setThinkingStreaming('')

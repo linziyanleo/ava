@@ -332,7 +332,13 @@ export function MessageArea({ session, conversation, conversationId, turns, load
       )}
 
       {/* Input (console only) */}
-      {isConsole && !isReadOnly && <ChatInput onSend={onSend} disabled={sending} isMobile={isMobile} />}
+      {isConsole && !isReadOnly && (
+        <ChatInput
+          onSend={onSend}
+          sendDisabled={sending || !!processing}
+          isMobile={isMobile}
+        />
+      )}
 
       {/* Search modal */}
       {showSearch && (

@@ -4,7 +4,7 @@ import type { ChatComposePayload } from './types'
 
 interface ChatInputProps {
   onSend: (payload: ChatComposePayload) => Promise<void> | void
-  disabled: boolean
+  sendDisabled: boolean
   isMobile?: boolean
 }
 
@@ -38,7 +38,7 @@ function normalizePastedFile(file: File, index: number): File {
   return new File([file], `pasted-image-${Date.now()}-${index}.${extension}`, { type: file.type })
 }
 
-export function ChatInput({ onSend, disabled, isMobile }: ChatInputProps) {
+export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [pasteError, setPasteError] = useState('')
@@ -115,7 +115,7 @@ export function ChatInput({ onSend, disabled, isMobile }: ChatInputProps) {
 
   const handleSend = async () => {
     const text = input.trim()
-    if ((!text && attachments.length === 0) || disabled) return
+    if ((!text && attachments.length === 0) || sendDisabled) return
     try {
       await onSend({
         text,
@@ -171,8 +171,7 @@ export function ChatInput({ onSend, disabled, isMobile }: ChatInputProps) {
                 />
                 <button
                   onClick={() => removeAttachment(attachment.id)}
-                  disabled={disabled}
-                  className="absolute right-2 top-2 rounded-full bg-black/65 p-1 text-white hover:bg-[var(--danger)] disabled:opacity-40"
+                  className="absolute right-2 top-2 rounded-full bg-black/65 p-1 text-white hover:bg-[var(--danger)]"
                   title="移除图片"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -198,13 +197,12 @@ export function ChatInput({ onSend, disabled, isMobile }: ChatInputProps) {
           onCompositionStart={() => { isComposingRef.current = true }}
           onCompositionEnd={() => { isComposingRef.current = false }}
           placeholder="Type a message or paste images... (⌘+Enter to send)"
-          disabled={disabled}
-          className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 resize-none leading-normal"
+          className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] resize-none leading-normal"
           style={{ maxHeight: `${MAX_HEIGHT}px` }}
         />
         <button
           onClick={() => { void handleSend() }}
-          disabled={(!input.trim() && attachments.length === 0) || disabled}
+          disabled={(!input.trim() && attachments.length === 0) || sendDisabled}
           className="px-4 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-40 transition-colors shrink-0"
           title="Send (⌘+Enter)"
         >
