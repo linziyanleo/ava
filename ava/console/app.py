@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+from loguru import logger
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -61,6 +62,36 @@ def get_services_for_user(user: UserInfo | None = None) -> Services:
     if user and user.role == "mock_tester" and services.mock is not None:
         return services.mock
     return services
+
+
+def _proxy_close_params(
+    code: object | None,
+    reason: object | None,
+    *,
+    fallback_code: int = 1000,
+    fallback_reason: str = "",
+) -> tuple[int, str]:
+    close_code = code if isinstance(code, int) and code > 0 else fallback_code
+    close_reason = reason if isinstance(reason, str) else ""
+    if not close_reason:
+        close_reason = fallback_reason
+    return close_code, close_reason
+
+
+async def _close_upstream_if_needed(upstream, *, code: int, reason: str) -> None:
+    try:
+        await upstream.close(code=code, reason=reason)
+    except TypeError:
+        await upstream.close()
+    except Exception:
+        pass
+
+
+async def _close_websocket_if_needed(websocket: WebSocket, *, code: int, reason: str) -> None:
+    try:
+        await websocket.close(code=code, reason=reason)
+    except Exception:
+        pass
 
 
 def _mount_console_spa(app: FastAPI) -> None:
@@ -378,6 +409,7 @@ def create_console_app_standalone(
     @app.websocket("/api/chat/ws/{session_id}")
     async def proxy_chat_ws(websocket: WebSocket, session_id: str):
         import websockets.asyncio.client as ws_client
+        from websockets import exceptions as ws_exceptions
 
         await websocket.accept()
         cookie_name = auth.session_cookie_name()
@@ -392,22 +424,94 @@ def create_console_app_standalone(
             async with ws_client.connect(gw_ws_url, **connect_kwargs) as upstream:
 
                 async def client_to_upstream():
+                    close_code = 1000
+                    close_reason = ""
                     try:
                         while True:
                             data = await websocket.receive_text()
                             await upstream.send(data)
-                    except WebSocketDisconnect:
-                        await upstream.close()
+                    except WebSocketDisconnect as exc:
+                        close_code, close_reason = _proxy_close_params(
+                            getattr(exc, "code", None),
+                            getattr(exc, "reason", ""),
+                        )
+                        logger.debug(
+                            "proxy_chat_ws client->upstream disconnected for {}: code={} reason={}",
+                            session_id,
+                            close_code,
+                            close_reason,
+                        )
+                    except Exception as exc:
+                        logger.debug(
+                            "proxy_chat_ws client->upstream error for {}: {}",
+                            session_id,
+                            exc,
+                        )
+                        raise
+                    finally:
+                        await _close_upstream_if_needed(
+                            upstream,
+                            code=close_code,
+                            reason=close_reason,
+                        )
+                        logger.debug(
+                            "proxy_chat_ws client->upstream finished for {} (upstream_state={} close_code={} close_reason={})",
+                            session_id,
+                            getattr(upstream, "state", None),
+                            getattr(upstream, "close_code", None),
+                            getattr(upstream, "close_reason", None),
+                        )
 
                 async def upstream_to_client():
+                    close_code = 1000
+                    close_reason = ""
                     try:
                         async for msg in upstream:
                             await websocket.send_text(msg if isinstance(msg, str) else msg.decode())
-                    except Exception:
-                        pass
+                        close_code, close_reason = _proxy_close_params(
+                            getattr(upstream, "close_code", None),
+                            getattr(upstream, "close_reason", None),
+                        )
+                        logger.debug(
+                            "proxy_chat_ws upstream->client stream ended for {} (close_code={} close_reason={})",
+                            session_id,
+                            close_code,
+                            close_reason,
+                        )
+                    except ws_exceptions.ConnectionClosed as exc:
+                        close_code, close_reason = _proxy_close_params(
+                            getattr(exc, "code", None),
+                            getattr(exc, "reason", ""),
+                        )
+                        logger.debug(
+                            "proxy_chat_ws upstream->client disconnected for {}: code={} reason={}",
+                            session_id,
+                            close_code,
+                            close_reason,
+                        )
+                    except Exception as exc:
+                        logger.debug(
+                            "proxy_chat_ws upstream->client error for {}: {}",
+                            session_id,
+                            exc,
+                        )
+                        raise
+                    finally:
+                        await _close_websocket_if_needed(
+                            websocket,
+                            code=close_code,
+                            reason=close_reason,
+                        )
+                        logger.debug(
+                            "proxy_chat_ws upstream->client finished for {} (close_code={} close_reason={})",
+                            session_id,
+                            close_code,
+                            close_reason,
+                        )
 
                 await asyncio.gather(client_to_upstream(), upstream_to_client())
-        except Exception:
+        except Exception as exc:
+            logger.debug("proxy_chat_ws outer exception for {}: {}", session_id, exc)
             try:
                 await websocket.close(code=1011, reason="Gateway unreachable")
             except Exception:
