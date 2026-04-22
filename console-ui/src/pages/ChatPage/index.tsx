@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
-import type { SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup } from './types'
+import type { SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
 import { SceneTabs } from './SceneTabs'
@@ -11,6 +11,20 @@ import { MessageArea } from './MessageArea'
 
 const SESSION_LIST_POLL_MS = 30_000
 const OBSERVE_PENDING_META_KEY = '__avaObservePending'
+const MAX_RECONNECT_DELAY_MS = 15_000
+
+function getReconnectDelay(attempt: number): number {
+  return Math.min(500 * 2 ** attempt, MAX_RECONNECT_DELAY_MS)
+}
+
+function disposeSocket(socket: WebSocket | null) {
+  if (!socket) return
+  socket.onopen = null
+  socket.onmessage = null
+  socket.onerror = null
+  socket.onclose = null
+  socket.close()
+}
 
 function isObservePendingTurn(turn: TurnGroup): boolean {
   return turn.userMessage.metadata?.[OBSERVE_PENDING_META_KEY] === true
@@ -71,17 +85,23 @@ export default function ChatPage() {
   const [toolHintStreaming, setToolHintStreaming] = useState('')
   const [sending, setSending] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [transportStatus, setTransportStatus] = useState<ChatStreamStatus>('idle')
+  const [activeTransport, setActiveTransport] = useState<ActiveChatTransport>('none')
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wsReconnectAttempts = useRef(0)
   const wsSessionId = useRef<string>('')
   const observeWsRef = useRef<WebSocket | null>(null)
   const observeReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const observeReconnectAttempts = useRef(0)
   const observeSessionKey = useRef<string>('')
   const initializedRef = useRef(false)
   const { isMobile } = useResponsiveMode()
   const { isMockTester } = useAuth()
   const mockMode = isMockTester()
+  const activeTransportRef = useRef<ActiveChatTransport>(activeTransport)
+  activeTransportRef.current = activeTransport
 
   const loadConversations = useCallback(async (sessionKey: string) => {
     try {
@@ -172,16 +192,41 @@ export default function ChatPage() {
     )
   }, [pickConversationId])
 
+  const disconnectConsoleWs = useCallback((nextStatus: ChatStreamStatus = 'idle') => {
+    if (wsReconnectTimer.current) {
+      clearTimeout(wsReconnectTimer.current)
+      wsReconnectTimer.current = null
+    }
+    wsReconnectAttempts.current = 0
+    const socket = wsRef.current
+    wsRef.current = null
+    wsSessionId.current = ''
+    disposeSocket(socket)
+    if (activeTransportRef.current === 'console') {
+      setActiveTransport('none')
+      setTransportStatus(nextStatus)
+    }
+  }, [])
+
   const connectWs = useCallback((sid: string, isReconnect = false) => {
     if (wsReconnectTimer.current) {
       clearTimeout(wsReconnectTimer.current)
       wsReconnectTimer.current = null
     }
-    wsRef.current?.close()
+    disposeSocket(wsRef.current)
+    wsRef.current = null
     wsSessionId.current = sid
     const sessionKey = `console:${sid}`
+    setActiveTransport('console')
+    setTransportStatus(isReconnect ? 'reconnecting' : 'connecting')
     const ws = new WebSocket(wsUrl(`/chat/ws/${sid}`))
+    ws.onopen = () => {
+      if (wsRef.current !== ws) return
+      wsReconnectAttempts.current = 0
+      setTransportStatus('open')
+    }
     ws.onmessage = (e) => {
+      if (wsRef.current !== ws) return
       const data = JSON.parse(e.data)
       if (data.type === 'thinking') {
         setThinkingStreaming((prev) => prev + data.content)
@@ -205,14 +250,23 @@ export default function ChatPage() {
         })
       }
     }
-    ws.onerror = () => setSending(false)
+    ws.onerror = () => {
+      if (wsRef.current !== ws) return
+      setSending(false)
+      setTransportStatus('error')
+    }
     ws.onclose = () => {
+      if (wsRef.current !== ws) return
+      wsRef.current = null
       setSending(false)
       // Reload messages on disconnect — the LLM may have finished while ws was down.
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
       // Auto-reconnect if this is still the active session
       if (wsSessionId.current === sid) {
-        wsReconnectTimer.current = setTimeout(() => connectWs(sid, true), 2000)
+        setTransportStatus('reconnecting')
+        const delay = getReconnectDelay(wsReconnectAttempts.current)
+        wsReconnectAttempts.current += 1
+        wsReconnectTimer.current = setTimeout(() => connectWs(sid, true), delay)
       }
     }
     wsRef.current = ws
@@ -223,27 +277,39 @@ export default function ChatPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const disconnectObserveWs = useCallback(() => {
+  const disconnectObserveWs = useCallback((nextStatus: ChatStreamStatus = 'idle') => {
     if (observeReconnectTimer.current) {
       clearTimeout(observeReconnectTimer.current)
       observeReconnectTimer.current = null
     }
-    observeWsRef.current?.close()
+    observeReconnectAttempts.current = 0
+    const socket = observeWsRef.current
     observeWsRef.current = null
     observeSessionKey.current = ''
+    disposeSocket(socket)
     setProcessing(false)
+    if (activeTransportRef.current === 'observe') {
+      setActiveTransport('none')
+      setTransportStatus(nextStatus)
+    }
   }, [])
 
-  const connectObserveWs = useCallback((sessionKey: string) => {
-    disconnectObserveWs()
+  const connectObserveWs = useCallback((sessionKey: string, isReconnect = false) => {
+    disconnectObserveWs(isReconnect ? 'reconnecting' : 'idle')
     observeSessionKey.current = sessionKey
+    setActiveTransport('observe')
+    setTransportStatus(isReconnect ? 'reconnecting' : 'connecting')
     const ws = new WebSocket(wsUrl(`/chat/ws/observe/${encodeURIComponent(sessionKey)}`))
 
     ws.onopen = () => {
+      if (observeWsRef.current !== ws) return
+      observeReconnectAttempts.current = 0
+      setTransportStatus('open')
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
     }
 
     ws.onmessage = (e) => {
+      if (observeWsRef.current !== ws) return
       const data = JSON.parse(e.data)
       if (data.type === 'message_arrived') {
         const eventConversationId = typeof data.conversation_id === 'string' ? data.conversation_id : ''
@@ -290,9 +356,19 @@ export default function ChatPage() {
       }
     }
 
+    ws.onerror = () => {
+      if (observeWsRef.current !== ws) return
+      setTransportStatus('error')
+    }
+
     ws.onclose = () => {
+      if (observeWsRef.current !== ws) return
+      observeWsRef.current = null
       if (observeSessionKey.current === sessionKey) {
-        observeReconnectTimer.current = setTimeout(() => connectObserveWs(sessionKey), 2000)
+        setTransportStatus('reconnecting')
+        const delay = getReconnectDelay(observeReconnectAttempts.current)
+        observeReconnectAttempts.current += 1
+        observeReconnectTimer.current = setTimeout(() => connectObserveWs(sessionKey, true), delay)
       }
     }
 
@@ -369,15 +445,21 @@ export default function ChatPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, activeScene, disconnectObserveWs, connectObserveWs, mockMode])
 
+  useEffect(() => {
+    return () => {
+      disconnectConsoleWs()
+      disconnectObserveWs()
+    }
+  }, [disconnectConsoleWs, disconnectObserveWs])
+
   const handleSessionSelect = (key: string) => {
     setActiveSession(key)
     setActiveConversationId(null)
     setStreaming('')
     setThinkingStreaming('')
+    setToolHintStreaming('')
     setProcessing(false)
-    wsSessionId.current = ''
-    if (wsReconnectTimer.current) { clearTimeout(wsReconnectTimer.current); wsReconnectTimer.current = null }
-    wsRef.current?.close()
+    disconnectConsoleWs()
     disconnectObserveWs()
     setMobileSessionOpen(false)
 
@@ -400,18 +482,18 @@ export default function ChatPage() {
     setMobileSessionOpen(false)
     setStreaming('')
     setThinkingStreaming('')
+    setToolHintStreaming('')
     setProcessing(false)
     void loadSessionMessagesWithMeta(sessionKey, meta, conversationId)
   }
 
   const handleSceneChange = (scene: SceneType) => {
     setActiveScene(scene)
-    wsSessionId.current = ''
-    if (wsReconnectTimer.current) { clearTimeout(wsReconnectTimer.current); wsReconnectTimer.current = null }
-    wsRef.current?.close()
+    disconnectConsoleWs()
     disconnectObserveWs()
     setStreaming('')
     setThinkingStreaming('')
+    setToolHintStreaming('')
     setProcessing(false)
 
     const sceneSessions = sessions.filter((s) => s.scene === scene)
@@ -433,6 +515,8 @@ export default function ChatPage() {
       setActiveConversationId(null)
       setCurrentMeta(null)
       setTurns([])
+      setActiveTransport('none')
+      setTransportStatus('idle')
     }
   }
 
@@ -474,6 +558,7 @@ export default function ChatPage() {
       }))
       setActiveConversationId(res.conversation_id)
       setTurns([])
+      disconnectObserveWs()
       if (!mockMode) {
         connectWs(sid)
       }
@@ -506,9 +591,8 @@ export default function ChatPage() {
         setActiveSession('')
         setCurrentMeta(null)
         setTurns([])
-        wsSessionId.current = ''
-        if (wsReconnectTimer.current) { clearTimeout(wsReconnectTimer.current); wsReconnectTimer.current = null }
-        wsRef.current?.close()
+        disconnectConsoleWs('closed')
+        disconnectObserveWs('closed')
       }
       loadSessionList()
     } catch (err) {
@@ -654,6 +738,8 @@ export default function ChatPage() {
           streaming={streaming}
           thinkingStreaming={thinkingStreaming}
           toolHintStreaming={toolHintStreaming}
+          transportStatus={transportStatus}
+          activeTransport={activeTransport}
           sending={sending}
           processing={processing}
           onSend={handleSend}

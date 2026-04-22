@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
-import type { SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats } from './types';
+import type { SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
+import { ConnectionBadge } from './ConnectionBadge'
 import { TurnGroupComponent } from './TurnGroup'
 import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
@@ -21,6 +22,8 @@ interface MessageAreaProps {
   streaming: string
   thinkingStreaming: string
   toolHintStreaming: string
+  transportStatus: ChatStreamStatus
+  activeTransport: ActiveChatTransport
   sending: boolean
   processing?: boolean
   onSend: (message: string) => void
@@ -29,7 +32,7 @@ interface MessageAreaProps {
   onToggleSessionPanel?: () => void
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, toolHintStreaming, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, toolHintStreaming, transportStatus, activeTransport, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -182,6 +185,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <ConnectionBadge transport={activeTransport} status={transportStatus} />
           {(isReadOnly || !isConsole) && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
               {conversation && isReadOnly ? 'History · Read-only' : 'Read-only'}
@@ -254,7 +258,10 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                   </button>
                   {thinkingExpanded && (
                     <div className="px-3 pb-2 border-t border-[var(--border)]">
-                      <pre className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[200px] overflow-y-auto mt-1.5">
+                      <pre
+                        className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[200px] overflow-y-auto mt-1.5"
+                        style={{ lineHeight: 'var(--cjk-line-height)' }}
+                      >
                         {thinkingStreaming}
                       </pre>
                     </div>
@@ -265,7 +272,12 @@ export function MessageArea({ session, conversation, conversationId, turns, load
             {streaming && (
               <div className="flex justify-start">
                 <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
-                  <pre className="whitespace-pre-wrap font-[inherit]">{streaming}</pre>
+                  <pre
+                    className="whitespace-pre-wrap font-[inherit]"
+                    style={{ lineHeight: 'var(--cjk-line-height)' }}
+                  >
+                    {streaming}
+                  </pre>
                   <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
                 </div>
               </div>

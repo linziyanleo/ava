@@ -1,4 +1,6 @@
 export type SceneType = 'telegram' | 'cron' | 'heartbeat' | 'console' | 'cli' | 'feishu' | 'QQ' | 'wx' | 'discord' | 'other'
+export type ChatStreamStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'
+export type ActiveChatTransport = 'console' | 'observe' | 'none'
 
 export interface SessionMeta {
   key: string
