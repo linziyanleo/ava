@@ -26,6 +26,7 @@ from typing import Callable
 from loguru import logger
 
 from ava.adapters.nanobot.discovery import ensure_nanobot_on_sys_path
+from ava.runtime.bootstrap import configure_bootstrap, enforce_home_migration_gate
 
 # ---------------------------------------------------------------------------
 # Patch registry — each patch is a callable that takes no args and returns
@@ -160,9 +161,11 @@ def _normalize_argv(argv: list[str]) -> tuple[list[str], bool]:
 
 def main() -> None:
     """Normalise argv, apply patches, register ava commands, start nanobot."""
-    argv, wants_version = _normalize_argv(sys.argv[1:])
+    argv = configure_bootstrap(sys.argv[1:])
+    argv, wants_version = _normalize_argv(argv)
     if wants_version:
         _print_version_and_exit()
+    enforce_home_migration_gate()
     sys.argv = [sys.argv[0], *argv]
 
     nanobot_root = ensure_nanobot_on_sys_path()
