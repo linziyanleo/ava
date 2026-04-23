@@ -44,8 +44,8 @@ def test_execute_reports_missing_google_genai_dependency(monkeypatch, tmp_path: 
         "_load_image_gen_config",
         lambda: ("google/gemini-3.1-flash-image-preview", "secret-key", "https://vertex.example/v1"),
     )
-    monkeypatch.setattr(image_gen_module, "GENERATED_DIR", tmp_path)
-    monkeypatch.setattr(image_gen_module, "RECORDS_FILE", tmp_path / "records.jsonl")
+    monkeypatch.setattr(image_gen_module, "_get_generated_dir", lambda: tmp_path)
+    monkeypatch.setattr(image_gen_module, "_get_records_file", lambda: tmp_path / "records.jsonl")
 
     tool = image_gen_module.ImageGenTool()
 

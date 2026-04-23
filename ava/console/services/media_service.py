@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ava.console.models import MediaRecord
+from ava.runtime import paths as runtime_paths
 
 
 _CHAT_UPLOAD_MIME_EXTENSIONS = {
@@ -28,7 +29,7 @@ class MediaService:
         screenshot_dir: Path | None = None,
         chat_upload_dir: Path | None = None,
     ):
-        self._media_dir = media_dir or (Path.home() / ".nanobot" / "media" / "generated")
+        self._media_dir = media_dir or runtime_paths.get_generated_media_dir()
         self._screenshot_dir = screenshot_dir or (self._media_dir.parent / "screenshots")
         self._chat_upload_dir = chat_upload_dir or (self._media_dir.parent / "chat-uploads")
         self._records_file = self._media_dir / "records.jsonl"

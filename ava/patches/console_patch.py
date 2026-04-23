@@ -26,9 +26,7 @@ from loguru import logger
 
 from ava.console.mock_bundle_runtime import validate_console_security
 from ava.launcher import register_patch
-
-
-_CONSOLE_META_FILE = Path.home() / ".nanobot" / "console.json"
+from ava.runtime import paths as runtime_paths
 
 # Per-process state shared between the Console task and the SIGUSR1 handler.
 _console_state: dict[str, Any] = {
@@ -39,9 +37,10 @@ _console_state: dict[str, Any] = {
 
 
 def _write_console_meta(host: str, port: int, gateway_port: int | None) -> None:
+    meta_file = runtime_paths.get_console_meta_file()
     try:
-        _CONSOLE_META_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CONSOLE_META_FILE.write_text(
+        meta_file.parent.mkdir(parents=True, exist_ok=True)
+        meta_file.write_text(
             json.dumps(
                 {
                     "pid": os.getpid(),
@@ -59,7 +58,7 @@ def _write_console_meta(host: str, port: int, gateway_port: int | None) -> None:
 
 def _clear_console_meta() -> None:
     try:
-        _CONSOLE_META_FILE.unlink(missing_ok=True)
+        runtime_paths.get_console_meta_file().unlink(missing_ok=True)
     except OSError:
         pass
 
@@ -158,11 +157,11 @@ def apply_console_patch() -> str:
 
                     cfg = load_config()
                     workspace = get_workspace_path()
-                    nanobot_dir = get_data_dir()  # ~/.nanobot/ — aligned with upstream
+                    nanobot_dir = get_data_dir()
                     nanobot_dir.mkdir(parents=True, exist_ok=True)
 
                     # Write PID file so GatewayService can detect running gateway
-                    pid_file = Path.home() / ".nanobot" / "gateway.pid"
+                    pid_file = runtime_paths.get_pid_file()
                     pid_file.parent.mkdir(parents=True, exist_ok=True)
                     pid_file.write_text(str(os.getpid()))
 

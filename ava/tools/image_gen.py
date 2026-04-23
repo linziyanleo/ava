@@ -9,9 +9,15 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+from ava.runtime import paths as runtime_paths
 
-GENERATED_DIR = Path.home() / ".nanobot" / "media" / "generated"
-RECORDS_FILE = GENERATED_DIR / "records.jsonl"
+
+def _get_generated_dir() -> Path:
+    return runtime_paths.get_generated_media_dir()
+
+
+def _get_records_file() -> Path:
+    return _get_generated_dir() / "records.jsonl"
 
 def _load_image_gen_config() -> tuple[str, str, str]:
     """Load image generation model, api_key, api_base from config.json."""
@@ -42,7 +48,9 @@ class ImageGenTool(Tool):
         self._token_stats = token_stats
         self._media_service = media_service
         self._client = None
-        GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+        self._generated_dir = _get_generated_dir()
+        self._records_file = _get_records_file()
+        self._generated_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def name(self) -> str:
@@ -108,7 +116,7 @@ class ImageGenTool(Tool):
     def _save_image(self, image, record_id: str, index: int) -> Path:
         """Save a PIL Image to the generated directory."""
         filename = f"{record_id}_{index}.png"
-        path = GENERATED_DIR / filename
+        path = self._generated_dir / filename
         image.save(str(path))
         return path
 
@@ -121,7 +129,7 @@ class ImageGenTool(Tool):
                 logger.warning("Failed to write image gen record via DB: {}", e)
             return
         try:
-            with open(RECORDS_FILE, "a", encoding="utf-8") as f:
+            with open(self._records_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.warning("Failed to write image gen record: {}", e)

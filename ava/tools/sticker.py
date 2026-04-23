@@ -8,9 +8,13 @@ import httpx
 
 from nanobot.agent.tools.base import Tool
 from nanobot.config.loader import load_config
+from ava.runtime import paths as runtime_paths
 
 DEFAULT_STICKER_PACK_NAME = "ava_01"
-STICKER_CONFIG_PATH = Path.home() / ".nanobot" / "sticker.json"
+
+
+def _get_sticker_config_path() -> Path:
+    return runtime_paths.get_sticker_config_path()
 
 class StickerTool(Tool):
     """Tool to send Telegram stickers."""
@@ -78,16 +82,17 @@ class StickerTool(Tool):
         }
 
     def _load_sticker_config(self) -> dict:
-        """Load sticker pack config from ~/.nanobot/sticker.json, cache the result."""
+        """Load sticker pack config and cache the result."""
         if self._sticker_config is not None:
             return self._sticker_config
 
-        if not STICKER_CONFIG_PATH.exists():
+        config_path = _get_sticker_config_path()
+        if not config_path.exists():
             self._sticker_config = {}
             return self._sticker_config
 
         try:
-            with open(STICKER_CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 self._sticker_config = json.load(f)
         except (json.JSONDecodeError, IOError):
             self._sticker_config = {}
@@ -198,7 +203,7 @@ class StickerTool(Tool):
         """Execute the sticker send."""
         sticker_data = self._get_sticker_data()
         if not sticker_data:
-            return "Error: No sticker config found. Create ~/.nanobot/sticker.json with pack data."
+            return f"Error: No sticker config found at {_get_sticker_config_path()}"
 
         min_id = min(sticker_data.keys())
         max_id = max(sticker_data.keys())
@@ -214,7 +219,7 @@ class StickerTool(Tool):
         proxy = cfg.get("proxy")
 
         if not token:
-            return "Error: Telegram token not configured in ~/.nanobot/config.json"
+            return f"Error: Telegram token not configured in {runtime_paths.get_config_path()}"
 
         target_chat_id = chat_id or self._default_chat_id
         if not target_chat_id:
