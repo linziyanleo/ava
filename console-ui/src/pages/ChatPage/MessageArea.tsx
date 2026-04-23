@@ -89,13 +89,14 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
   }, [checkScrollPosition])
 
   useEffect(() => {
+    if (loading) return
     if (isInitialScroll.current && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'instant' })
       isInitialScroll.current = false
     } else {
       checkScrollPosition()
     }
-  }, [turns, checkScrollPosition])
+  }, [loading, turns, checkScrollPosition])
 
   // Auto-scroll when streaming new content (if user was near bottom)
   useEffect(() => {

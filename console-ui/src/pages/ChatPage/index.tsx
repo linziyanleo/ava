@@ -652,6 +652,7 @@ export default function ChatPage() {
     if (activeSession) {
       void refreshSessionViewRef.current(activeSession, {
         preferredConversationId: activeConversationIdRef.current,
+        silent: true,
       })
     } else {
       loadSessionList()

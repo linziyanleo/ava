@@ -68,6 +68,44 @@ function settleLastLoadingTool(entries: InFlightTurnEntry[]): InFlightTurnEntry[
   return entries
 }
 
+function splitToolHints(hints: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+
+  for (let i = 0; i < hints.length; i += 1) {
+    const ch = hints[i]
+    if (quote) {
+      current += ch
+      if (ch === quote && hints[i - 1] !== '\\') {
+        quote = null
+      }
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      current += ch
+      continue
+    }
+    if (ch === ',' && hints[i + 1] === ' ') {
+      const trimmed = current.trim()
+      if (trimmed) {
+        parts.push(trimmed.replace(/\s×\s\d+$/, ''))
+      }
+      current = ''
+      i += 1
+      continue
+    }
+    current += ch
+  }
+
+  const tail = current.trim()
+  if (tail) {
+    parts.push(tail.replace(/\s×\s\d+$/, ''))
+  }
+  return parts
+}
+
 function stripWrappingQuotes(value: string): string {
   if (
     (value.startsWith('"') && value.endsWith('"'))
@@ -169,16 +207,17 @@ export function appendInFlightAssistantChunk(turn: InFlightTurn, chunk: string):
 export function appendInFlightToolHint(turn: InFlightTurn, hint: string): InFlightTurn {
   const committed = commitAssistantDraft(turn)
   const nextIteration = committed.entries.filter((entry) => entry.kind === 'tool').length
+  const hintParts = splitToolHints(hint)
   return {
     ...committed,
     phase: 'awaiting_tool',
     processing: true,
     entries: [
       ...committed.entries,
-      {
-        kind: 'tool',
-        tool: buildSyntheticToolCall(hint, nextIteration),
-      },
+      ...(hintParts.length > 0 ? hintParts : [hint]).map((part) => ({
+        kind: 'tool' as const,
+        tool: buildSyntheticToolCall(part, nextIteration),
+      })),
     ],
   }
 }
