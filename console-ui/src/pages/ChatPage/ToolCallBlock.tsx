@@ -127,6 +127,18 @@ function parsePageAgentResult(text: string): PageAgentResult | null {
   }
 }
 
+function stringifyToolResult(content: unknown): string | null {
+  if (content === null || content === undefined) return null
+  if (typeof content === 'string' || Array.isArray(content)) {
+    return getContentText(content)
+  }
+  try {
+    return JSON.stringify(content, null, 2)
+  } catch {
+    return String(content)
+  }
+}
+
 function TokenStatsLink({
   sessionKey,
   conversationId,
@@ -205,7 +217,7 @@ export function ToolCallBlock({
     args = tc.call.function.arguments
   }
 
-  const resultText = tc.result ? getContentText(tc.result.content) : null
+  const resultText = tc.result ? stringifyToolResult(tc.result.content) : null
   let resultPreview = ''
   if (resultText) {
     resultPreview = resultText.length > 120 ? resultText.slice(0, 120) + '...' : resultText
