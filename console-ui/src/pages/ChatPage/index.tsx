@@ -5,12 +5,20 @@ import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 import type { ChatComposePayload, ChatImageUpload, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
+import {
+  appendInFlightAssistantChunk,
+  appendInFlightThinking,
+  appendInFlightToolHint,
+  applyInFlightStreamEnd,
+  createInFlightTurn,
+  markInFlightProcessing,
+  type InFlightTurn,
+} from './inFlightTurn'
 import { SceneTabs } from './SceneTabs'
 import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
 
 const SESSION_LIST_POLL_MS = 30_000
-const OBSERVE_PENDING_META_KEY = '__avaObservePending'
 const MAX_RECONNECT_DELAY_MS = 15_000
 const SEND_WATCHDOG_MS = 120_000
 
@@ -31,51 +39,6 @@ function disposeSocket(socket: WebSocket | null, onDispose?: () => void) {
   onDispose?.()
 }
 
-function isObservePendingTurn(turn: TurnGroup): boolean {
-  return turn.userMessage.metadata?.[OBSERVE_PENDING_META_KEY] === true
-}
-
-function appendObservePendingTurn(
-  turns: TurnGroup[],
-  data: { content?: string; timestamp?: string; conversation_id?: string | null; turn_seq?: unknown },
-): TurnGroup[] {
-  const turnSeq = typeof data.turn_seq === 'number' ? data.turn_seq : getNextTurnSeq(turns)
-  if (typeof data.turn_seq === 'number' && turns.some((turn) => turn.turnSeq === data.turn_seq)) {
-    return turns
-  }
-
-  const lastTurn = turns[turns.length - 1]
-  if (lastTurn && isObservePendingTurn(lastTurn) && lastTurn.userMessage.content === (data.content ?? '')) {
-    return turns
-  }
-
-  const pendingMsg: RawMessage = {
-    role: 'user',
-    content: data.content ?? '',
-    timestamp: data.timestamp,
-    metadata: {
-      [OBSERVE_PENDING_META_KEY]: true,
-      conversation_id: data.conversation_id ?? '',
-    },
-  }
-
-  return [...turns, {
-    turnSeq,
-    userMessage: pendingMsg,
-    assistantSteps: [],
-    isComplete: false,
-    startTime: pendingMsg.timestamp,
-    toolCalls: [],
-  }]
-}
-
-function dropObservePendingTurns(turns: TurnGroup[], turnSeq?: unknown): TurnGroup[] {
-  if (typeof turnSeq === 'number') {
-    return turns.filter((turn) => !(isObservePendingTurn(turn) && turn.turnSeq === turnSeq))
-  }
-  return turns.filter((turn) => !isObservePendingTurn(turn))
-}
-
 export default function ChatPage() {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [conversationLists, setConversationLists] = useState<Record<string, ConversationMeta[]>>({})
@@ -84,12 +47,9 @@ export default function ChatPage() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [currentMeta, setCurrentMeta] = useState<SessionMeta | null>(null)
   const [turns, setTurns] = useState<TurnGroup[]>([])
+  const [inFlightTurn, setInFlightTurn] = useState<InFlightTurn | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
-  const [streaming, setStreaming] = useState('')
-  const [thinkingStreaming, setThinkingStreaming] = useState('')
-  const [toolHintStreaming, setToolHintStreaming] = useState('')
   const [sending, setSending] = useState(false)
-  const [processing, setProcessing] = useState(false)
   const [transportStatus, setTransportStatus] = useState<ChatStreamStatus>('idle')
   const [activeTransport, setActiveTransport] = useState<ActiveChatTransport>('none')
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false)
@@ -109,8 +69,8 @@ export default function ChatPage() {
   const mockMode = isMockTester()
   const activeTransportRef = useRef<ActiveChatTransport>(activeTransport)
   activeTransportRef.current = activeTransport
-  const sendingRef = useRef(sending)
-  sendingRef.current = sending
+  const consoleBusyRef = useRef(false)
+  consoleBusyRef.current = sending || inFlightTurn?.transport === 'console'
 
   const clearSendWatchdog = useCallback(() => {
     if (sendWatchdogTimer.current) {
@@ -119,24 +79,21 @@ export default function ChatPage() {
     }
   }, [])
 
-  const resetConsoleTransientState = useCallback(() => {
+  const clearConsoleInFlight = useCallback(() => {
     clearSendWatchdog()
     setSending(false)
-    setProcessing(false)
-    setStreaming('')
-    setThinkingStreaming('')
-    setToolHintStreaming('')
+    setInFlightTurn(null)
   }, [clearSendWatchdog])
 
   const armSendWatchdog = useCallback(() => {
     clearSendWatchdog()
     sendWatchdogTimer.current = setTimeout(() => {
-      if (!sendingRef.current) return
-      resetConsoleTransientState()
+      if (!consoleBusyRef.current) return
+      clearConsoleInFlight()
       setTransportStatus('error')
       setError('响应超时，请检查连接后重试')
     }, SEND_WATCHDOG_MS)
-  }, [clearSendWatchdog, resetConsoleTransientState])
+  }, [clearConsoleInFlight, clearSendWatchdog])
 
   const loadConversations = useCallback(async (sessionKey: string) => {
     try {
@@ -203,6 +160,8 @@ export default function ChatPage() {
 
   const activeConversationIdRef = useRef<string | null>(activeConversationId)
   activeConversationIdRef.current = activeConversationId
+  const turnsRef = useRef(turns)
+  turnsRef.current = turns
 
   const refreshSessionView = useCallback(async (
     sessionKey: string,
@@ -236,19 +195,20 @@ export default function ChatPage() {
     const socket = wsRef.current
     wsRef.current = null
     wsSessionId.current = ''
-    disposeSocket(socket, resetConsoleTransientState)
+    disposeSocket(socket)
+    clearConsoleInFlight()
     if (activeTransportRef.current === 'console') {
       setActiveTransport('none')
       setTransportStatus(nextStatus)
     }
-  }, [resetConsoleTransientState])
+  }, [clearConsoleInFlight])
 
   const connectWs = useCallback((sid: string, isReconnect = false) => {
     if (wsReconnectTimer.current) {
       clearTimeout(wsReconnectTimer.current)
       wsReconnectTimer.current = null
     }
-    disposeSocket(wsRef.current, resetConsoleTransientState)
+    disposeSocket(wsRef.current)
     wsRef.current = null
     wsSessionId.current = sid
     const sessionKey = `console:${sid}`
@@ -266,16 +226,18 @@ export default function ChatPage() {
       const data = JSON.parse(e.data)
       if (data.type === 'thinking') {
         armSendWatchdog()
-        setThinkingStreaming((prev) => prev + data.content)
+        setInFlightTurn((prev) => (prev ? appendInFlightThinking(prev, data.content) : prev))
       } else if (data.type === 'progress') {
         armSendWatchdog()
         if (data.tool_hint) {
-          setToolHintStreaming(data.content)
+          setInFlightTurn((prev) => (prev ? appendInFlightToolHint(prev, data.content) : prev))
         } else {
-          setStreaming((prev) => prev + data.content)
+          setInFlightTurn((prev) => (prev ? appendInFlightAssistantChunk(prev, data.content) : prev))
         }
+      } else if (data.type === 'stream_end') {
+        setInFlightTurn((prev) => (prev ? applyInFlightStreamEnd(prev, !!data.resuming) : prev))
       } else if (data.type === 'complete') {
-        resetConsoleTransientState()
+        clearConsoleInFlight()
         void refreshSessionViewRef.current(sessionKey, {
           forceActiveConversation: true,
         })
@@ -295,7 +257,6 @@ export default function ChatPage() {
         readyState: ws.readyState,
         eventType: event.type,
       })
-      resetConsoleTransientState()
       setTransportStatus('error')
     }
     ws.onclose = (event) => {
@@ -311,7 +272,6 @@ export default function ChatPage() {
         readyState: ws.readyState,
       })
       wsRef.current = null
-      resetConsoleTransientState()
       // Reload messages on disconnect — the LLM may have finished while ws was down.
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
       // Auto-reconnect if this is still the active session
@@ -328,7 +288,7 @@ export default function ChatPage() {
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [armSendWatchdog, clearConsoleInFlight])
 
   const disconnectObserveWs = useCallback((nextStatus: ChatStreamStatus = 'idle') => {
     if (observeReconnectTimer.current) {
@@ -340,7 +300,7 @@ export default function ChatPage() {
     observeWsRef.current = null
     observeSessionKey.current = ''
     disposeSocket(socket)
-    setProcessing(false)
+    setInFlightTurn((prev) => (prev?.transport === 'observe' ? null : prev))
     if (activeTransportRef.current === 'observe') {
       setActiveTransport('none')
       setTransportStatus(nextStatus)
@@ -373,8 +333,26 @@ export default function ChatPage() {
         ) {
           return
         }
-        setTurns((prev) => appendObservePendingTurn(prev, data))
-        setProcessing(true)
+        setInFlightTurn((prev) => {
+          if (
+            prev?.transport === 'observe'
+            && typeof data.turn_seq === 'number'
+            && prev.turnSeq === data.turn_seq
+          ) {
+            return markInFlightProcessing(prev, true)
+          }
+          return createInFlightTurn({
+            transport: 'observe',
+            turnSeq: typeof data.turn_seq === 'number' ? data.turn_seq : getNextTurnSeq(turnsRef.current),
+            conversationId: eventConversationId || activeConversationIdRef.current,
+            userMessage: {
+              role: 'user',
+              content: data.content ?? '',
+              timestamp: data.timestamp,
+              metadata: { conversation_id: eventConversationId || '' },
+            },
+          })
+        })
       } else if (data.type === 'processing_started') {
         const eventConversationId = typeof data.conversation_id === 'string' ? data.conversation_id : ''
         if (
@@ -382,11 +360,10 @@ export default function ChatPage() {
           || !activeConversationIdRef.current
           || activeConversationIdRef.current === eventConversationId
         ) {
-          setProcessing(true)
+          setInFlightTurn((prev) => (prev?.transport === 'observe' ? markInFlightProcessing(prev, true) : prev))
         }
       } else if (data.type === 'conversation_rotated') {
-        setProcessing(false)
-        setTurns((prev) => dropObservePendingTurns(prev))
+        setInFlightTurn((prev) => (prev?.transport === 'observe' ? null : prev))
         void refreshSessionViewRef.current(sessionKey, {
           preferredConversationId: data.new_conversation_id ?? null,
           silent: true,
@@ -400,8 +377,7 @@ export default function ChatPage() {
         ) {
           return
         }
-        setProcessing(false)
-        setTurns((prev) => dropObservePendingTurns(prev, data.turn_seq))
+        setInFlightTurn((prev) => (prev?.transport === 'observe' ? null : prev))
         void refreshSessionViewRef.current(sessionKey, {
           preferredConversationId: activeConversationIdRef.current,
           silent: true,
@@ -508,10 +484,8 @@ export default function ChatPage() {
   const handleSessionSelect = (key: string) => {
     setActiveSession(key)
     setActiveConversationId(null)
-    setStreaming('')
-    setThinkingStreaming('')
-    setToolHintStreaming('')
-    setProcessing(false)
+    setInFlightTurn(null)
+    setSending(false)
     disconnectConsoleWs()
     disconnectObserveWs()
     setMobileSessionOpen(false)
@@ -533,10 +507,8 @@ export default function ChatPage() {
     const meta = sessions.find((s) => s.key === sessionKey) || null
     setActiveSession(sessionKey)
     setMobileSessionOpen(false)
-    setStreaming('')
-    setThinkingStreaming('')
-    setToolHintStreaming('')
-    setProcessing(false)
+    setInFlightTurn(null)
+    setSending(false)
     void loadSessionMessagesWithMeta(sessionKey, meta, conversationId)
   }
 
@@ -544,10 +516,8 @@ export default function ChatPage() {
     setActiveScene(scene)
     disconnectConsoleWs()
     disconnectObserveWs()
-    setStreaming('')
-    setThinkingStreaming('')
-    setToolHintStreaming('')
-    setProcessing(false)
+    setInFlightTurn(null)
+    setSending(false)
 
     const sceneSessions = sessions.filter((s) => s.scene === scene)
     if (sceneSessions.length > 0) {
@@ -568,6 +538,8 @@ export default function ChatPage() {
       setActiveConversationId(null)
       setCurrentMeta(null)
       setTurns([])
+      setInFlightTurn(null)
+      setSending(false)
       setActiveTransport('none')
       setTransportStatus('idle')
     }
@@ -609,6 +581,8 @@ export default function ChatPage() {
       }))
       setActiveConversationId(res.conversation_id)
       setTurns([])
+      setInFlightTurn(null)
+      setSending(false)
       disconnectObserveWs()
       if (!mockMode) {
         connectWs(sid)
@@ -642,6 +616,8 @@ export default function ChatPage() {
         setActiveSession('')
         setCurrentMeta(null)
         setTurns([])
+        setInFlightTurn(null)
+        setSending(false)
         disconnectConsoleWs('closed')
         disconnectObserveWs('closed')
       }
@@ -690,11 +666,8 @@ export default function ChatPage() {
 
   const handleSend = async ({ text, attachments }: ChatComposePayload) => {
     if (mockMode) return
-    if (!wsRef.current || sending || processing || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
+    if (!wsRef.current || sending || inFlightTurn || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
     setError('')
-    setStreaming('')
-    setThinkingStreaming('')
-    setToolHintStreaming('')
     setSending(true)
     try {
       let uploads: ChatImageUpload[] = []
@@ -722,23 +695,23 @@ export default function ChatPage() {
         content: optimisticContent,
         timestamp: new Date().toISOString(),
       }
-      setTurns((prev) => [...prev, {
-        turnSeq: getNextTurnSeq(prev),
+      setInFlightTurn(createInFlightTurn({
+        transport: 'console',
+        turnSeq: getNextTurnSeq(turns),
+        conversationId: activeConversationId,
         userMessage: userMsg,
-        assistantSteps: [],
-        isComplete: false,
-        startTime: userMsg.timestamp,
-        toolCalls: [],
-      }])
+      }))
 
       wsRef.current.send(JSON.stringify({
         content: text,
         media: uploads.map((upload) => upload.media_path),
       }))
+      setSending(false)
       armSendWatchdog()
     } catch (err) {
       clearSendWatchdog()
       setSending(false)
+      setInFlightTurn(null)
       const msg = err instanceof Error ? err.message : 'Failed to send message'
       setError(msg)
       throw err
@@ -816,16 +789,13 @@ export default function ChatPage() {
           conversation={selectedConversation}
           conversationId={activeConversationId}
           turns={turns}
+          inFlightTurn={inFlightTurn}
           loading={loadingMessages}
           isConsole={isConsole && !!activeSession}
           isReadOnly={isReadOnlyConversation}
-          streaming={streaming}
-          thinkingStreaming={thinkingStreaming}
-          toolHintStreaming={toolHintStreaming}
           transportStatus={transportStatus}
           activeTransport={activeTransport}
-          sending={sending}
-          processing={processing}
+          sendDisabled={sending || !!inFlightTurn}
           onSend={handleSend}
           onRefresh={handleRefresh}
           isMobile={isMobile}

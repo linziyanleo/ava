@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
+import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
 import type { ChatComposePayload, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
@@ -8,8 +8,9 @@ import { TurnGroupComponent } from './TurnGroup'
 import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
 import { ContextInspector } from './ContextInspector'
+import { InFlightTurnBlock } from './InFlightTurnBlock'
+import type { InFlightTurn } from './inFlightTurn'
 import { formatTokenCount } from './utils'
-import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { api } from '../../api/client';
 
 interface MessageAreaProps {
@@ -17,28 +18,24 @@ interface MessageAreaProps {
   conversation: ConversationMeta | null
   conversationId: string | null
   turns: TurnGroup[]
+  inFlightTurn: InFlightTurn | null
   loading: boolean
   isConsole: boolean
   isReadOnly?: boolean
-  streaming: string
-  thinkingStreaming: string
-  toolHintStreaming: string
   transportStatus: ChatStreamStatus
   activeTransport: ActiveChatTransport
-  sending: boolean
-  processing?: boolean
+  sendDisabled: boolean
   onSend: (payload: ChatComposePayload) => Promise<void> | void
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, toolHintStreaming, transportStatus, activeTransport, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isInitialScroll = useRef(true)
-  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const [turnTokenStats, setTurnTokenStats] = useState<Map<number, TurnTokenStats>>(new Map());
   const [iterationStats, setIterationStats] = useState<Map<string, IterationTokenStats>>(new Map());
   const [refreshing, setRefreshing] = useState(false)
@@ -102,14 +99,19 @@ export function MessageArea({ session, conversation, conversationId, turns, load
 
   // Auto-scroll when streaming new content (if user was near bottom)
   useEffect(() => {
-    if (!streaming && !thinkingStreaming) return
+    if (!inFlightTurn) return
     const el = scrollContainerRef.current
     if (!el) return
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
     if (isNearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' })
     }
-  }, [streaming, thinkingStreaming])
+  }, [
+    inFlightTurn?.draftAssistant,
+    inFlightTurn?.thinkingContent,
+    inFlightTurn?.entries.length,
+    inFlightTurn,
+  ])
 
   useEffect(() => {
     isInitialScroll.current = true
@@ -136,7 +138,11 @@ export function MessageArea({ session, conversation, conversationId, turns, load
 
   let headerTotalTokens = session.token_stats.total_tokens
   let headerLlmCalls = session.token_stats.llm_calls
-  const hasVisibleStreamingOutput = Boolean(streaming || thinkingStreaming)
+  const hasVisibleStreamingOutput = Boolean(
+    inFlightTurn?.draftAssistant
+    || inFlightTurn?.thinkingContent
+    || inFlightTurn?.entries.length,
+  )
   if (turnTokenStats.size > 0) {
     headerTotalTokens = 0
     headerLlmCalls = 0
@@ -252,64 +258,8 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 suppressLoadingIndicator={isConsole && i === turns.length - 1 && hasVisibleStreamingOutput}
               />
             ))}
-            {thinkingStreaming && (
-              <div className="flex justify-start">
-                <div
-                  className="max-w-[80%] rounded-2xl rounded-bl-md border border-[var(--border)] text-sm overflow-hidden"
-                  style={{ background: 'var(--bg-tertiary, var(--bg-secondary))' }}
-                >
-                  <button
-                    onClick={() => setThinkingExpanded(v => !v)}
-                    className="flex items-center gap-1.5 w-full px-3 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                  >
-                    <Brain className="w-3.5 h-3.5 text-[var(--accent)] animate-pulse" />
-                    <span className="font-medium">Thinking...</span>
-                    {thinkingExpanded ? (
-                      <ChevronDown className="w-3 h-3 ml-auto" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 ml-auto" />
-                    )}
-                  </button>
-                  {thinkingExpanded && (
-                    <div className="px-3 pb-2 border-t border-[var(--border)]">
-                      <pre
-                        className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[200px] overflow-y-auto mt-1.5"
-                        style={{ lineHeight: 'var(--cjk-line-height)' }}
-                      >
-                        {thinkingStreaming}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {streaming && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
-                  <MarkdownRenderer content={streaming} />
-                  <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
-                </div>
-              </div>
-            )}
-            {toolHintStreaming && (
-              <div className="flex justify-start">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-xs text-[var(--text-secondary)]">
-                  <Loader2 className="w-3 h-3 animate-spin text-[var(--accent)]" />
-                  <span className="font-mono">{toolHintStreaming}</span>
-                </div>
-              </div>
-            )}
-            {processing && !streaming && (turns.length === 0 || turns[turns.length - 1]?.isComplete) && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm text-[var(--text-secondary)]">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse [animation-delay:0.15s]" />
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse [animation-delay:0.3s]" />
-                    <span className="ml-1">Processing...</span>
-                  </span>
-                </div>
-              </div>
+            {inFlightTurn && (
+              <InFlightTurnBlock turn={inFlightTurn} />
             )}
           </>
         )}
@@ -333,7 +283,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
       {isConsole && !isReadOnly && (
         <ChatInput
           onSend={onSend}
-          sendDisabled={sending || !!processing}
+          sendDisabled={sendDisabled}
           isMobile={isMobile}
         />
       )}
