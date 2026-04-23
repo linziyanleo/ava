@@ -12,6 +12,7 @@ import {
   applyInFlightStreamEnd,
   createInFlightTurn,
   markInFlightProcessing,
+  upsertInFlightTurn,
   type InFlightTurn,
 } from './inFlightTurn'
 import { SceneTabs } from './SceneTabs'
@@ -83,6 +84,17 @@ export default function ChatPage() {
     clearSendWatchdog()
     setSending(false)
     setInFlightTurn(null)
+  }, [clearSendWatchdog])
+
+  const finalizeConsoleInFlight = useCallback(() => {
+    clearSendWatchdog()
+    setSending(false)
+    setInFlightTurn((prev) => {
+      if (prev?.transport === 'console') {
+        setTurns((currentTurns) => upsertInFlightTurn(currentTurns, prev))
+      }
+      return null
+    })
   }, [clearSendWatchdog])
 
   const armSendWatchdog = useCallback(() => {
@@ -237,13 +249,15 @@ export default function ChatPage() {
       } else if (data.type === 'stream_end') {
         setInFlightTurn((prev) => (prev ? applyInFlightStreamEnd(prev, !!data.resuming) : prev))
       } else if (data.type === 'complete') {
-        clearConsoleInFlight()
+        finalizeConsoleInFlight()
         void refreshSessionViewRef.current(sessionKey, {
           forceActiveConversation: true,
+          silent: true,
         })
       } else if (data.type === 'async_result') {
         void refreshSessionViewRef.current(sessionKey, {
           preferredConversationId: activeConversationIdRef.current,
+          silent: true,
         })
       }
     }
@@ -288,7 +302,7 @@ export default function ChatPage() {
       loadSessionMessagesRef.current(sessionKey, activeConversationIdRef.current, true)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armSendWatchdog, clearConsoleInFlight])
+  }, [armSendWatchdog, finalizeConsoleInFlight, clearConsoleInFlight])
 
   const disconnectObserveWs = useCallback((nextStatus: ChatStreamStatus = 'idle') => {
     if (observeReconnectTimer.current) {

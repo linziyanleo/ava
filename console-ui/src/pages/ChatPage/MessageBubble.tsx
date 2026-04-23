@@ -106,6 +106,7 @@ interface MessageBubbleProps {
   sessionKey?: string;
   showFooter?: boolean;
   streamingCursor?: boolean;
+  markdownInstanceKey?: string | number;
 }
 
 export const MessageBubble = React.memo(function MessageBubble({
@@ -115,6 +116,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   sessionKey,
   showFooter = true,
   streamingCursor = false,
+  markdownInstanceKey,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
@@ -213,7 +215,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                   <pre className="whitespace-pre-wrap font-[inherit] break-words">{displayText}</pre>
                 ) : (
                   <>
-                    <MarkdownRenderer content={displayText} />
+                    <MarkdownRenderer key={markdownInstanceKey} content={displayText} />
                     {streamingCursor && (
                       <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
                     )}

@@ -138,6 +138,11 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   let headerTotalTokens = session.token_stats.total_tokens
   let headerLlmCalls = session.token_stats.llm_calls
+  const visibleTurns = isConsole
+    && inFlightTurn?.transport === 'console'
+    && typeof inFlightTurn.turnSeq === 'number'
+    ? turns.filter((turn) => turn.turnSeq !== inFlightTurn.turnSeq)
+    : turns
   const hasVisibleStreamingOutput = Boolean(
     inFlightTurn?.draftAssistant
     || inFlightTurn?.thinkingContent
@@ -247,7 +252,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
           </div>
         ) : (
           <>
-            {turns.map((turn, i) => (
+            {visibleTurns.map((turn, i) => (
               <TurnGroupComponent
                 key={turn.turnSeq != null ? `turn-${turn.turnSeq}` : `turn-synthetic-${i}`}
                 turn={turn}
@@ -255,7 +260,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
                 tokenStats={turn.turnSeq != null ? turnTokenStats.get(turn.turnSeq) : undefined}
                 iterationStats={iterationStats}
                 sessionKey={session?.key}
-                suppressLoadingIndicator={isConsole && i === turns.length - 1 && hasVisibleStreamingOutput}
+                suppressLoadingIndicator={isConsole && i === visibleTurns.length - 1 && hasVisibleStreamingOutput}
               />
             ))}
             {inFlightTurn && (

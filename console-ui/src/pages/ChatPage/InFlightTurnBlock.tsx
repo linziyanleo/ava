@@ -77,6 +77,7 @@ export function InFlightTurnBlock({ turn }: InFlightTurnBlockProps) {
           isUser={false}
           showFooter={false}
           streamingCursor
+          markdownInstanceKey={turn.draftAssistant}
         />
       )}
 

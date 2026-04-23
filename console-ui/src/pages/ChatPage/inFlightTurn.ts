@@ -1,4 +1,4 @@
-import type { RawMessage, ToolCall, ToolCallWithResult } from './types'
+import type { RawMessage, ToolCall, ToolCallWithResult, TurnGroup } from './types'
 
 export type InFlightTransport = 'console' | 'observe'
 export type InFlightPhase = 'pending' | 'thinking' | 'streaming' | 'awaiting_tool'
@@ -197,4 +197,67 @@ export function markInFlightProcessing(turn: InFlightTurn, processing: boolean):
     ...turn,
     processing,
   }
+}
+
+export function finalizeInFlightTurn(turn: InFlightTurn): InFlightTurn {
+  const committed = commitAssistantDraft(turn)
+  return {
+    ...committed,
+    entries: settleLastLoadingTool(committed.entries),
+    phase: 'pending',
+    processing: false,
+  }
+}
+
+export function materializeInFlightTurn(turn: InFlightTurn): TurnGroup {
+  const finalized = finalizeInFlightTurn(turn)
+  const assistantSteps: RawMessage[] = []
+  const toolCalls: ToolCallWithResult[] = []
+  let endTime = finalized.userMessage.timestamp
+
+  for (const entry of finalized.entries) {
+    if (entry.kind === 'assistant') {
+      assistantSteps.push(entry.message)
+      if (entry.message.timestamp) endTime = entry.message.timestamp
+      continue
+    }
+
+    toolCalls.push({
+      call: entry.tool.call,
+      result: entry.tool.result,
+      callTimestamp: entry.tool.result?.timestamp,
+      iteration: entry.tool.iteration,
+    })
+
+    if (entry.tool.result) {
+      assistantSteps.push(entry.tool.result)
+      if (entry.tool.result.timestamp) endTime = entry.tool.result.timestamp
+    }
+  }
+
+  return {
+    turnSeq: finalized.turnSeq,
+    userMessage: finalized.userMessage,
+    assistantSteps,
+    isComplete: true,
+    startTime: finalized.userMessage.timestamp,
+    endTime,
+    toolCalls,
+  }
+}
+
+export function upsertInFlightTurn(
+  turns: TurnGroup[],
+  turn: InFlightTurn,
+): TurnGroup[] {
+  const materialized = materializeInFlightTurn(turn)
+  if (typeof materialized.turnSeq === 'number') {
+    const existingIndex = turns.findIndex((item) => item.turnSeq === materialized.turnSeq)
+    if (existingIndex >= 0) {
+      const nextTurns = [...turns]
+      nextTurns[existingIndex] = materialized
+      return nextTurns
+    }
+  }
+  return [...turns, materialized]
 }
