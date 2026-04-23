@@ -26,12 +26,14 @@ def _listener_message_to_payload(msg: OutboundMessage) -> dict[str, object]:
     }
     if metadata.get("tool_hint"):
         payload["tool_hint"] = True
+    if "resuming" in metadata:
+        payload["resuming"] = bool(metadata["resuming"])
     return payload
 
 
 def _should_skip_listener_message(msg: OutboundMessage) -> bool:
     event_type = (msg.metadata or {}).get("event_type", "async_result")
-    if event_type == "complete":
+    if event_type in {"complete", "stream_end"}:
         return False
     return not msg.content or msg.content in _EMPTY_LISTENER_CONTENTS
 
@@ -296,6 +298,22 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             async def on_stream(chunk: str):
                 await _dispatch_listener_event(chunk, event_type="progress")
 
+            async def on_stream_end(*, resuming: bool):
+                metadata = {
+                    "session_key": session_key,
+                    "event_type": "stream_end",
+                    "resuming": resuming,
+                }
+                await bus.dispatch_to_console_listener(
+                    session_key,
+                    OutboundMessage(
+                        channel="console",
+                        chat_id=user.username,
+                        content="",
+                        metadata=metadata,
+                    ),
+                )
+
             response = await svc_chat.send_message(
                 session_id=session_id,
                 message=content,
@@ -303,6 +321,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 media=media,
                 on_progress=on_progress,
                 on_stream=on_stream,
+                on_stream_end=on_stream_end,
             )
             await _dispatch_listener_event(response, event_type="complete")
 

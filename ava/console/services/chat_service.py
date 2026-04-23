@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
+from nanobot.bus.events import OutboundMessage
+
 from ava.console.services.context_preview_service import build_context_preview
 
 _LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo or timezone.utc
@@ -80,6 +82,16 @@ class ChatService:
         if isinstance(parsed, (dict, list)):
             return parsed
         return raw_content
+
+    @staticmethod
+    def _normalize_direct_response_content(response: Any) -> str:
+        if response is None:
+            return ""
+        if isinstance(response, OutboundMessage):
+            return response.content or ""
+        if isinstance(response, str):
+            return response
+        return str(response)
 
     @staticmethod
     def _message_text(raw_content: Any) -> str:
@@ -716,6 +728,7 @@ class ChatService:
         media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[..., Awaitable[None]] | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
         response = await self._agent.process_direct(
@@ -725,9 +738,10 @@ class ChatService:
             chat_id=user_id,
             on_progress=on_progress,
             on_stream=on_stream,
+            on_stream_end=on_stream_end,
             media=media,
         )
-        return response or ""
+        return self._normalize_direct_response_content(response)
 
     def get_history(self, session_id: str) -> list[dict]:
         if self._use_db:

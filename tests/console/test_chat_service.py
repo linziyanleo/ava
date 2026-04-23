@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from nanobot.bus.events import OutboundMessage
 
 from ava.console.services.chat_service import ChatService
 from ava.storage import Database
@@ -26,6 +27,7 @@ class _FakeAgentLoop:
         chat_id: str,
         on_progress=None,
         on_stream=None,
+        on_stream_end=None,
         media=None,
     ):
         self.calls.append({
@@ -35,6 +37,7 @@ class _FakeAgentLoop:
             "chat_id": chat_id,
             "on_progress": on_progress,
             "on_stream": on_stream,
+            "on_stream_end": on_stream_end,
             "media": media,
         })
         return "ok"
@@ -197,6 +200,7 @@ async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
         "chat_id": "tester",
         "on_progress": None,
         "on_stream": None,
+        "on_stream_end": None,
         "media": ["/tmp/example.png"],
     }]
 
@@ -224,6 +228,79 @@ async def test_send_message_passes_on_stream_to_agent_loop(tmp_path):
         "chat_id": "tester",
         "on_progress": None,
         "on_stream": on_stream,
+        "on_stream_end": None,
+        "media": None,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_send_message_returns_text_from_outbound_message(tmp_path):
+    class _OutboundAgentLoop(_FakeAgentLoop):
+        async def process_direct(
+            self,
+            content: str,
+            *,
+            session_key: str,
+            channel: str,
+            chat_id: str,
+            on_progress=None,
+            on_stream=None,
+            on_stream_end=None,
+            media=None,
+        ):
+            self.calls.append({
+                "content": content,
+                "session_key": session_key,
+                "channel": channel,
+                "chat_id": chat_id,
+                "on_progress": on_progress,
+                "on_stream": on_stream,
+                "on_stream_end": on_stream_end,
+                "media": media,
+            })
+            return OutboundMessage(
+                channel="console",
+                chat_id=chat_id,
+                content="done",
+                metadata={"session_key": session_key},
+            )
+
+    agent_loop = _OutboundAgentLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    result = await service.send_message(
+        session_id="abc123",
+        message="finish this",
+        user_id="tester",
+    )
+
+    assert result == "done"
+
+
+@pytest.mark.asyncio
+async def test_send_message_passes_on_stream_end_to_agent_loop(tmp_path):
+    agent_loop = _FakeAgentLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    async def on_stream_end(*, resuming: bool):
+        return None
+
+    result = await service.send_message(
+        session_id="abc123",
+        message="stream this",
+        user_id="tester",
+        on_stream_end=on_stream_end,
+    )
+
+    assert result == "ok"
+    assert agent_loop.calls == [{
+        "content": "stream this",
+        "session_key": "console:abc123",
+        "channel": "console",
+        "chat_id": "tester",
+        "on_progress": None,
+        "on_stream": None,
+        "on_stream_end": on_stream_end,
         "media": None,
     }]
 
