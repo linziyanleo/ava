@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Brain, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { MessageBubble } from './MessageBubble'
 import { ToolCallBlock } from './ToolCallBlock'
 import type { InFlightTurn } from './inFlightTurn'
@@ -70,12 +69,15 @@ export function InFlightTurnBlock({ turn }: InFlightTurnBlockProps) {
       )}
 
       {turn.draftAssistant && (
-        <div className="flex justify-start">
-          <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
-            <MarkdownRenderer content={turn.draftAssistant} />
-            <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
-          </div>
-        </div>
+        <MessageBubble
+          message={{
+            role: 'assistant',
+            content: turn.draftAssistant,
+          }}
+          isUser={false}
+          showFooter={false}
+          streamingCursor
+        />
       )}
 
       {turn.processing && !hasVisibleOutput && (

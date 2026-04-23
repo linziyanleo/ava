@@ -104,9 +104,18 @@ interface MessageBubbleProps {
   isUser: boolean;
   tokenStats?: TurnTokenStats;
   sessionKey?: string;
+  showFooter?: boolean;
+  streamingCursor?: boolean;
 }
 
-export const MessageBubble = React.memo(function MessageBubble({ message, isUser, tokenStats, sessionKey }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({
+  message,
+  isUser,
+  tokenStats,
+  sessionKey,
+  showFooter = true,
+  streamingCursor = false,
+}: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [showTokenInfo, setShowTokenInfo] = useState(false);
@@ -203,48 +212,55 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
                 (isUser ? (
                   <pre className="whitespace-pre-wrap font-[inherit] break-words">{displayText}</pre>
                 ) : (
-                  <MarkdownRenderer content={displayText} />
+                  <>
+                    <MarkdownRenderer content={displayText} />
+                    {streamingCursor && (
+                      <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
+                    )}
+                  </>
                 ))}
               {mediaBlocks.map((block, i) => (
                 <MediaBlockIndicator key={i} block={block} />
               ))}
             </div>
-            <div
-              className={cn(
-                'flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-secondary)]',
-                isUser ? 'justify-end' : 'justify-start',
-              )}
-            >
-              {message.timestamp && <span>{formatTimestamp(message.timestamp)}</span>}
-              <button
-                onClick={handleCopy}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--text-primary)]"
-                title="Copy"
+            {showFooter && (
+              <div
+                className={cn(
+                  'flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-secondary)]',
+                  isUser ? 'justify-end' : 'justify-start',
+                )}
               >
-                {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-              </button>
-              {tokenStats && !isUser && (
-                <div className="relative" ref={popoverRef}>
-                  <button
-                    onClick={() => setShowTokenInfo(!showTokenInfo)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)] flex items-center gap-0.5"
-                    title="Token usage"
-                  >
-                    <Info className="w-3 h-3" />
-                    <span>{formatTokenCount(tokenStats.total_tokens)}</span>
-                  </button>
-                  {showTokenInfo && (
-                    <TokenInfoPopover
-                      stats={tokenStats}
-                      sessionKey={sessionKey}
-                      turnSeq={tokenStats.turn_seq ?? undefined}
-                      isMobile={isMobile}
-                      onClose={() => setShowTokenInfo(false)}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
+                {message.timestamp && <span>{formatTimestamp(message.timestamp)}</span>}
+                <button
+                  onClick={handleCopy}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--text-primary)]"
+                  title="Copy"
+                >
+                  {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                </button>
+                {tokenStats && !isUser && (
+                  <div className="relative" ref={popoverRef}>
+                    <button
+                      onClick={() => setShowTokenInfo(!showTokenInfo)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)] flex items-center gap-0.5"
+                      title="Token usage"
+                    >
+                      <Info className="w-3 h-3" />
+                      <span>{formatTokenCount(tokenStats.total_tokens)}</span>
+                    </button>
+                    {showTokenInfo && (
+                      <TokenInfoPopover
+                        stats={tokenStats}
+                        sessionKey={sessionKey}
+                        turnSeq={tokenStats.turn_seq ?? undefined}
+                        isMobile={isMobile}
+                        onClose={() => setShowTokenInfo(false)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
