@@ -16,7 +16,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
-    from ava.agent.bg_tasks import BackgroundTaskStore
+    from ava.agent.bg_tasks import BackgroundTaskStore, SubmitResult
 
 _MAX_OUTPUT_CHARS = 32000
 _HEAD_CHARS = 8000
@@ -72,7 +72,7 @@ class CodexTool(Tool):
             "refactoring, bug fixing, or multi-file analysis over manually "
             "reading/writing files with read_file/write_file/edit_file. "
             "All runs are async (background, notifies when complete). "
-            "Modes: 'fast' (shorter timeout), 'standard' (default), "
+            "Modes: 'standard' (default, full-auto sandbox), "
             "'readonly' (read-only sandbox)."
         )
 
@@ -91,10 +91,9 @@ class CodexTool(Tool):
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["fast", "standard", "readonly"],
+                    "enum": ["standard", "readonly"],
                     "description": (
-                        "fast: async, 120s timeout, full-auto sandbox; "
-                        "standard: async, default timeout, full-auto sandbox (default); "
+                        "standard: async, full-auto sandbox (default); "
                         "readonly: async, read-only sandbox"
                     ),
                 },
@@ -127,19 +126,32 @@ class CodexTool(Tool):
             except Exception as e:
                 return f"Error: {e}"
 
-        timeout = 120 if mode == "fast" else self._timeout
-        task_id = self._task_store.submit_coding_task(
+        from ava.agent.worktree_manager import resolve_target, make_inplace_workspace
+
+        try:
+            target = resolve_target(project)
+        except ValueError:
+            target = None
+
+        workspace = None
+        if target:
+            ws_id = f"{self._session_key}:{target.workspace_key}"
+            workspace = make_inplace_workspace(target, workspace_id=ws_id)
+
+        result = self._task_store.submit_coding_task(
             executor=self._run_background,
             origin_session_key=self._session_key,
             prompt=prompt,
             project_path=project,
-            timeout=timeout,
+            timeout=self._timeout,
             task_type="codex",
-            auto_continue=True,
+            auto_continue=mode == "standard",
+            target=target,
+            workspace=workspace,
             mode=mode,
             project=project,
         )
-        return f"Codex task started (id: {task_id}). Use /task to check progress."
+        return self._format_submit_result(result)
 
     async def _run_background(
         self,
@@ -158,7 +170,12 @@ class CodexTool(Tool):
         if not prompt:
             raise ValueError("prompt is required")
 
-        cmd = self._build_command(prompt, project, mode)
+        cmd = self._build_command(
+            prompt,
+            project,
+            mode,
+            launcher=self._resolve_invocation_prefix(codex_bin),
+        )
         t0 = time.monotonic()
         stdout, stderr = await self._run_subprocess(cmd, project, self._timeout)
         duration_ms = int((time.monotonic() - t0) * 1000)
@@ -175,6 +192,10 @@ class CodexTool(Tool):
             )
 
         self._record_stats(parsed, prompt)
+        if parsed.get("is_error"):
+            raise RuntimeError(
+                parsed.get("error_message") or "Codex reported an error without details"
+            )
         return parsed
 
     async def cancel(self, task_id: str) -> str:
@@ -192,8 +213,11 @@ class CodexTool(Tool):
         prompt: str,
         project: str,
         mode: str,
+        *,
+        launcher: list[str] | None = None,
     ) -> list[str]:
-        cmd = ["codex", _CODEX_SUBCMD, prompt, "--json", "-C", project]
+        cmd = list(launcher or ["codex"])
+        cmd.extend([_CODEX_SUBCMD, prompt, "--json", "-C", project])
 
         if self._model:
             cmd.extend(["-m", self._model])
@@ -204,6 +228,28 @@ class CodexTool(Tool):
             cmd.append("--full-auto")
 
         return cmd
+
+    @staticmethod
+    def _resolve_invocation_prefix(codex_bin: str) -> list[str]:
+        """Pin npm-installed `codex` launchers to the sibling `node` binary.
+
+        This avoids mixed-arch shells where `/usr/bin/env node` resolves to a
+        different Node installation than the one that owns the global Codex package.
+        """
+        codex_path = Path(codex_bin)
+        try:
+            with codex_path.open("rb") as handle:
+                first_line = handle.readline(256)
+        except OSError:
+            return [codex_bin]
+
+        if b"node" not in first_line:
+            return [codex_bin]
+
+        node_bin = codex_path.with_name("node")
+        if node_bin.is_file():
+            return [str(node_bin), str(codex_path)]
+        return [codex_bin]
 
     async def _run_subprocess(
         self,
@@ -250,6 +296,16 @@ class CodexTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 return "", f"Codex timed out after {timeout}s"
+            except asyncio.CancelledError:
+                logger.info("codex: subprocess cancelled, killing child process pid={}", process.pid)
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+                raise
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return "", f"Failed to start Codex: {e}"
 
@@ -264,8 +320,8 @@ class CodexTool(Tool):
 
         thread_id = ""
         result_text = ""
-        is_error = False
-        error_message = ""
+        fatal_error_message = ""
+        transient_error_message = ""
         num_turns = 0
         total_input = 0
         total_cached_input = 0
@@ -293,30 +349,66 @@ class CodexTool(Tool):
                 total_output += int(usage.get("output_tokens", 0) or 0)
 
             elif etype == "turn.failed":
-                is_error = True
                 err_obj = event.get("error")
                 if isinstance(err_obj, dict):
-                    error_message = err_obj.get("message", "")
+                    fatal_error_message = err_obj.get("message", "")
                 else:
-                    error_message = str(err_obj or "")
+                    fatal_error_message = str(err_obj or "")
 
             elif etype == "item.completed":
                 item = event.get("item") or {}
                 if item.get("type") == "agent_message":
-                    result_text = item.get("text", "") or ""
+                    text = self._extract_agent_message_text(item)
+                    if text.strip():
+                        result_text = text
 
             elif etype == "error":
-                is_error = True
-                error_message = event.get("message", "") or str(event)
+                transient_error_message = event.get("message", "") or str(event)
 
-        if not result_text and not is_error:
+            elif etype == "agent_message":
+                text = self._extract_agent_message_text(event)
+                if text.strip():
+                    result_text = text
+
+        if fatal_error_message:
+            return {
+                "run_id": thread_id,
+                "thread_id": thread_id,
+                "result": result_text,
+                "is_error": True,
+                "error_message": fatal_error_message,
+                "num_turns": num_turns,
+                "usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cached_input,
+                    "output_tokens": total_output,
+                },
+            }
+
+        if not result_text and transient_error_message:
+            return {
+                "run_id": thread_id,
+                "thread_id": thread_id,
+                "result": "",
+                "is_error": True,
+                "error_message": transient_error_message,
+                "num_turns": num_turns,
+                "usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cached_input,
+                    "output_tokens": total_output,
+                },
+            }
+
+        if not result_text:
             return {"_parse_error": True}
 
         return {
+            "run_id": thread_id,
             "thread_id": thread_id,
             "result": result_text,
-            "is_error": is_error,
-            "error_message": error_message,
+            "is_error": False,
+            "error_message": "",
             "num_turns": num_turns,
             "usage": {
                 "input_tokens": total_input,
@@ -324,6 +416,11 @@ class CodexTool(Tool):
                 "output_tokens": total_output,
             },
         }
+
+    @staticmethod
+    def _extract_agent_message_text(payload: dict[str, Any]) -> str:
+        text = payload.get("text") or payload.get("message") or ""
+        return text if isinstance(text, str) else ""
 
     def _record_stats(self, parsed: dict[str, Any], prompt: str = "") -> None:
         if not self._token_stats:
@@ -335,7 +432,7 @@ class CodexTool(Tool):
         output_tokens = usage.get("output_tokens", 0)
         total_input = input_tokens + cached_input
 
-        thread_id = parsed.get("thread_id", "")
+        run_id = parsed.get("run_id", "") or parsed.get("thread_id", "")
         num_turns = parsed.get("num_turns", 0)
         duration_ms = parsed.get("duration_ms", 0)
         result_text = parsed.get("result", "")
@@ -344,7 +441,7 @@ class CodexTool(Tool):
         model_name = self._model or "codex-default"
 
         user_msg = (
-            f"[codex] thread={thread_id} turns={num_turns} "
+            f"[codex] run={run_id} turns={num_turns} "
             f"duration={duration_ms}ms\n\n--- Prompt ---\n{prompt}"
         )
 
@@ -369,13 +466,25 @@ class CodexTool(Tool):
             num_turns, duration_ms,
         )
 
+    @staticmethod
+    def _format_submit_result(result: SubmitResult) -> str:
+        parts = [f"Codex task started (id: {result.task_id})."]
+        if result.replaced_task_id:
+            parts.append(f" Replaced previous task {result.replaced_task_id}.")
+        if result.active_in_session:
+            parts.append(
+                f" ({len(result.active_in_session)} other active task(s) in this session)"
+            )
+        parts.append(" Use /task to check progress.")
+        return "".join(parts)
+
     def _format_output(self, parsed: dict[str, Any], mode: str) -> str:
         is_error = parsed.get("is_error", False)
         result_text = parsed.get("result", "")
         error_msg = parsed.get("error_message", "")
         num_turns = parsed.get("num_turns", 0)
         duration_ms = parsed.get("duration_ms", 0)
-        thread_id = parsed.get("thread_id", "")
+        run_id = parsed.get("run_id", "") or parsed.get("thread_id", "")
 
         status = "ERROR" if is_error else "SUCCESS"
 
@@ -384,8 +493,8 @@ class CodexTool(Tool):
             f"Turns: {num_turns} | Duration: {duration_ms}ms",
         ]
 
-        if thread_id:
-            parts.append(f"Thread: {thread_id}")
+        if run_id:
+            parts.append(f"Run: {run_id}")
 
         parts.append("")
 

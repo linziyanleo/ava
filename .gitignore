@@ -13,3 +13,5 @@ ava/AGENTS.md
 console-ui/dist/
 console-ui/node_modules/
 bridge/node_modules/
+.playwright-mcp/
+.codex-tmp/

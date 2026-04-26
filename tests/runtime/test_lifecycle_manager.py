@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ava.runtime.lifecycle import LifecycleManager, _detect_supervisor
+from ava.runtime.paths import get_pid_file
 
 
 class TestLifecycleManagerInit:
@@ -193,8 +194,9 @@ class TestOrphanRecovery:
 
 
 class TestCleanup:
-    def test_cleanup_removes_pid_file(self, tmp_path):
-        pid_file = Path.home() / ".nanobot" / "gateway.pid"
+    def test_cleanup_removes_pid_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AVA_HOME", str(tmp_path / "ava-home"))
+        pid_file = get_pid_file()
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text("12345")
 

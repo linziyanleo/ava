@@ -18,9 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
-
-_DEFAULT_RUNTIME_DIR = Path.home() / ".nanobot" / "runtime"
+from ava.runtime import paths as runtime_paths
 
 
 class LifecycleManager:
@@ -33,7 +31,7 @@ class LifecycleManager:
         gateway_port: int = 18790,
         console_port: int = 6688,
     ) -> None:
-        self.runtime_dir = (runtime_dir or _DEFAULT_RUNTIME_DIR).resolve()
+        self.runtime_dir = (runtime_dir or runtime_paths.get_runtime_dir()).resolve()
         self._bg_store = bg_store
         self._gateway_port = gateway_port
         self._console_port = console_port
@@ -257,7 +255,7 @@ class LifecycleManager:
 
     def cleanup(self) -> None:
         """进程退出时清理（不删除 state.json，供下一代读取）。"""
-        pid_file = Path.home() / ".nanobot" / "gateway.pid"
+        pid_file = runtime_paths.get_pid_file()
         try:
             pid_file.unlink(missing_ok=True)
         except OSError:

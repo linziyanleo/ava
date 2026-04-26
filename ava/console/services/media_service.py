@@ -3,16 +3,35 @@
 from __future__ import annotations
 
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any
 
 from ava.console.models import MediaRecord
+from ava.runtime import paths as runtime_paths
+
+
+_CHAT_UPLOAD_MIME_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+_MAX_CHAT_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 
 
 class MediaService:
-    def __init__(self, media_dir: Path | None = None, db: Any | None = None, screenshot_dir: Path | None = None):
-        self._media_dir = media_dir or (Path.home() / ".nanobot" / "media" / "generated")
+    def __init__(
+        self,
+        media_dir: Path | None = None,
+        db: Any | None = None,
+        screenshot_dir: Path | None = None,
+        chat_upload_dir: Path | None = None,
+    ):
+        self._media_dir = media_dir or runtime_paths.get_generated_media_dir()
         self._screenshot_dir = screenshot_dir or (self._media_dir.parent / "screenshots")
+        self._chat_upload_dir = chat_upload_dir or (self._media_dir.parent / "chat-uploads")
         self._records_file = self._media_dir / "records.jsonl"
         self._db = db
         self._migrate_legacy_screenshots()
@@ -141,9 +160,58 @@ class MediaService:
             return None
         return filename
 
+    @staticmethod
+    def _safe_stem(name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")
+        return cleaned or "pasted-image"
+
+    @staticmethod
+    def build_display_path(image_ref: str) -> str:
+        normalized = image_ref.replace("\\", "/")
+        filename = normalized.split("/")[-1]
+        if not filename:
+            return "image"
+        for marker in ("chat-uploads", "generated", "screenshots"):
+            token = f"/{marker}/"
+            if token in normalized:
+                return f"{marker}/{filename}"
+        return filename
+
+    @staticmethod
+    def build_preview_url(filename: str) -> str:
+        return f"/api/media/images/{filename}"
+
+    def save_chat_upload(self, *, filename: str | None, mime_type: str | None, data: bytes) -> dict[str, Any]:
+        mime = (mime_type or "").lower().strip()
+        if mime not in _CHAT_UPLOAD_MIME_EXTENSIONS:
+            raise ValueError("Only PNG, JPEG, WEBP, and GIF images are supported")
+        if not data:
+            raise ValueError("Uploaded image is empty")
+        if len(data) > _MAX_CHAT_UPLOAD_SIZE_BYTES:
+            raise ValueError("Image exceeds 10MB limit")
+
+        requested_name = filename or ""
+        requested_suffix = Path(requested_name).suffix.lower()
+        suffix = requested_suffix if requested_suffix in _CHAT_UPLOAD_MIME_EXTENSIONS.values() else _CHAT_UPLOAD_MIME_EXTENSIONS[mime]
+        stem = self._safe_stem(Path(requested_name).stem or "pasted-image")
+        stored_filename = f"chat-{uuid.uuid4().hex[:12]}-{stem}{suffix}"
+
+        self._chat_upload_dir.mkdir(parents=True, exist_ok=True)
+        stored_path = self._chat_upload_dir / stored_filename
+        stored_path.write_bytes(data)
+
+        return {
+            "filename": stored_filename,
+            "media_path": str(stored_path),
+            "path": self.build_display_path(str(stored_path)),
+            "mime_type": mime,
+            "size_bytes": len(data),
+            "preview_url": self.build_preview_url(stored_filename),
+        }
+
     def _iter_lookup_paths(self, filename: str):
         seen: set[str] = set()
-        for base_dir in (self._media_dir, self._screenshot_dir):
+        for base_dir in (self._media_dir, self._screenshot_dir, self._chat_upload_dir):
             path = base_dir / filename
             key = str(path)
             if key in seen:

@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Loader2, Brain, ChevronDown, ChevronRight, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink } from 'lucide-react'
-import type { SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats } from './types';
+import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
+import type { ChatComposePayload, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
+import { ConnectionBadge } from './ConnectionBadge'
 import { TurnGroupComponent } from './TurnGroup'
 import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
+import { ContextInspector } from './ContextInspector'
+import { InFlightTurnBlock } from './InFlightTurnBlock'
+import type { InFlightTurn } from './inFlightTurn'
 import { formatTokenCount } from './utils'
 import { api } from '../../api/client';
 
@@ -14,31 +18,31 @@ interface MessageAreaProps {
   conversation: ConversationMeta | null
   conversationId: string | null
   turns: TurnGroup[]
+  inFlightTurn: InFlightTurn | null
   loading: boolean
   isConsole: boolean
   isReadOnly?: boolean
-  streaming: string
-  thinkingStreaming: string
-  sending: boolean
-  processing?: boolean
-  onSend: (message: string) => void
+  transportStatus: ChatStreamStatus
+  activeTransport: ActiveChatTransport
+  sendDisabled: boolean
+  onSend: (payload: ChatComposePayload) => Promise<void> | void
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, loading, isConsole, isReadOnly, streaming, thinkingStreaming, sending, processing, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isInitialScroll = useRef(true)
-  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const [turnTokenStats, setTurnTokenStats] = useState<Map<number, TurnTokenStats>>(new Map());
   const [iterationStats, setIterationStats] = useState<Map<string, IterationTokenStats>>(new Map());
   const [refreshing, setRefreshing] = useState(false)
   const [keyCopied, setKeyCopied] = useState(false)
   const [showScrollDown, setShowScrollDown] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
+  const [showInspector, setShowInspector] = useState(false)
 
   useEffect(() => {
     if (!session?.key) {
@@ -85,28 +89,38 @@ export function MessageArea({ session, conversation, conversationId, turns, load
   }, [checkScrollPosition])
 
   useEffect(() => {
+    if (loading) return
     if (isInitialScroll.current && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'instant' })
       isInitialScroll.current = false
     } else {
       checkScrollPosition()
     }
-  }, [turns, checkScrollPosition])
+  }, [loading, turns, checkScrollPosition])
 
   // Auto-scroll when streaming new content (if user was near bottom)
   useEffect(() => {
-    if (!streaming && !thinkingStreaming) return
+    if (!inFlightTurn) return
     const el = scrollContainerRef.current
     if (!el) return
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
     if (isNearBottom) {
       bottomRef.current?.scrollIntoView({ behavior: 'instant' })
     }
-  }, [streaming, thinkingStreaming])
+  }, [
+    inFlightTurn?.draftAssistant,
+    inFlightTurn?.thinkingContent,
+    inFlightTurn?.entries.length,
+    inFlightTurn,
+  ])
 
   useEffect(() => {
     isInitialScroll.current = true
   }, [session?.key])
+
+  useEffect(() => {
+    setShowInspector(false)
+  }, [session?.key, conversationId])
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -121,6 +135,27 @@ export function MessageArea({ session, conversation, conversationId, turns, load
         </div>
       </div>
     )
+  }
+
+  let headerTotalTokens = session.token_stats.total_tokens
+  let headerLlmCalls = session.token_stats.llm_calls
+  const visibleTurns = isConsole
+    && inFlightTurn?.transport === 'console'
+    && typeof inFlightTurn.turnSeq === 'number'
+    ? turns.filter((turn) => turn.turnSeq !== inFlightTurn.turnSeq)
+    : turns
+  const hasVisibleStreamingOutput = Boolean(
+    inFlightTurn?.draftAssistant
+    || inFlightTurn?.thinkingContent
+    || inFlightTurn?.entries.length,
+  )
+  if (turnTokenStats.size > 0) {
+    headerTotalTokens = 0
+    headerLlmCalls = 0
+    for (const stats of turnTokenStats.values()) {
+      headerTotalTokens += stats.total_tokens
+      headerLlmCalls += stats.llm_calls
+    }
   }
 
   return (
@@ -166,15 +201,16 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 if (conversationId) params.set('conversation_id', conversationId)
                 navigate(`/tokens?${params.toString()}`)
               }}
-              className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
-              title="查看当前会话的 Token 统计"
-            >
-              <span>⚡ {formatTokenCount(session.token_stats.total_tokens)} tokens · {session.token_stats.llm_calls} calls</span>
+            className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
+            title="查看当前会话的 Token 统计"
+          >
+              <span>⚡ {formatTokenCount(headerTotalTokens)} tokens · {headerLlmCalls} calls</span>
               <ExternalLink className="w-3 h-3" />
             </button>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <ConnectionBadge transport={activeTransport} status={transportStatus} />
           {(isReadOnly || !isConsole) && (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
               {conversation && isReadOnly ? 'History · Read-only' : 'Read-only'}
@@ -198,6 +234,14 @@ export function MessageArea({ session, conversation, conversationId, turns, load
           >
             <Search className="w-3.5 h-3.5" />
           </button>
+          <button
+            onClick={() => setShowInspector(true)}
+            disabled={!session?.key || isReadOnly}
+            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            title={isReadOnly ? '只对当前活跃会话开放 Context Inspector' : 'Context Inspector'}
+          >
+            <FileText className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -209,7 +253,7 @@ export function MessageArea({ session, conversation, conversationId, turns, load
           </div>
         ) : (
           <>
-            {turns.map((turn, i) => (
+            {visibleTurns.map((turn, i) => (
               <TurnGroupComponent
                 key={turn.turnSeq != null ? `turn-${turn.turnSeq}` : `turn-synthetic-${i}`}
                 turn={turn}
@@ -217,55 +261,11 @@ export function MessageArea({ session, conversation, conversationId, turns, load
                 tokenStats={turn.turnSeq != null ? turnTokenStats.get(turn.turnSeq) : undefined}
                 iterationStats={iterationStats}
                 sessionKey={session?.key}
+                suppressLoadingIndicator={isConsole && i === visibleTurns.length - 1 && hasVisibleStreamingOutput}
               />
             ))}
-            {thinkingStreaming && (
-              <div className="flex justify-start">
-                <div
-                  className="max-w-[80%] rounded-2xl rounded-bl-md border border-[var(--border)] text-sm overflow-hidden"
-                  style={{ background: 'var(--bg-tertiary, var(--bg-secondary))' }}
-                >
-                  <button
-                    onClick={() => setThinkingExpanded(v => !v)}
-                    className="flex items-center gap-1.5 w-full px-3 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                  >
-                    <Brain className="w-3.5 h-3.5 text-[var(--accent)] animate-pulse" />
-                    <span className="font-medium">Thinking...</span>
-                    {thinkingExpanded ? (
-                      <ChevronDown className="w-3 h-3 ml-auto" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 ml-auto" />
-                    )}
-                  </button>
-                  {thinkingExpanded && (
-                    <div className="px-3 pb-2 border-t border-[var(--border)]">
-                      <pre className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[200px] overflow-y-auto mt-1.5">
-                        {thinkingStreaming}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {streaming && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm">
-                  <pre className="whitespace-pre-wrap font-[inherit]">{streaming}</pre>
-                  <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
-                </div>
-              </div>
-            )}
-            {processing && !streaming && (turns.length === 0 || turns[turns.length - 1]?.isComplete) && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-md bg-[var(--bg-secondary)] border border-[var(--border)] text-sm text-[var(--text-secondary)]">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse [animation-delay:0.15s]" />
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse [animation-delay:0.3s]" />
-                    <span className="ml-1">Processing...</span>
-                  </span>
-                </div>
-              </div>
+            {inFlightTurn && (
+              <InFlightTurnBlock turn={inFlightTurn} />
             )}
           </>
         )}
@@ -286,12 +286,25 @@ export function MessageArea({ session, conversation, conversationId, turns, load
       )}
 
       {/* Input (console only) */}
-      {isConsole && !isReadOnly && <ChatInput onSend={onSend} disabled={sending} isMobile={isMobile} />}
+      {isConsole && !isReadOnly && (
+        <ChatInput
+          onSend={onSend}
+          sendDisabled={sendDisabled}
+          isMobile={isMobile}
+        />
+      )}
 
       {/* Search modal */}
       {showSearch && (
         <SearchModal turns={turns} onClose={() => setShowSearch(false)} />
       )}
+
+      <ContextInspector
+        open={showInspector}
+        sessionKey={session?.key || null}
+        disabled={!!isReadOnly}
+        onClose={() => setShowInspector(false)}
+      />
     </div>
   );
 }

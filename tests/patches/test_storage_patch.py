@@ -198,6 +198,214 @@ class TestStoragePatch:
         assert loaded.messages[1]["tool_call_id"] == "tc1"
         assert loaded.messages[1]["name"] == "test"
 
+    def test_save_skips_duplicate_message_signature(self, patched_manager):
+        session = _make_session(messages=[
+            {
+                "role": "assistant",
+                "content": "calling tool",
+                "tool_calls": [{"id": "tc1", "function": {"name": "write_file"}}],
+                "timestamp": "2026-01-01T00:00:00",
+            },
+            {
+                "role": "tool",
+                "content": "Successfully wrote file",
+                "tool_call_id": "tc1",
+                "name": "write_file",
+                "timestamp": "2026-01-01T00:00:01",
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "timestamp": "2026-01-01T00:00:02",
+            },
+        ])
+        patched_manager.save(session)
+
+        session.messages.extend([
+            {
+                "role": "tool",
+                "content": "Successfully wrote file",
+                "tool_call_id": "tc1",
+                "name": "write_file",
+                "timestamp": "2026-01-01T00:00:01",
+            },
+            {
+                "role": "assistant",
+                "content": "done",
+                "timestamp": "2026-01-01T00:00:02",
+            },
+        ])
+        patched_manager.save(session)
+
+        loaded = patched_manager._load("test:123")
+        assert loaded is not None
+        assert [(msg["role"], msg["content"]) for msg in loaded.messages] == [
+            ("assistant", "calling tool"),
+            ("tool", "Successfully wrote file"),
+            ("assistant", "done"),
+        ]
+
+    def test_float_timestamp_load_rewrite_is_idempotent(self, patched_manager):
+        session = _make_session(
+            messages=[
+                {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00"},
+                {"role": "assistant", "content": "done", "timestamp": "2026-01-01T00:00:01"},
+            ],
+            metadata={"token_stats": {}, "conversation_id": "conv_dirty"},
+        )
+        patched_manager.save(session)
+
+        from ava.storage import get_db
+
+        db = get_db()
+        conn = db._get_conn()
+        conn.execute(
+            """
+            UPDATE session_messages
+               SET timestamp = '1776685800.123'
+             WHERE session_id = (SELECT id FROM sessions WHERE key = ?)
+               AND conversation_id = ?
+            """,
+            ("test:123", "conv_dirty"),
+        )
+        conn.commit()
+
+        loaded = patched_manager._load("test:123")
+        assert loaded is not None
+        assert all(isinstance(msg["timestamp"], str) for msg in loaded.messages)
+        assert all("T" in msg["timestamp"] for msg in loaded.messages)
+        for msg in loaded.messages:
+            datetime.fromisoformat(msg["timestamp"])
+
+        patched_manager.save(loaded)
+        patched_manager.save(loaded)
+
+        rows = db.fetchall(
+            """
+            SELECT seq, timestamp
+              FROM session_messages sm
+              JOIN sessions s ON s.id = sm.session_id
+             WHERE s.key = ? AND sm.conversation_id = ?
+             ORDER BY seq
+            """,
+            ("test:123", "conv_dirty"),
+        )
+        assert len(rows) == 2
+        for row in rows:
+            assert row["timestamp"] != "1776685800.123"
+            datetime.fromisoformat(row["timestamp"])
+
+    def test_float_timestamp_signature_does_not_duplicate_on_resave(self, patched_manager):
+        session = _make_session(messages=[
+            {
+                "role": "assistant",
+                "content": "[Background Task abc123 SUCCESS]\nType: codex | Duration: 100ms\n\nok",
+                "timestamp": 1776688335.40905,
+            },
+        ])
+
+        patched_manager.save(session)
+        patched_manager.save(session)
+
+        from ava.storage import get_db
+
+        db = get_db()
+        rows = db.fetchall(
+            """
+            SELECT seq, role, content, timestamp
+              FROM session_messages sm
+              JOIN sessions s ON s.id = sm.session_id
+             WHERE s.key = ?
+             ORDER BY seq, sm.id
+            """,
+            ("test:123",),
+        )
+        assert [(row["seq"], row["role"], row["content"]) for row in rows] == [
+            (0, "assistant", "[Background Task abc123 SUCCESS]\nType: codex | Duration: 100ms\n\nok"),
+        ]
+        assert rows[0]["timestamp"] == "1776688335.40905"
+
+    def test_save_skips_logical_duplicate_tool_calls_and_background_tasks(self, patched_manager):
+        tool_calls = [{"id": "call_dup", "function": {"name": "send_sticker"}}]
+        bg_summary = "[Background Task abc123 SUCCESS]\nType: codex | Duration: 100ms\n\nok"
+        bg_continuation = (
+            "[Background Task Completed — SUCCESS]\n"
+            "Task: codex:abc123\n"
+            "Duration: 100ms\n\n"
+            "ok\n\n"
+            "请基于以上结果继续处理后续步骤。如果所有工作已完成，请总结。"
+        )
+        session = _make_session(messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "timestamp": "2026-04-20T20:20:17.659672",
+            },
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "timestamp": "2026-04-20T20:20:17.700000",
+            },
+            {
+                "role": "tool",
+                "content": "send_sticker, 💡",
+                "tool_call_id": "call_dup",
+                "name": "send_sticker",
+                "timestamp": "2026-04-20T20:20:17.659675",
+            },
+            {
+                "role": "tool",
+                "content": "send_sticker, 💡",
+                "tool_call_id": "call_dup",
+                "name": "send_sticker",
+                "timestamp": "2026-04-20T20:20:17.700001",
+            },
+            {
+                "role": "assistant",
+                "content": bg_summary,
+                "timestamp": "2026-04-20T20:32:15.000001",
+            },
+            {
+                "role": "assistant",
+                "content": bg_summary,
+                "timestamp": "2026-04-20T20:32:15.000002",
+            },
+            {
+                "role": "user",
+                "content": bg_continuation,
+                "timestamp": "2026-04-20T20:32:15.650320",
+            },
+            {
+                "role": "user",
+                "content": bg_continuation,
+                "timestamp": "2026-04-20T20:32:15.650321",
+            },
+        ])
+
+        patched_manager.save(session)
+
+        from ava.storage import get_db
+
+        db = get_db()
+        rows = db.fetchall(
+            """
+            SELECT seq, role, content, tool_calls, tool_call_id, name
+              FROM session_messages sm
+              JOIN sessions s ON s.id = sm.session_id
+             WHERE s.key = ?
+             ORDER BY seq, sm.id
+            """,
+            ("test:123",),
+        )
+        assert [(row["role"], row["content"], row["tool_call_id"], row["name"]) for row in rows] == [
+            ("assistant", "", None, None),
+            ("tool", "send_sticker, 💡", "call_dup", "send_sticker"),
+            ("assistant", bg_summary, None, None),
+            ("user", bg_continuation, None, None),
+        ]
+
     def test_list_sessions(self, patched_manager):
         """T5.4: list_sessions returns saved sessions."""
         patched_manager.save(_make_session("sess:1"))

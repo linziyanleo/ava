@@ -24,6 +24,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+from ava.runtime import paths as runtime_paths
 
 _RUNNER_SCRIPT = Path(__file__).resolve().parents[2] / "console-ui" / "e2e" / "page-agent-runner.mjs"
 
@@ -1003,4 +1004,4 @@ class PageAgentTool(Tool):
             custom = getattr(self._config, "screenshot_dir", "")
             if custom:
                 return Path(custom).expanduser()
-        return Path.home() / ".nanobot" / "media" / "screenshots"
+        return runtime_paths.get_screenshot_dir()

@@ -4,12 +4,11 @@
 
 系统启动时自动创建两个本地账号，密码保存在 console 数据目录下：
 
-| 账号 | 用户名 | 角色 | 密码文件 |
-|------|--------|------|----------|
-| 管理员 | `nanobot` | `admin` | `<console_dir>/local-secrets/nanobot_password` |
-| 测试员 | `mock_tester` | `mock_tester` | `<console_dir>/local-secrets/mock_tester_password` |
+| 账号 | 用户名 | 角色 | 默认密码 | 密码文件 |
+|------|--------|------|----------|----------|
+| 测试员 | `mock_tester` | `mock_tester` | （随机生成） | `<console_dir>/local-secrets/mock_tester_password` |
 
-密码为首次启动时随机生成（`secrets.token_urlsafe(24)`），后续启动自动校验并同步。
+测试员密码为首次启动时随机生成（`secrets.token_urlsafe(24)`）。后续启动自动校验并同步。
 
 ## 登录操作
 

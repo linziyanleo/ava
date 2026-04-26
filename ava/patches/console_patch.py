@@ -15,12 +15,98 @@ Port priority: config.gateway.console.port → CAFE_CONSOLE_PORT env → 6688
 
 from __future__ import annotations
 
+import json
 import os
+import signal
+import time
+from pathlib import Path
+from typing import Any, Callable
 
 from loguru import logger
 
 from ava.console.mock_bundle_runtime import validate_console_security
 from ava.launcher import register_patch
+from ava.runtime import paths as runtime_paths
+
+# Per-process state shared between the Console task and the SIGUSR1 handler.
+_console_state: dict[str, Any] = {
+    "server": None,            # current uvicorn.Server (or None when idle)
+    "restart_pending": False,  # set True by SIGUSR1 to request a restart
+    "signal_installed": False,
+}
+
+
+def _write_console_meta(host: str, port: int, gateway_port: int | None) -> None:
+    meta_file = runtime_paths.get_console_meta_file()
+    try:
+        meta_file.parent.mkdir(parents=True, exist_ok=True)
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "console_host": host,
+                    "console_port": port,
+                    "gateway_port": gateway_port,
+                    "started_at": time.time(),
+                },
+                indent=2,
+            )
+        )
+    except OSError as exc:
+        logger.warning("Failed to write console meta: {}", exc)
+
+
+def _clear_console_meta() -> None:
+    try:
+        runtime_paths.get_console_meta_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _on_sigusr1() -> None:
+    """Triggered by ``ava console-restart`` via SIGUSR1.
+
+    Shuts down the current uvicorn server; the outer loop in
+    ``_run_console_loop`` then spawns a fresh one with the same app.
+    """
+    server = _console_state.get("server")
+    if server is None:
+        logger.info("SIGUSR1 received but Console is not running — ignored.")
+        return
+    _console_state["restart_pending"] = True
+    server.should_exit = True
+    logger.info("SIGUSR1 received → Web Console will restart shortly.")
+
+
+def _install_sigusr1_handler() -> None:
+    if _console_state["signal_installed"]:
+        return
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGUSR1, _on_sigusr1)
+        _console_state["signal_installed"] = True
+    except (NotImplementedError, RuntimeError) as exc:
+        logger.info("SIGUSR1 handler not installed ({}): {}", type(exc).__name__, exc)
+
+
+async def _run_console_loop(build_server: Callable[[], Any]) -> None:
+    """Serve the Console until cancelled; rebuild on SIGUSR1 restart."""
+    import asyncio
+
+    while True:
+        server = build_server()
+        _console_state["server"] = server
+        try:
+            await server.serve()
+        except asyncio.CancelledError:
+            raise
+        finally:
+            _console_state["server"] = None
+        if not _console_state.pop("restart_pending", False):
+            break
+        logger.info("Web Console: restarting server instance ...")
 
 
 def apply_console_patch() -> str:
@@ -71,11 +157,11 @@ def apply_console_patch() -> str:
 
                     cfg = load_config()
                     workspace = get_workspace_path()
-                    nanobot_dir = get_data_dir()  # ~/.nanobot/ — aligned with upstream
+                    nanobot_dir = get_data_dir()
                     nanobot_dir.mkdir(parents=True, exist_ok=True)
 
                     # Write PID file so GatewayService can detect running gateway
-                    pid_file = Path.home() / ".nanobot" / "gateway.pid"
+                    pid_file = runtime_paths.get_pid_file()
                     pid_file.parent.mkdir(parents=True, exist_ok=True)
                     pid_file.write_text(str(os.getpid()))
 
@@ -141,14 +227,22 @@ def apply_console_patch() -> str:
                         )
                         logger.info("Console starting in standalone mode (HTTP proxy)")
 
-                    uvicorn_config = uvicorn.Config(
-                        console_app,
-                        host=console_host,
-                        port=console_port,
-                        log_level="warning",
+                    def _build_server():
+                        uvicorn_config = uvicorn.Config(
+                            console_app,
+                            host=console_host,
+                            port=console_port,
+                            log_level="warning",
+                        )
+                        return uvicorn.Server(uvicorn_config)
+
+                    console_task = asyncio.create_task(_run_console_loop(_build_server))
+                    _install_sigusr1_handler()
+                    _write_console_meta(
+                        console_host,
+                        console_port,
+                        getattr(getattr(cfg, "gateway", None), "port", None),
                     )
-                    server = uvicorn.Server(uvicorn_config)
-                    console_task = asyncio.create_task(server.serve())
                     logger.info(
                         "Web Console starting at http://{}:{}/", console_host, console_port
                     )
@@ -167,6 +261,7 @@ def apply_console_patch() -> str:
                             await console_task
                         except asyncio.CancelledError:
                             pass
+                    _clear_console_meta()
                     # Clean up PID file
                     if pid_file and pid_file.exists():
                         try:

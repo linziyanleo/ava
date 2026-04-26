@@ -106,6 +106,7 @@ def _legacy_sidecar_config_payload(workspace: Path) -> dict:
         },
         "token_stats": {
             "enabled": True,
+            "snapshot_content_max_chars": 1800,
             "record_full_request_payload": False,
         },
     }
@@ -192,6 +193,7 @@ class TestOnboardPatch:
         assert saved["providers"]["zenmux"]["apiBase"] == "https://zenmux.ai/api/v1"
         assert saved["providers"]["yunwu"]["apiBase"] == "https://yunwu.ai/v1/messages"
         assert saved["providers"]["gemini"]["apiBase"] == "https://zenmux.ai/api/v1"
+        assert saved["token_stats"]["snapshot_content_max_chars"] == 1800
         assert saved["token_stats"]["record_full_request_payload"] is False
 
         assert saved["api"]["host"] == "127.0.0.1"

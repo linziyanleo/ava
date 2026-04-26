@@ -395,8 +395,6 @@ Console UI 的 `/bg-tasks` 页面提供可视化监控，通过 WebSocket 实时
 - 默认使用 `standard` 异步模式，适合中大型任务
 - 异步任务完成后会自动将结果持久化到会话历史，并通过 IM 通知用户
 - 活跃任务的摘要会自动注入到 system prompt，让模型感知当前后台执行状态
-- 只在明确需要阻塞结果时使用 `mode="sync"`
-- `console_ui_dev_loop` v1 默认使用 `claude_code(mode="sync")`
 
 ## Codex
 

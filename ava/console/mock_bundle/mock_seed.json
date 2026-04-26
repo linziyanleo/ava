@@ -183,6 +183,14 @@
             "name": "claude_code",
             "arguments": "{\"mode\":\"standard\",\"project_path\":\"/mock/workspace\",\"prompt\":\"Document the missing mock_tester page coverage and add a token-stats jump from the chat session.\"}"
           }
+        },
+        {
+          "id": "mock-call-codex",
+          "type": "function",
+          "function": {
+            "name": "codex",
+            "arguments": "{\"mode\":\"standard\",\"project_path\":\"/mock/workspace\",\"prompt\":\"Review whether the mock-safe background task copy should mention both Claude Code and Codex.\"}"
+          }
         }
       ],
       "timestamp": "2026-04-07T09:10:04+08:00"
@@ -251,11 +259,21 @@
       "session_key": "console:mock-session-2",
       "seq": 8,
       "conversation_id": "mock-conv-2",
+      "role": "tool",
+      "tool_call_id": "mock-call-codex",
+      "name": "codex",
+      "content": "[Codex SUCCESS]\nTurns: 3 | Duration: 5400ms\nRun: mock-codex-thread-01\n\nUpdated background task copy so the mock-safe console refers to both Claude Code and Codex paths.",
+      "timestamp": "2026-04-07T09:10:34+08:00"
+    },
+    {
+      "session_key": "console:mock-session-2",
+      "seq": 9,
+      "conversation_id": "mock-conv-2",
       "role": "assistant",
       "content": [
         {
           "type": "text",
-          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, and `claude_code` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
+          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code and Codex.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
         }
       ],
       "timestamp": "2026-04-07T09:10:36+08:00"
@@ -538,8 +556,17 @@
         "doing": 1,
         "done": 4
       },
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/nanobot",
+      "cli_run_id": "mock-cli-session-01",
       "cli_session_id": "mock-cli-session-01",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/nanobot:.",
+      "workspace_id": "ws-mock-nanobot-root",
+      "execution_cwd": "/Users/fang/nanobot",
+      "isolation_mode": "inplace",
+      "branch_name": "main",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775527800,
@@ -561,6 +588,50 @@
       "full_result": ""
     },
     {
+      "task_id": "mock-task-run-2",
+      "task_type": "coding",
+      "origin_session_key": "console:mock-session-2",
+      "status": "running",
+      "prompt_preview": "Add workspace metadata display to background task cards.",
+      "started_at": 1775527850,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "editing",
+      "last_tool_name": "write_file",
+      "todo_summary": {
+        "todo": 1,
+        "doing": 1,
+        "done": 2
+      },
+      "project_path": "/Users/fang/nanobot",
+      "cli_run_id": "mock-cli-session-05",
+      "cli_session_id": "mock-cli-session-05",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/nanobot:.",
+      "workspace_id": "ws-mock-nanobot-root",
+      "execution_cwd": "/Users/fang/nanobot",
+      "isolation_mode": "inplace",
+      "branch_name": "main",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527850,
+          "event": "submitted",
+          "detail": "Add workspace metadata display to background task cards."
+        },
+        {
+          "timestamp": 1775527855,
+          "event": "started",
+          "detail": ""
+        }
+      ],
+      "full_prompt": "Add workspace metadata display to background task cards.",
+      "full_result": ""
+    },
+    {
       "task_id": "mock-task-queue-1",
       "task_type": "codex",
       "origin_session_key": "console:mock-session-3",
@@ -578,8 +649,17 @@
         "doing": 0,
         "done": 0
       },
-      "project_path": "/mock/workspace",
-      "cli_session_id": "",
+      "project_path": "/Users/fang/ava",
+      "cli_run_id": "mock-codex-thread-01",
+      "cli_session_id": "mock-codex-thread-01",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": "console-ui",
+      "workspace_key": "/Users/fang/ava:console-ui",
+      "workspace_id": "ws-mock-ava-console",
+      "execution_cwd": "/Users/fang/ava/console-ui",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775527920,
@@ -606,8 +686,17 @@
       "phase": "completed",
       "last_tool_name": "write_file",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/ava",
+      "cli_run_id": "mock-cli-session-02",
       "cli_session_id": "mock-cli-session-02",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": ".",
+      "workspace_key": "/Users/fang/ava:.",
+      "workspace_id": "ws-mock-ava-root",
+      "execution_cwd": "/Users/fang/ava",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775524200,
@@ -642,8 +731,17 @@
       "phase": "blocked",
       "last_tool_name": "page_agent",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
+      "project_path": "/Users/fang/nanobot",
+      "cli_run_id": "mock-cli-session-03",
       "cli_session_id": "mock-cli-session-03",
+      "repo_root": "/Users/fang/nanobot",
+      "workdir_relpath": "src/plugins",
+      "workspace_key": "/Users/fang/nanobot:src/plugins",
+      "workspace_id": "ws-mock-nanobot-plugins",
+      "execution_cwd": "/Users/fang/nanobot/src/plugins",
+      "isolation_mode": "worktree",
+      "branch_name": "feat/browser-preview",
+      "worktree_path": "/Users/fang/nanobot-wt-browser",
       "timeline": [
         {
           "timestamp": 1775525100,
@@ -678,8 +776,17 @@
       "phase": "cancelled",
       "last_tool_name": "update_plan",
       "todo_summary": null,
-      "project_path": "/mock/workspace",
-      "cli_session_id": "mock-cli-session-04",
+      "project_path": "/Users/fang/ava",
+      "cli_run_id": "mock-codex-thread-02",
+      "cli_session_id": "mock-codex-thread-02",
+      "repo_root": "/Users/fang/ava",
+      "workdir_relpath": "console-ui",
+      "workspace_key": "/Users/fang/ava:console-ui",
+      "workspace_id": "ws-mock-ava-console",
+      "execution_cwd": "/Users/fang/ava/console-ui",
+      "isolation_mode": "inplace",
+      "branch_name": "feat/0.0.1",
+      "worktree_path": "",
       "timeline": [
         {
           "timestamp": 1775526000,

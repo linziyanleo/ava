@@ -15,7 +15,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
-    from ava.agent.bg_tasks import BackgroundTaskStore
+    from ava.agent.bg_tasks import BackgroundTaskStore, SubmitResult
 
 _MAX_OUTPUT_CHARS = 32000   # hard cap for extreme cases
 _HEAD_CHARS = 8000          # keep first N chars (task breakdown, early progress)
@@ -23,8 +23,8 @@ _TAIL_CHARS = 12000         # keep last N chars (final summary, conclusions)
 
 class ClaudeCodeTool(Tool):
     """Run Claude Code CLI to modify code, add features, fix bugs, or analyze a codebase.
-    
-    Supports both synchronous (blocking) and asynchronous (background) execution modes.
+
+    All runs are async via BackgroundTaskStore.
     """
 
     def __init__(
@@ -73,9 +73,9 @@ class ClaudeCodeTool(Tool):
             "For ANY task involving code modification, refactoring, bug fixing, "
             "or multi-file analysis, ALWAYS prefer this tool over manually "
             "reading/writing files one by one with read_file/write_file/edit_file. "
-            "Default is async (background, notifies when complete). "
-            "Modes: 'fast' (async, max 5 turns), 'standard' (async, default), "
-            "'readonly' (async, analysis only), 'sync' (blocking)."
+            "All runs are async (background, notifies when complete). "
+            "Modes: 'standard' (default, full tool access), "
+            "'readonly' (read-only analysis)."
         )
 
     @property
@@ -93,12 +93,10 @@ class ClaudeCodeTool(Tool):
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["fast", "standard", "readonly", "sync"],
+                    "enum": ["standard", "readonly"],
                     "description": (
-                        "fast: async, max 5 turns, 120s timeout; "
-                        "standard: async, max 15 turns (default); "
-                        "readonly: async, analysis only; "
-                        "sync: synchronous blocking execution"
+                        "standard: async, full tool access (default); "
+                        "readonly: async, analysis only"
                     ),
                 },
                 "session_id": {
@@ -121,83 +119,36 @@ class ClaudeCodeTool(Tool):
         if not Path(project).is_dir():
             return f"Error: Project directory does not exist: {project}"
 
-        if mode == "sync":
-            task_id: str | None = None
-            if self._task_store:
-                task_id = self._task_store.submit_sync_task(
-                    origin_session_key=self._session_key,
-                    prompt=prompt,
-                    project_path=project,
-                    task_type="claude_code",
-                )
-
-            parsed, formatted = await self._execute_sync(prompt, project, session_id)
-
-            if task_id and self._task_store:
-                is_error = parsed.get("is_error", False)
-                await self._task_store.complete_sync_task(
-                    task_id,
-                    status="failed" if is_error else "succeeded",
-                    result_text=formatted,
-                    error_message=formatted if is_error else "",
-                    session_id=parsed.get("session_id", ""),
-                )
-
-            return formatted
-
         if not self._task_store:
-            logger.warning("claude_code: BackgroundTaskStore not available, falling back to sync")
-            _parsed, formatted = await self._execute_sync(prompt, project, session_id)
-            return formatted
+            return "Error: BackgroundTaskStore not available."
 
-        timeout = 120 if mode == "fast" else self._timeout
-        task_id = self._task_store.submit_coding_task(
+        from ava.agent.worktree_manager import resolve_target, make_inplace_workspace
+
+        try:
+            target = resolve_target(project)
+        except ValueError:
+            target = None
+
+        workspace = None
+        if target:
+            ws_id = f"{self._session_key}:{target.workspace_key}"
+            workspace = make_inplace_workspace(target, workspace_id=ws_id)
+
+        result = self._task_store.submit_coding_task(
             executor=self._execute_background,
             origin_session_key=self._session_key,
             prompt=prompt,
             project_path=project,
-            timeout=timeout,
+            timeout=self._timeout,
             task_type="claude_code",
-            auto_continue=mode in ("standard", "fast"),
+            auto_continue=mode == "standard",
+            target=target,
+            workspace=workspace,
             mode=mode,
             session_id=session_id,
             project=project,
         )
-        return f"Claude Code task started (id: {task_id}). Use /task to check progress."
-
-    async def _execute_sync(
-        self,
-        prompt: str,
-        project: str,
-        session_id: str | None = None,
-    ) -> tuple[dict[str, Any], str]:
-        """Execute Claude Code synchronously. Returns (parsed_json, formatted_output)."""
-        claude_bin = shutil.which("claude")
-        if not claude_bin:
-            formatted = (
-                "Error: claude not found in PATH. Install Claude Code CLI globally: "
-                "npm install -g @anthropic-ai/claude-code"
-            )
-            return {"is_error": True}, formatted
-
-        cmd = self._build_command(prompt, project, "standard", session_id)
-        timeout = self._timeout
-
-        logger.info("claude_code (sync): project={}", project)
-        stdout, stderr = await self._run_subprocess(cmd, project, timeout)
-
-        if stderr and not stdout:
-            formatted = f"Error: Claude Code failed.\n{stderr[:2000]}"
-            return {"is_error": True}, formatted
-
-        parsed = self._parse_result(stdout)
-        if parsed.get("_parse_error"):
-            raw = stdout[:_MAX_OUTPUT_CHARS] if stdout else "(no output)"
-            formatted = f"Claude Code returned non-JSON output:\n{raw}"
-            return {"is_error": True}, formatted
-
-        self._record_stats(parsed, prompt)
-        return parsed, self._format_output(parsed, "sync")
+        return self._format_submit_result(result)
 
     async def _execute_background(
         self,
@@ -244,7 +195,6 @@ class ClaudeCodeTool(Tool):
         mode: str,
         session_id: str | None,
     ) -> list[str]:
-        max_turns = 5 if mode == "fast" else self._max_turns
         allowed = "View,Read,Glob,Grep" if mode == "readonly" else self._allowed_tools
 
         cmd = [
@@ -252,7 +202,7 @@ class ClaudeCodeTool(Tool):
             "-p", prompt,
             "--output-format", "json",
             "--model", self._model,
-            "--max-turns", str(max_turns),
+            "--max-turns", str(self._max_turns),
             "--allowedTools", allowed,
         ]
 
@@ -305,6 +255,16 @@ class ClaudeCodeTool(Tool):
                 except asyncio.TimeoutError:
                     pass
                 return "", f"Claude Code timed out after {timeout}s"
+            except asyncio.CancelledError:
+                logger.info("claude_code: cancelled, killing child pid={}", process.pid)
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+                raise
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return "", f"Failed to start Claude Code: {e}"
 
@@ -384,6 +344,18 @@ class ClaudeCodeTool(Tool):
             model_name, input_tokens, output_tokens, cache_read, cache_creation,
             cost, num_turns, duration_ms,
         )
+
+    @staticmethod
+    def _format_submit_result(result: SubmitResult) -> str:
+        parts = [f"Claude Code task started (id: {result.task_id})."]
+        if result.replaced_task_id:
+            parts.append(f" Replaced previous task {result.replaced_task_id}.")
+        if result.active_in_session:
+            parts.append(
+                f" ({len(result.active_in_session)} other active task(s) in this session)"
+            )
+        parts.append(" Use /task to check progress.")
+        return "".join(parts)
 
     def _format_output(self, parsed: dict[str, Any], mode: str) -> str:
         is_error = parsed.get("is_error", False)

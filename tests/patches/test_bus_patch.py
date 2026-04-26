@@ -25,11 +25,12 @@ class TestBusPatch:
         assert isinstance(queue, asyncio.Queue)
         assert bus._console_listeners["sess1"] is queue
 
-    def test_unregister_listener(self, bus):
-        """T8.2: unregistered listener is removed."""
-        bus.register_console_listener("sess1")
+    def test_unregister_listener_marks_detached(self, bus):
+        """T8.2: unregistered listener is retained as a detached sticky queue."""
+        queue = bus.register_console_listener("sess1")
         bus.unregister_console_listener("sess1")
-        assert "sess1" not in getattr(bus, "_console_listeners", {})
+        assert bus._console_listeners["sess1"] is queue
+        assert getattr(queue, "_ava_consumer_detached", False) is True
 
     async def test_dispatch_event(self, bus):
         """T8.3: dispatch enqueues the event for the registered session."""
@@ -39,12 +40,34 @@ class TestBusPatch:
         received = await asyncio.wait_for(queue.get(), timeout=0.1)
         assert received == event
 
-    def test_re_register_listener_replaces_queue(self, bus):
-        """T8.4: repeated register replaces the previous queue for the same session."""
+    def test_re_register_listener_reuses_active_queue(self, bus):
+        """T8.4: repeated register reuses the sticky queue for the same session."""
         old_queue = bus.register_console_listener("sess1")
         new_queue = bus.register_console_listener("sess1")
-        assert old_queue is not new_queue
+        assert old_queue is new_queue
         assert bus._console_listeners["sess1"] is new_queue
+
+    @pytest.mark.asyncio
+    async def test_re_register_after_detach_reuses_buffered_queue(self, bus):
+        queue = bus.register_console_listener("sess1")
+        await queue.put({"type": "complete", "content": "done"})
+        bus.unregister_console_listener("sess1")
+
+        reused_queue = bus.register_console_listener("sess1")
+
+        assert reused_queue is queue
+        assert getattr(reused_queue, "_ava_consumer_detached", False) is False
+        assert reused_queue.get_nowait() == {"type": "complete", "content": "done"}
+
+    def test_reap_idle_listener_removes_detached_queue(self, bus):
+        queue = bus.register_console_listener("sess1")
+        bus.unregister_console_listener("sess1")
+        queue._ava_detached_at = 0.0
+
+        reaped = bus.reap_idle_console_listeners(now=301.0, idle_seconds=300.0)
+
+        assert reaped == ["sess1"]
+        assert "sess1" not in getattr(bus, "_console_listeners", {})
 
     async def test_dispatch_no_listener(self, bus):
         """T8.5: dispatch to unregistered session is a no-op."""

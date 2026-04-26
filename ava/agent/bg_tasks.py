@@ -9,21 +9,25 @@ Phase 1 只实装 coding 事件源，但读接口从第一天起就是通用的�
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
+    from ava.agent.worktree_manager import ExecutionWorkspace, ProjectTarget
 
 TaskStatus = Literal["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]
 
 _MAX_CONTINUATION_BUDGET = 5
 _FINISHED_RETENTION_MAX_ITEMS = 20
 _FINISHED_RETENTION_MAX_AGE_S = 30 * 60
+_BG_TASK_ASSISTANT_RE = re.compile(r"^\[Background Task ([A-Za-z0-9_-]+) [A-Z_]+\]\n")
 
 
 @dataclass
@@ -50,14 +54,33 @@ class TaskSnapshot:
     last_tool_name: str = ""
     todo_summary: dict[str, int] | None = None
     project_path: str = ""
+    cli_run_id: str = ""
     cli_session_id: str = ""
     auto_continue: bool = False
-    execution_mode: Literal["async", "sync"] = "async"
+    # workspace-aware fields (Phase 1)
+    repo_root: str = ""
+    workdir_relpath: str = ""
+    workspace_key: str = ""
+    workspace_id: str = ""
+    execution_cwd: str = ""
+    isolation_mode: str = "inplace"
+    branch_name: str = ""
+    worktree_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["timeline"] = [asdict(e) for e in self.timeline]
         return d
+
+
+@dataclass
+class SubmitResult:
+    """Returned by submit_coding_task to give callers workspace-aware context."""
+    task_id: str
+    reused: bool
+    replaced_task_id: str | None
+    workspace_id: str
+    active_in_session: list[str]
 
 
 CodingExecutor = Callable[..., Awaitable[dict[str, Any]]]
@@ -79,6 +102,21 @@ class BackgroundTaskStore:
     def set_agent_loop(self, loop: AgentLoop) -> None:
         self._agent_loop = loop
 
+    @staticmethod
+    def _session_has_bg_completion(messages: list[dict[str, Any]], task_id: str) -> bool:
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            match = _BG_TASK_ASSISTANT_RE.match(content)
+            if match and match.group(1) == task_id:
+                return True
+        return False
+
     def _ensure_tables(self) -> None:
         if not self._db:
             return
@@ -95,7 +133,6 @@ class BackgroundTaskStore:
                     finished_at REAL,
                     result_preview TEXT,
                     error_message TEXT,
-                    execution_mode TEXT NOT NULL DEFAULT 'async',
                     extra TEXT
                 )
             """)
@@ -116,12 +153,6 @@ class BackgroundTaskStore:
                 "CREATE INDEX IF NOT EXISTS idx_bg_task_events_task "
                 "ON bg_task_events(task_id)"
             )
-            try:
-                self._db.execute(
-                    "ALTER TABLE bg_tasks ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'async'"
-                )
-            except Exception:
-                pass
             self._db.commit()
         except Exception as exc:
             logger.warning("BackgroundTaskStore: failed to create tables: {}", exc)
@@ -136,28 +167,63 @@ class BackgroundTaskStore:
         *,
         origin_session_key: str,
         prompt: str,
-        project_path: str,
+        project_path: str = "",
         timeout: int,
         auto_continue: bool = False,
         task_type: str = "coding",
+        target: ProjectTarget | None = None,
+        workspace: ExecutionWorkspace | None = None,
+        replace_task_id: str | None = None,
+        workspace_exclusive: bool = True,
         **executor_kwargs: Any,
-    ) -> str:
+    ) -> SubmitResult:
+        ws_id = workspace.workspace_id if workspace else ""
+        ws_key = workspace.workspace_key if workspace else ""
+
+        if replace_task_id:
+            self._sync_cancel_and_wait(replace_task_id)
+        elif workspace_exclusive and ws_id:
+            existing = self.find_active_by_workspace(ws_id)
+            if existing:
+                replaced = existing[0]
+                replace_task_id = replaced.task_id
+                self._sync_cancel_and_wait(replaced.task_id)
+
         task_id = uuid.uuid4().hex[:12]
         now = time.time()
+
+        effective_project_path = project_path
+        if workspace:
+            effective_project_path = workspace.execution_cwd or project_path
+
         snapshot = TaskSnapshot(
             task_id=task_id,
             task_type=task_type,
             origin_session_key=origin_session_key,
             status="queued",
             prompt_preview=prompt[:200],
-            project_path=project_path,
+            project_path=effective_project_path,
             started_at=now,
             timeline=[TimelineEvent(timestamp=now, event="submitted", detail=prompt[:100])],
             auto_continue=auto_continue,
+            repo_root=target.repo_root if target else "",
+            workdir_relpath=target.workdir_relpath if target else "",
+            workspace_key=ws_key,
+            workspace_id=ws_id,
+            execution_cwd=workspace.execution_cwd if workspace else effective_project_path,
+            isolation_mode=workspace.isolation_mode if workspace else "inplace",
+            branch_name=workspace.branch_name or "" if workspace else "",
+            worktree_path=workspace.worktree_path or "" if workspace else "",
         )
         self._active[task_id] = snapshot
         self._persist_task(snapshot, full_prompt=prompt)
         self._persist_event(task_id, "submitted", prompt[:100])
+
+        active_ids = [
+            s.task_id for s in self._active.values()
+            if s.origin_session_key == origin_session_key
+            and s.task_id != task_id
+        ]
 
         async def _run() -> None:
             snapshot.status = "running"
@@ -174,7 +240,7 @@ class BackgroundTaskStore:
                 snapshot.elapsed_ms = int((snapshot.finished_at - snapshot.started_at) * 1000)
                 full_result_str = self._stringify_result_value(result.get("result"))
                 snapshot.result_preview = full_result_str
-                snapshot.cli_session_id = result.get("session_id", "")
+                snapshot.cli_run_id, snapshot.cli_session_id = self._resolve_cli_ids(result)
                 self._record_event(task_id, "succeeded", snapshot.result_preview[:100])
                 self._update_task_status(
                     task_id, "succeeded", snapshot, full_result=full_result_str,
@@ -211,67 +277,13 @@ class BackgroundTaskStore:
 
         task = asyncio.create_task(_run())
         self._tasks[task_id] = task
-        return task_id
-
-    def submit_sync_task(
-        self,
-        *,
-        origin_session_key: str,
-        prompt: str,
-        project_path: str,
-        task_type: str = "coding",
-    ) -> str:
-        """Register a sync task. Caller executes it inline and reports completion."""
-        task_id = uuid.uuid4().hex[:12]
-        now = time.time()
-        snapshot = TaskSnapshot(
+        return SubmitResult(
             task_id=task_id,
-            task_type=task_type,
-            origin_session_key=origin_session_key,
-            status="running",
-            prompt_preview=prompt[:200],
-            project_path=project_path,
-            started_at=now,
-            timeline=[
-                TimelineEvent(timestamp=now, event="submitted", detail=prompt[:100]),
-                TimelineEvent(timestamp=now, event="started", detail="sync mode"),
-            ],
-            execution_mode="sync",
+            reused=False,
+            replaced_task_id=replace_task_id,
+            workspace_id=ws_id,
+            active_in_session=active_ids,
         )
-        self._active[task_id] = snapshot
-        self._persist_task(snapshot, full_prompt=prompt)
-        self._persist_event(task_id, "submitted", prompt[:100])
-        self._persist_event(task_id, "started", "sync mode")
-        return task_id
-
-    async def complete_sync_task(
-        self,
-        task_id: str,
-        *,
-        status: Literal["succeeded", "failed"],
-        result_text: str = "",
-        error_message: str = "",
-        session_id: str = "",
-    ) -> None:
-        """Persist a sync task result without session writes, outbound notifications, or continuation."""
-        snapshot = self._active.get(task_id)
-        if not snapshot:
-            return
-
-        now = time.time()
-        snapshot.status = status
-        snapshot.finished_at = now
-        snapshot.elapsed_ms = int((now - (snapshot.started_at or now)) * 1000)
-        snapshot.result_preview = result_text
-        snapshot.error_message = error_message
-        snapshot.cli_session_id = session_id
-
-        event_name = "succeeded" if status == "succeeded" else "failed"
-        self._record_event(task_id, event_name, (result_text or error_message)[:100])
-        self._update_task_status(task_id, status, snapshot, full_result=result_text)
-
-        self._finished[task_id] = self._active.pop(task_id, snapshot)
-        self._prune_finished()
 
     def record_event(
         self, task_id: str, event: str, detail: str = "",
@@ -286,6 +298,49 @@ class BackgroundTaskStore:
                 TimelineEvent(timestamp=now, event=event, detail=detail)
             )
         self._persist_event(task_id, event, detail)
+
+    # ------------------------------------------------------------------
+    # Workspace-aware query
+    # ------------------------------------------------------------------
+
+    def find_active_by_workspace(self, workspace_id: str) -> list[TaskSnapshot]:
+        return [
+            s for s in self._active.values()
+            if s.workspace_id == workspace_id and s.status in ("queued", "running")
+        ]
+
+    def find_active_by_target(self, workspace_key: str) -> list[TaskSnapshot]:
+        return [
+            s for s in self._active.values()
+            if s.workspace_key == workspace_key and s.status in ("queued", "running")
+        ]
+
+    def list_active_by_session(self, session_key: str) -> list[TaskSnapshot]:
+        return [
+            s for s in self._active.values()
+            if s.origin_session_key == session_key and s.status in ("queued", "running")
+        ]
+
+    def _sync_cancel_and_wait(self, task_id: str) -> None:
+        """Cancel a task for replace. Also handles the edge case where _run
+        hasn't started yet (task cancelled before first await)."""
+        if task_id not in self._tasks:
+            return
+        atask = self._tasks[task_id]
+        if atask.done():
+            return
+        atask.cancel()
+        logger.info("BackgroundTaskStore: cancelled task {} for replace", task_id)
+
+        snapshot = self._active.get(task_id)
+        if snapshot and snapshot.status == "queued":
+            snapshot.status = "cancelled"
+            snapshot.finished_at = time.time()
+            snapshot.error_message = "Replaced by new task"
+            self._record_event(task_id, "cancelled", "Replaced by new task")
+            self._update_task_status(task_id, "cancelled", snapshot)
+            self._finished[task_id] = self._active.pop(task_id)
+            self._tasks.pop(task_id, None)
 
     # ------------------------------------------------------------------
     # 读取接口
@@ -407,6 +462,19 @@ class BackgroundTaskStore:
             return ""
         return value if isinstance(value, str) else str(value)
 
+    @classmethod
+    def _resolve_cli_ids(cls, result: dict[str, Any] | None) -> tuple[str, str]:
+        if not result:
+            return "", ""
+
+        session_id = cls._stringify_result_value(result.get("session_id")).strip()
+        run_id = cls._stringify_result_value(result.get("run_id")).strip()
+        thread_id = cls._stringify_result_value(result.get("thread_id")).strip()
+
+        cli_run_id = run_id or session_id or thread_id
+        cli_session_id = session_id or cli_run_id
+        return cli_run_id, cli_session_id
+
     def _resolve_result_text(
         self,
         snapshot: TaskSnapshot,
@@ -446,10 +514,16 @@ class BackgroundTaskStore:
 
         try:
             session = loop.sessions.get_or_create(snapshot.origin_session_key)
+            if self._session_has_bg_completion(session.messages, snapshot.task_id):
+                logger.info(
+                    "BackgroundTaskStore: duplicate completion ignored for session {} task {}",
+                    snapshot.origin_session_key, snapshot.task_id,
+                )
+                return
             session.messages.append({
                 "role": "assistant",
                 "content": formatted,
-                "timestamp": time.time(),
+                "timestamp": datetime.now().isoformat(),
                 "tools_used": [f"bg_task:{snapshot.task_type}"],
             })
             loop.sessions.save(session)
@@ -479,7 +553,7 @@ class BackgroundTaskStore:
 
         rebuild_info = await self._run_post_task_hooks(snapshot)
 
-        if snapshot.auto_continue:
+        if snapshot.auto_continue or snapshot.status == "failed":
             await self._trigger_continuation(snapshot, rebuild_info, result=result)
 
     # ------------------------------------------------------------------
@@ -637,8 +711,16 @@ class BackgroundTaskStore:
         try:
             import json
             extra: dict[str, Any] = {
+                "cli_run_id": snapshot.cli_run_id,
                 "cli_session_id": snapshot.cli_session_id,
-                "execution_mode": snapshot.execution_mode,
+                "repo_root": snapshot.repo_root,
+                "workdir_relpath": snapshot.workdir_relpath,
+                "workspace_key": snapshot.workspace_key,
+                "workspace_id": snapshot.workspace_id,
+                "execution_cwd": snapshot.execution_cwd,
+                "isolation_mode": snapshot.isolation_mode,
+                "branch_name": snapshot.branch_name,
+                "worktree_path": snapshot.worktree_path,
             }
             if full_prompt:
                 extra["full_prompt"] = full_prompt
@@ -648,15 +730,14 @@ class BackgroundTaskStore:
                 """INSERT OR REPLACE INTO bg_tasks
                    (task_id, task_type, origin_session_key, status,
                     prompt_preview, project_path, started_at, finished_at,
-                    result_preview, error_message, execution_mode, extra)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    result_preview, error_message, extra)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     snapshot.task_id, snapshot.task_type,
                     snapshot.origin_session_key, snapshot.status,
                     snapshot.prompt_preview, snapshot.project_path,
                     snapshot.started_at, snapshot.finished_at,
                     snapshot.result_preview, snapshot.error_message,
-                    snapshot.execution_mode,
                     json.dumps(extra),
                 ),
             )
@@ -683,15 +764,21 @@ class BackgroundTaskStore:
                         extra = _json.loads(row["extra"] or "{}")
                     except Exception:
                         pass
+                extra["cli_run_id"] = snapshot.cli_run_id
                 extra["cli_session_id"] = snapshot.cli_session_id
-                extra["execution_mode"] = snapshot.execution_mode
+                extra["workspace_id"] = snapshot.workspace_id
+                extra["workspace_key"] = snapshot.workspace_key
+                extra["execution_cwd"] = snapshot.execution_cwd
+                extra["isolation_mode"] = snapshot.isolation_mode
+                extra["branch_name"] = snapshot.branch_name
+                extra["worktree_path"] = snapshot.worktree_path
                 if full_result:
                     extra["full_result"] = full_result
                 self._db.execute(
                     """UPDATE bg_tasks SET status=?, finished_at=?,
-                       result_preview=?, error_message=?, execution_mode=?, extra=? WHERE task_id=?""",
+                       result_preview=?, error_message=?, extra=? WHERE task_id=?""",
                     (status, snapshot.finished_at, snapshot.result_preview,
-                     snapshot.error_message, snapshot.execution_mode, _json.dumps(extra), task_id),
+                     snapshot.error_message, _json.dumps(extra), task_id),
                 )
             else:
                 self._db.execute(
@@ -751,7 +838,7 @@ class BackgroundTaskStore:
             row = self._db.fetchone(
                 """SELECT task_id, task_type, origin_session_key, status,
                           prompt_preview, project_path, started_at, finished_at,
-                          result_preview, error_message, execution_mode, extra
+                          result_preview, error_message, extra
                    FROM bg_tasks
                    WHERE task_id=?""",
                 (task_id,),
@@ -780,9 +867,16 @@ class BackgroundTaskStore:
             result_preview=self._row_val(row, "result_preview"),
             error_message=self._row_val(row, "error_message"),
             project_path=self._row_val(row, "project_path"),
-            cli_session_id=extra.get("cli_session_id", ""),
-            execution_mode=self._row_val(row, "execution_mode", None)
-            or extra.get("execution_mode", "async"),
+            cli_run_id=extra.get("cli_run_id", "") or extra.get("cli_session_id", ""),
+            cli_session_id=extra.get("cli_session_id", "") or extra.get("cli_run_id", ""),
+            repo_root=extra.get("repo_root", ""),
+            workdir_relpath=extra.get("workdir_relpath", ""),
+            workspace_key=extra.get("workspace_key", ""),
+            workspace_id=extra.get("workspace_id", ""),
+            execution_cwd=extra.get("execution_cwd", ""),
+            isolation_mode=extra.get("isolation_mode", "inplace"),
+            branch_name=extra.get("branch_name", ""),
+            worktree_path=extra.get("worktree_path", ""),
         )
 
     @staticmethod
@@ -821,7 +915,7 @@ class BackgroundTaskStore:
             rows = self._db.fetchall(
                 f"""SELECT task_id, task_type, origin_session_key, status,
                            prompt_preview, project_path, started_at, finished_at,
-                           result_preview, error_message, execution_mode, extra
+                           result_preview, error_message, extra
                     FROM bg_tasks {where}
                     ORDER BY started_at DESC
                     LIMIT ? OFFSET ?""",

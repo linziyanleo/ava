@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Awaitable
+
+from nanobot.bus.events import OutboundMessage
+
+from ava.console.services.context_preview_service import build_context_preview
+
+_LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo or timezone.utc
+_IMAGE_PLACEHOLDER_RE = re.compile(r"\[image:\s*([^\]]+?)\]", re.IGNORECASE)
+_BG_TASK_ASSISTANT_RE = re.compile(
+    r"^\[Background Task ([A-Za-z0-9_-]+) ([A-Z_]+)\]\nType: ([^|\n]+?) \| Duration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
+_BG_TASK_CONTINUATION_RE = re.compile(
+    r"^\[Background Task Completed — ([A-Z_]+)\]\nTask: ([^:\n]+):([A-Za-z0-9_-]+)\nDuration: (\d+)ms(?:\n\n([\s\S]*))?$"
+)
 
 
 class ChatService:
@@ -19,6 +34,17 @@ class ChatService:
     @property
     def _use_db(self) -> bool:
         return self._db is not None
+
+    def _session_exists(self, session_key: str) -> bool:
+        if self._use_db:
+            row = self._db.fetchone(
+                "SELECT 1 AS ok FROM sessions WHERE key = ?",
+                (session_key,),
+            )
+            return row is not None
+
+        safe_key = session_key.replace(":", "_")
+        return (self._sessions_dir / f"{safe_key}.jsonl").exists()
 
     @staticmethod
     def _derive_scene(key: str) -> str:
@@ -57,6 +83,256 @@ class ChatService:
             return parsed
         return raw_content
 
+    @staticmethod
+    def _normalize_direct_response_content(response: Any) -> str:
+        if response is None:
+            return ""
+        if isinstance(response, OutboundMessage):
+            return response.content or ""
+        if isinstance(response, str):
+            return response
+        return str(response)
+
+    @staticmethod
+    def _message_text(raw_content: Any) -> str:
+        decoded = ChatService._decode_message_content(raw_content)
+        if isinstance(decoded, str):
+            return decoded.strip()
+        if isinstance(decoded, list):
+            return "\n".join(
+                item.get("text", "").strip()
+                for item in decoded
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            ).strip()
+        return ""
+
+    @staticmethod
+    def _preview_text(raw_content: Any) -> str:
+        text = ChatService._message_text(raw_content)
+        if not text:
+            return ""
+        text = _IMAGE_PLACEHOLDER_RE.sub("[image]", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    @staticmethod
+    def _texts_equivalent(left: str, right: str) -> bool:
+        if not left or not right:
+            return False
+        if left == right:
+            return True
+        return SequenceMatcher(a=left, b=right).ratio() >= 0.995
+
+    @staticmethod
+    def _background_task_signature(content: Any) -> tuple[str, str, str, str] | None:
+        if not isinstance(content, str):
+            return None
+        assistant_match = _BG_TASK_ASSISTANT_RE.match(content)
+        if assistant_match:
+            return (
+                "assistant",
+                assistant_match[1],
+                assistant_match[2],
+                assistant_match[5].strip(),
+            )
+        continuation_match = _BG_TASK_CONTINUATION_RE.match(content)
+        if continuation_match:
+            body = (continuation_match[5] or "").strip()
+            tail = "请基于以上结果继续处理后续步骤。如果所有工作已完成，请总结。"
+            if body.endswith(tail):
+                body = body[: -len(tail)].rstrip()
+            return (
+                "continuation",
+                continuation_match[3],
+                continuation_match[1],
+                body,
+            )
+        return None
+
+    @staticmethod
+    def _timestamp_sort_key(raw_timestamp: Any) -> tuple[int, float, str]:
+        if raw_timestamp is None:
+            return (1, 0.0, "")
+        if isinstance(raw_timestamp, (int, float)):
+            numeric = float(raw_timestamp)
+            return (0, numeric / 1000 if abs(numeric) >= 1e12 else numeric, "")
+        if not isinstance(raw_timestamp, str):
+            return (1, 0.0, "")
+
+        trimmed = raw_timestamp.strip()
+        if not trimmed:
+            return (1, 0.0, "")
+
+        if re.fullmatch(r"\d+(?:\.\d+)?", trimmed):
+            numeric = float(trimmed)
+            return (0, numeric / 1000 if abs(numeric) >= 1e12 else numeric, "")
+
+        try:
+            parsed = datetime.fromisoformat(trimmed.replace("Z", "+00:00"))
+        except ValueError:
+            return (1, 0.0, trimmed)
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_LOCAL_TIMEZONE)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+        return (0, parsed.timestamp(), "")
+
+    def _canonicalize_conversation_rows(
+        self,
+        msg_rows: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], bool]:
+        if not msg_rows:
+            return msg_rows, False
+
+        canonical = sorted(
+            (dict(row) for row in msg_rows),
+            key=lambda row: (
+                *self._timestamp_sort_key(row.get("timestamp")),
+                row["seq"],
+                row["id"],
+            ),
+        )
+        has_duplicate_seq = len({row["seq"] for row in canonical}) != len(canonical)
+        order_changed = [row["id"] for row in canonical] != [row["id"] for row in msg_rows]
+        needs_resequence = has_duplicate_seq or order_changed
+        if not needs_resequence:
+            return [dict(row) for row in msg_rows], False
+
+        for seq, row in enumerate(canonical):
+            row["seq"] = seq
+        return canonical, True
+
+    def _load_conversation_rows(self, session_id: int, conversation_id: str) -> list[dict[str, Any]]:
+        return self._db.fetchall(
+            """
+            SELECT id, seq, role, content, tool_calls, tool_call_id, name,
+                   reasoning_content, timestamp, conversation_id
+              FROM session_messages
+             WHERE session_id = ? AND conversation_id = ?
+             ORDER BY seq, id
+            """,
+            (session_id, conversation_id),
+        )
+
+    def _repair_conversation_artifacts(
+        self,
+        session_id: int,
+        conversation_id: str,
+        msg_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not self._use_db or not msg_rows:
+            return msg_rows
+
+        working, needs_resequence = self._canonicalize_conversation_rows(msg_rows)
+        delete_ids: list[int] = []
+        blank_assistant_ids: list[int] = []
+
+        seen_tool_call_assistants: set[tuple[str, str, str, str]] = set()
+        seen_tool_results: set[tuple[str, str, str, str]] = set()
+        seen_bg_messages: set[tuple[str, str, str, str]] = set()
+
+        idx = 0
+        while idx < len(working):
+            current = working[idx]
+            bg_signature = self._background_task_signature(current["content"])
+            if bg_signature:
+                if bg_signature in seen_bg_messages:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_bg_messages.add(bg_signature)
+            if current["role"] == "assistant" and current.get("tool_calls"):
+                signature = (
+                    current["tool_calls"] or "",
+                    current["content"] or "",
+                    current.get("reasoning_content") or "",
+                    current["timestamp"] or "",
+                )
+                if signature in seen_tool_call_assistants:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_tool_call_assistants.add(signature)
+            elif current["role"] == "tool" and current.get("tool_call_id"):
+                signature = (
+                    current["tool_call_id"] or "",
+                    current.get("name") or "",
+                    current["content"] or "",
+                    current["timestamp"] or "",
+                )
+                if signature in seen_tool_results:
+                    delete_ids.append(current["id"])
+                    del working[idx]
+                    continue
+                seen_tool_results.add(signature)
+            idx += 1
+
+        idx = 0
+        while idx + 1 < len(working):
+            current = working[idx]
+            following = working[idx + 1]
+            if current["role"] == "user" and following["role"] == "user":
+                current_text = self._message_text(current["content"])
+                following_text = self._message_text(following["content"])
+                has_followup = any(row["role"] != "user" for row in working[idx + 2:])
+                if current_text and current_text == following_text and has_followup:
+                    delete_ids.append(following["id"])
+                    del working[idx + 1]
+                    continue
+            idx += 1
+
+        idx = 0
+        while idx < len(working):
+            current = working[idx]
+            current_text = self._message_text(current["content"])
+            if current["role"] == "assistant" and current.get("tool_calls") and current_text:
+                next_idx = idx + 1
+                saw_tool = False
+                while next_idx < len(working) and working[next_idx]["role"] == "tool":
+                    saw_tool = True
+                    next_idx += 1
+                if saw_tool and next_idx < len(working):
+                    final_row = working[next_idx]
+                    final_text = self._message_text(final_row["content"])
+                    if (
+                        final_row["role"] == "assistant"
+                        and not final_row.get("tool_calls")
+                        and self._texts_equivalent(current_text, final_text)
+                    ):
+                        blank_assistant_ids.append(current["id"])
+                        current["content"] = ""
+            idx += 1
+
+        if not delete_ids and not blank_assistant_ids and not needs_resequence:
+            return msg_rows
+
+        for row_id in delete_ids:
+            self._db.execute(
+                "DELETE FROM session_messages WHERE id = ?",
+                (row_id,),
+            )
+        for row_id in blank_assistant_ids:
+            self._db.execute(
+                "UPDATE session_messages SET content = '' WHERE id = ?",
+                (row_id,),
+            )
+        if delete_ids or blank_assistant_ids:
+            self._db.commit()
+
+        refreshed = self._load_conversation_rows(session_id, conversation_id)
+        canonical, needs_resequence = self._canonicalize_conversation_rows(refreshed)
+        if not needs_resequence:
+            return refreshed
+
+        for row in canonical:
+            self._db.execute(
+                "UPDATE session_messages SET seq = ? WHERE id = ?",
+                (row["seq"], row["id"]),
+            )
+        self._db.commit()
+        return self._load_conversation_rows(session_id, conversation_id)
+
     def _resolve_active_conversation_id(
         self,
         session_id: int,
@@ -84,6 +360,46 @@ class ChatService:
         value = latest["conversation_id"]
         return value if isinstance(value, str) else ""
 
+    @staticmethod
+    def _normalize_token_stats(stats: dict[str, Any] | None) -> dict[str, int]:
+        data = stats or {}
+        return {
+            "total_prompt_tokens": int(data.get("total_prompt_tokens", 0) or 0),
+            "total_completion_tokens": int(data.get("total_completion_tokens", 0) or 0),
+            "total_tokens": int(data.get("total_tokens", 0) or 0),
+            "llm_calls": int(data.get("llm_calls", 0) or 0),
+        }
+
+    def _resolve_session_token_stats(
+        self,
+        session_key: str,
+        conversation_id: str,
+        fallback: dict[str, Any] | None,
+    ) -> dict[str, int]:
+        fallback_stats = self._normalize_token_stats(fallback)
+        if not self._use_db:
+            return fallback_stats
+
+        try:
+            row = self._db.fetchone(
+                """
+                SELECT COALESCE(SUM(prompt_tokens), 0) AS total_prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0) AS total_completion_tokens,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                       COUNT(*) AS llm_calls
+                  FROM token_usage
+                 WHERE session_key = ? AND conversation_id = ?
+                """,
+                (session_key, conversation_id),
+            )
+        except Exception:
+            return fallback_stats
+
+        live_stats = self._normalize_token_stats(dict(row) if row else None)
+        if live_stats["llm_calls"] == 0 and fallback_stats["llm_calls"] > 0:
+            return fallback_stats
+        return live_stats
+
     def list_sessions(self, user_id: str | None = None) -> list[dict]:
         if self._use_db:
             rows = self._db.fetchall(
@@ -107,18 +423,14 @@ class ChatService:
                         ts = json.loads(r["token_stats"])
                     except json.JSONDecodeError:
                         pass
+                active_conversation_id = self._resolve_active_conversation_id(r["id"], meta)
                 sessions.append({
                     "key": key,
                     "scene": self._derive_scene(key),
                     "created_at": r["created_at"] or "",
                     "updated_at": r["updated_at"] or "",
-                    "conversation_id": self._resolve_active_conversation_id(r["id"], meta),
-                    "token_stats": {
-                        "total_prompt_tokens": ts.get("total_prompt_tokens", 0),
-                        "total_completion_tokens": ts.get("total_completion_tokens", 0),
-                        "total_tokens": ts.get("total_tokens", 0),
-                        "llm_calls": ts.get("llm_calls", 0),
-                    },
+                    "conversation_id": active_conversation_id,
+                    "token_stats": self._resolve_session_token_stats(key, active_conversation_id, ts),
                     "message_count": r["msg_count"],
                 })
             return sessions
@@ -216,17 +528,7 @@ class ChatService:
                 if timestamp:
                     group["updated_at"] = timestamp
                 if not group["first_message_preview"]:
-                    preview = self._decode_message_content(message_row["content"])
-                    if isinstance(preview, str):
-                        preview_text = preview.strip()
-                    elif isinstance(preview, list):
-                        preview_text = " ".join(
-                            item.get("text", "")
-                            for item in preview
-                            if isinstance(item, dict) and isinstance(item.get("text"), str)
-                        ).strip()
-                    else:
-                        preview_text = ""
+                    preview_text = self._preview_text(message_row["content"])
                     if preview_text:
                         group["first_message_preview"] = preview_text[:60]
 
@@ -258,9 +560,9 @@ class ChatService:
         last_timestamp = messages[-1].get("timestamp", "")
         preview = ""
         for message in messages:
-            content = message.get("content")
-            if isinstance(content, str) and content.strip():
-                preview = content.strip()[:60]
+            preview_text = self._preview_text(message.get("content"))
+            if preview_text:
+                preview = preview_text[:60]
                 break
         return [{
             "conversation_id": "",
@@ -293,12 +595,19 @@ class ChatService:
                 else conversation_id
             )
             msg_rows = self._db.fetchall(
-                """SELECT role, content, tool_calls, tool_call_id, name,
-                          reasoning_content, timestamp, conversation_id
-                   FROM session_messages
-                   WHERE session_id = ? AND conversation_id = ?
-                   ORDER BY seq""",
+                """
+                SELECT id, seq, role, content, tool_calls, tool_call_id, name,
+                       reasoning_content, timestamp, conversation_id
+                  FROM session_messages
+                 WHERE session_id = ? AND conversation_id = ?
+                 ORDER BY seq, id
+                """,
                 (row["id"], resolved_conversation_id),
+            )
+            msg_rows = self._repair_conversation_artifacts(
+                row["id"],
+                resolved_conversation_id,
+                msg_rows,
             )
             messages: list[dict] = []
             for mr in msg_rows:
@@ -339,6 +648,31 @@ class ChatService:
             except json.JSONDecodeError:
                 continue
         return messages
+
+    def get_context_preview(
+        self,
+        session_key: str,
+        *,
+        full: bool = False,
+        reveal: bool = False,
+    ) -> dict[str, Any]:
+        if not self._agent:
+            raise RuntimeError("Context preview is unavailable while the gateway is offline")
+        if not self._session_exists(session_key):
+            raise KeyError(session_key)
+
+        sessions = getattr(self._agent, "sessions", None)
+        if sessions is None or not hasattr(sessions, "get_or_create"):
+            raise RuntimeError("Agent session manager is unavailable")
+
+        session = sessions.get_or_create(session_key)
+        return build_context_preview(
+            loop=self._agent,
+            session=session,
+            session_key=session_key,
+            full=full,
+            reveal=reveal,
+        )
 
     def create_session(self, user_id: str, title: str = "") -> dict[str, str]:
         sid = uuid.uuid4().hex[:8]
@@ -391,7 +725,10 @@ class ChatService:
         session_id: str,
         message: str,
         user_id: str,
+        media: list[str] | None = None,
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[..., Awaitable[None]] | None = None,
+        on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
         response = await self._agent.process_direct(
@@ -400,8 +737,11 @@ class ChatService:
             channel="console",
             chat_id=user_id,
             on_progress=on_progress,
+            on_stream=on_stream,
+            on_stream_end=on_stream_end,
+            media=media,
         )
-        return response or ""
+        return self._normalize_direct_response_content(response)
 
     def get_history(self, session_id: str) -> list[dict]:
         if self._use_db:

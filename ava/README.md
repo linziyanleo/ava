@@ -52,5 +52,18 @@ python -m ava agent -m "Hello"
 ## Console / Mock 数据
 
 - repo 内版本化数据仍在 `ava/console/mock_bundle/`
-- 运行时可写数据继续沿用 nanobot 默认的工作目录与持久化位置
+- Ava 运行时默认 home 已迁到 `~/.ava/`，可通过 `AVA_HOME=/custom/path` 覆盖
+- 老用户如果仍只有 `~/.nanobot/`，首次启动会提示先执行 `ava migrate-home`
+- 临时兼容旧 home 可用 `ava --legacy-home ...` 或设置 `AVA_LEGACY_HOME=1`
 - Console 和 gateway 的联动行为保持原契约，不因为仓库抽取而改成双进程分叉实现
+
+## Home 迁移
+
+```bash
+ava migrate-home --dry-run
+ava migrate-home
+```
+
+- `--dry-run` 只预览迁移项，不落盘
+- `--mode copy|move|symlink` 控制迁移策略，默认 `copy`
+- `--rollback` 会把当前 `AVA_HOME` 下的数据迁回 legacy `~/.nanobot/`

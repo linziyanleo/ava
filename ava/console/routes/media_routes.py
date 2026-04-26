@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
@@ -41,7 +43,8 @@ async def get_image(
     path = get_services_for_user(user).media.get_image_path(filename)
     if path is None:
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(str(path), media_type="image/png")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(str(path), media_type=media_type)
 
 
 @router.delete("/records/{record_id}")

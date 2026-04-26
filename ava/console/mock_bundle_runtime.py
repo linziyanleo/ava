@@ -16,9 +16,10 @@ from typing import Any
 from ava.agent.bg_tasks import TimelineEvent
 from ava.storage.database import Database
 
-LOCAL_ADMIN_USERNAME = "nanobot"
+LOCAL_ADMIN_USERNAME = "admin"
+LOCAL_ADMIN_DEFAULT_PASSWORD = "admin"
 MOCK_TESTER_USERNAME = "mock_tester"
-LOCAL_ADMIN_PASSWORD_FILE = "nanobot_password"
+LOCAL_ADMIN_PASSWORD_FILE = "admin_password"
 MOCK_TESTER_PASSWORD_FILE = "mock_tester_password"
 LOCAL_SECRETS_DIRNAME = "local-secrets"
 MOCK_DATA_DIRNAME = "mock_data"
@@ -91,10 +92,19 @@ class MockBackgroundTaskStore:
         task.setdefault("last_tool_name", "")
         task.setdefault("todo_summary", None)
         task.setdefault("project_path", "")
-        task.setdefault("cli_session_id", "")
+        task.setdefault("cli_run_id", task.get("cli_session_id", ""))
+        task.setdefault("cli_session_id", task.get("cli_run_id", ""))
         task.setdefault("timeline", [])
         task.setdefault("full_prompt", "")
         task.setdefault("full_result", "")
+        task.setdefault("repo_root", "")
+        task.setdefault("workdir_relpath", "")
+        task.setdefault("workspace_key", "")
+        task.setdefault("workspace_id", "")
+        task.setdefault("execution_cwd", task.get("project_path", ""))
+        task.setdefault("isolation_mode", "inplace")
+        task.setdefault("branch_name", "")
+        task.setdefault("worktree_path", "")
         return task
 
     @staticmethod
@@ -240,6 +250,7 @@ def ensure_local_accounts(users, console_dir: Path) -> dict[str, LocalAccountInf
         username=LOCAL_ADMIN_USERNAME,
         role="admin",
         password_filename=LOCAL_ADMIN_PASSWORD_FILE,
+        default_password=LOCAL_ADMIN_DEFAULT_PASSWORD,
     )
     mock = _ensure_local_account(
         users=users,
@@ -318,9 +329,10 @@ def _ensure_local_account(
     username: str,
     role: str,
     password_filename: str,
+    default_password: str | None = None,
 ) -> LocalAccountInfo:
     password_file = secrets_dir / password_filename
-    password = _ensure_password_file(password_file)
+    password = _ensure_password_file(password_file, default_password=default_password)
 
     existing = users.get_user(username)
     if existing is None:
@@ -338,13 +350,13 @@ def _ensure_local_account(
     return LocalAccountInfo(username=username, role=role, password_file=password_file)
 
 
-def _ensure_password_file(path: Path) -> str:
+def _ensure_password_file(path: Path, default_password: str | None = None) -> str:
     if path.exists():
         password = path.read_text("utf-8").strip()
         if password:
             return password
 
-    password = secrets.token_urlsafe(24)
+    password = default_password if default_password is not None else secrets.token_urlsafe(24)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(password + "\n", "utf-8")
     _best_effort_private_file(path)

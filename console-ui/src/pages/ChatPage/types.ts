@@ -1,4 +1,26 @@
 export type SceneType = 'telegram' | 'cron' | 'heartbeat' | 'console' | 'cli' | 'feishu' | 'QQ' | 'wx' | 'discord' | 'other'
+export type ChatStreamStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'
+export type ActiveChatTransport = 'console' | 'observe' | 'none'
+
+export interface MessageContentBlock {
+  type: string
+  text?: string
+  [key: string]: unknown
+}
+
+export interface ChatComposePayload {
+  text: string
+  attachments: File[]
+}
+
+export interface ChatImageUpload {
+  filename: string
+  media_path: string
+  path: string
+  mime_type: string
+  size_bytes: number
+  preview_url: string
+}
 
 export interface SessionMeta {
   key: string
@@ -35,7 +57,7 @@ export interface ToolCall {
 
 export interface RawMessage {
   role: 'user' | 'assistant' | 'tool' | 'system'
-  content: string | null | Array<{ type: string; text?: string }>
+  content: string | null | MessageContentBlock[]
   timestamp?: string
   tool_calls?: ToolCall[]
   tool_call_id?: string
@@ -47,6 +69,8 @@ export interface RawMessage {
 export interface ToolCallWithResult {
   call: ToolCall
   result?: RawMessage
+  callTimestamp?: string
+  iteration: number
 }
 
 export interface TurnTokenStats {
@@ -72,6 +96,76 @@ export interface IterationTokenStats {
   model_role: string
   tool_names: string
   finish_reason: string
+}
+
+export interface ContextPreviewSection {
+  name: string
+  source: string
+  content: string
+  tokens: number
+  truncated: boolean
+}
+
+export interface ContextPreviewBlock {
+  type: string
+  text?: string
+  image_url?: { url: string }
+  value?: unknown
+  [key: string]: unknown
+}
+
+export interface ContextPreviewMessage {
+  role: 'user' | 'assistant' | 'tool' | 'system' | string
+  content: string
+  content_type: 'text' | 'blocks'
+  content_blocks: ContextPreviewBlock[] | null
+  tool_calls?: ToolCall[] | null
+  tool_call_id?: string | null
+  name?: string | null
+  tokens: number
+  truncated: boolean
+}
+
+export interface ContextPreview {
+  snapshot_ts: string
+  session_key: string
+  workspace: string
+  provider: {
+    name: string
+    model: string
+  }
+  scope: string
+  system_sections: ContextPreviewSection[]
+  runtime_context: {
+    content: string
+    tokens: number
+    truncated: boolean
+  }
+  messages: ContextPreviewMessage[]
+  tools: {
+    count: number
+    tokens: number
+    names: string[]
+  }
+  totals: {
+    system_tokens: number
+    runtime_tokens: number
+    history_tokens: number
+    tool_tokens: number
+    request_total_tokens: number
+    context_window: number
+    max_completion_tokens: number
+    ctx_budget: number
+    utilization_pct: number
+  }
+  flags: {
+    sanitized: boolean
+    full: boolean
+    reveal: boolean
+    streaming: boolean
+    in_flight: boolean
+  }
+  notes: string[]
 }
 
 export interface TurnGroup {

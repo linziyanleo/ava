@@ -86,7 +86,7 @@ def test_mock_tester_can_open_mock_safe_console_pages(tmp_path, monkeypatch):
     assistant_with_tools = next(msg for msg in tool_payload if msg["role"] == "assistant" and msg.get("tool_calls"))
     assert assistant_with_tools["reasoning_content"]
     tool_names = {call["function"]["name"] for call in assistant_with_tools["tool_calls"]}
-    assert tool_names == {"page_agent", "vision", "transcribe", "memory_tool", "image_gen", "claude_code"}
+    assert tool_names == {"page_agent", "vision", "transcribe", "memory_tool", "image_gen", "claude_code", "codex"}
     assert any(msg["role"] == "tool" and msg.get("tool_call_id") == "mock-call-page-agent" for msg in tool_payload)
     assert any(msg["role"] == "tool" and msg.get("tool_call_id") == "mock-call-memory-tool" for msg in tool_payload)
     assert isinstance(tool_payload[-1]["content"], list)
@@ -102,6 +102,9 @@ def test_mock_tester_can_open_mock_safe_console_pages(tmp_path, monkeypatch):
     assert bg_tasks.status_code == 200
     statuses = {task["status"] for task in bg_tasks.json()["tasks"]}
     assert statuses == {"queued", "running"}
+    codex_task = next(task for task in bg_tasks.json()["tasks"] if task["task_type"] == "codex")
+    assert codex_task["cli_run_id"] == "mock-codex-thread-01"
+    assert codex_task["cli_session_id"] == "mock-codex-thread-01"
 
     history = client.get("/api/bg-tasks/history", params={"page": 1, "page_size": 10})
     assert history.status_code == 200

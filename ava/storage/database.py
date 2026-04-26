@@ -128,14 +128,20 @@ class Database:
         if backfilled:
             logger.info("Backfilled turn_seq for {} token_usage records", backfilled)
 
+        iteration_backfilled = self.backfill_iteration()
+        if iteration_backfilled:
+            logger.info("Backfilled iteration for {} token_usage records", iteration_backfilled)
+
         return counts
 
     def backfill_turn_seq(self, session_key: str | None = None) -> int:
         """Infer turn_seq for token_usage records that have NULL turn_seq.
 
         Uses session_messages timestamps to determine which user-turn each
-        LLM call belongs to. When session_key is provided, only backfill the
-        matching session.
+        LLM call belongs to.  Turn boundaries are built from user messages
+        sorted by timestamp (not seq) and deduplicated so that each seq
+        value maps to its earliest timestamp.  The assigned turn_seq uses
+        the original ``seq`` value rather than a positional index.
         """
         conn = self._get_conn()
 
@@ -166,17 +172,23 @@ class Database:
             if not session_row:
                 continue
 
+            # Fetch user messages, deduplicate by seq (keep earliest timestamp),
+            # then sort by timestamp so boundary scanning works correctly.
             user_msgs = conn.execute(
-                "SELECT seq, timestamp FROM session_messages "
-                "WHERE session_id = ? AND role = 'user' ORDER BY seq",
+                "SELECT seq, MIN(timestamp) as timestamp FROM session_messages "
+                "WHERE session_id = ? AND role = 'user' "
+                "GROUP BY seq ORDER BY MIN(timestamp)",
                 (session_row["id"],),
             ).fetchall()
             if not user_msgs:
                 continue
 
-            turn_boundaries: list[tuple[int, str]] = []
-            for turn_idx, row in enumerate(user_msgs):
-                turn_boundaries.append((turn_idx, row["timestamp"] or ""))
+            # Build (seq_value, timestamp) boundaries sorted by timestamp
+            turn_boundaries: list[tuple[int, str]] = [
+                (row["seq"], row["timestamp"] or "")
+                for row in user_msgs
+                if row["timestamp"]
+            ]
 
             records = conn.execute(
                 "SELECT id, timestamp FROM token_usage "
@@ -186,18 +198,68 @@ class Database:
 
             for rec in records:
                 rec_ts = rec["timestamp"] or ""
-                assigned_turn = 0
-                for turn_idx, boundary_ts in turn_boundaries:
-                    if not boundary_ts:
-                        continue
+                assigned_turn = turn_boundaries[0][0] if turn_boundaries else 0
+                for seq_val, boundary_ts in turn_boundaries:
                     if rec_ts >= boundary_ts:
-                        assigned_turn = turn_idx
+                        assigned_turn = seq_val
                     else:
                         break
 
                 conn.execute(
                     "UPDATE token_usage SET turn_seq = ? WHERE id = ?",
                     (assigned_turn, rec["id"]),
+                )
+                total_updated += 1
+
+        conn.commit()
+        return total_updated
+
+    def backfill_iteration(self, session_key: str | None = None) -> int:
+        """Assign deterministic iteration values to legacy all-zero turn groups.
+
+        Only updates groups with more than one record where every row still has
+        the legacy default iteration=0. Ordering is based on timestamp then id
+        so repeated runs are idempotent.
+        """
+        conn = self._get_conn()
+
+        clauses = ["turn_seq IS NOT NULL"]
+        params: list[Any] = []
+        if session_key:
+            clauses.append("session_key = ?")
+            params.append(session_key)
+
+        groups = conn.execute(
+            f"""
+            SELECT session_key, conversation_id, turn_seq
+              FROM token_usage
+             WHERE {" AND ".join(clauses)}
+             GROUP BY session_key, conversation_id, turn_seq
+            HAVING COUNT(*) > 1 AND COALESCE(MAX(iteration), 0) = 0
+            ORDER BY session_key, conversation_id, turn_seq
+            """,
+            tuple(params),
+        ).fetchall()
+        if not groups:
+            return 0
+
+        total_updated = 0
+        for group in groups:
+            rows = conn.execute(
+                """
+                SELECT id
+                  FROM token_usage
+                 WHERE session_key = ? AND conversation_id = ? AND turn_seq = ?
+                 ORDER BY CASE WHEN timestamp IS NULL OR timestamp = '' THEN 1 ELSE 0 END,
+                          timestamp ASC,
+                          id ASC
+                """,
+                (group["session_key"], group["conversation_id"], group["turn_seq"]),
+            ).fetchall()
+            for iteration, row in enumerate(rows):
+                conn.execute(
+                    "UPDATE token_usage SET iteration = ? WHERE id = ?",
+                    (iteration, row["id"]),
                 )
                 total_updated += 1
 

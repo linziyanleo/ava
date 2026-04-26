@@ -582,6 +582,11 @@ class TokenStatsConfig(Base):
     """Token 统计配置。"""
 
     enabled: bool = True
+    snapshot_content_max_chars: int = Field(
+        default=3000,
+        validation_alias=AliasChoices("snapshot_content_max_chars", "snapshotContentMaxChars"),
+        serialization_alias="snapshot_content_max_chars",
+    )
     record_full_request_payload: bool = Field(
         default=False,
         validation_alias=AliasChoices("record_full_request_payload", "recordFullRequestPayload"),

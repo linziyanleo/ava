@@ -24,6 +24,7 @@ import httpx
 from loguru import logger
 
 from ava.launcher import register_patch
+from ava.runtime import paths as runtime_paths
 
 _ZENMUX_VERTEX_BASE_URL = "https://zenmux.ai/api/vertex-ai/v1"
 _ZENMUX_TRANSCRIPTION_MODEL = "google/gemini-2.5-flash-lite"
@@ -41,12 +42,12 @@ def _read_proxy_from_raw_config() -> str | None:
     """从 raw config / extra_config 里读取 web proxy。"""
     proxy: str | None = None
     try:
-        config_path = Path.home() / ".nanobot" / "config.json"
+        config_path = runtime_paths.resolve_ava_home() / "config.json"
         if config_path.exists():
             data = json.loads(config_path.read_text(encoding="utf-8"))
             proxy = data.get("tools", {}).get("web", {}).get("proxy") or None
 
-        extra_path = Path.home() / ".nanobot" / "extra_config.json"
+        extra_path = runtime_paths.resolve_ava_home() / "extra_config.json"
         if extra_path.exists():
             extra = json.loads(extra_path.read_text(encoding="utf-8"))
             proxy = extra.get("tools", {}).get("web", {}).get("proxy") or proxy
@@ -60,7 +61,9 @@ def _load_runtime_config() -> Any | None:
     try:
         from nanobot.config.loader import load_config, resolve_config_env_vars
 
-        return resolve_config_env_vars(load_config())
+        return resolve_config_env_vars(
+            load_config(runtime_paths.resolve_ava_home() / "config.json")
+        )
     except Exception as exc:
         logger.warning("transcription_patch: failed to load runtime config: {}", exc)
         return None

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   RefreshCw,
   XCircle,
@@ -13,6 +13,12 @@ import {
   Wifi,
   WifiOff,
   History,
+  Terminal,
+  Zap,
+  Code,
+  FolderOpen,
+  GitBranch,
+  X,
 } from 'lucide-react'
 import { api, wsUrl } from '../api/client'
 import { useAuth } from '../stores/auth'
@@ -28,7 +34,6 @@ interface TaskItem {
   task_type: string
   origin_session_key: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-  execution_mode?: 'async' | 'sync'
   prompt_preview: string
   started_at: number | null
   finished_at: number | null
@@ -40,7 +45,16 @@ interface TaskItem {
   last_tool_name: string
   todo_summary: Record<string, number> | null
   project_path: string
+  cli_run_id: string
   cli_session_id: string
+  repo_root: string
+  workdir_relpath: string
+  workspace_key: string
+  workspace_id: string
+  execution_cwd: string
+  isolation_mode: 'inplace' | 'worktree'
+  branch_name: string
+  worktree_path: string
 }
 
 interface TasksResponse {
@@ -54,6 +68,41 @@ interface HistoryResponse {
   total: number
   page: number
   page_size: number
+}
+
+// --- Module B: Task type visual config ---
+
+const TASK_TYPE_STYLE: Record<string, {
+  icon: typeof Terminal
+  accent: string
+  accentBg: string
+  label: string
+}> = {
+  claude_code: {
+    icon: Terminal,
+    accent: 'text-emerald-500',
+    accentBg: 'bg-emerald-500/10',
+    label: 'Claude Code',
+  },
+  codex: {
+    icon: Zap,
+    accent: 'text-sky-500',
+    accentBg: 'bg-sky-500/10',
+    label: 'Codex',
+  },
+  coding: {
+    icon: Code,
+    accent: 'text-violet-500',
+    accentBg: 'bg-violet-500/10',
+    label: 'Coding',
+  },
+}
+
+const DEFAULT_TYPE_STYLE = {
+  icon: Code,
+  accent: 'text-gray-400',
+  accentBg: 'bg-gray-400/10',
+  label: 'Unknown',
 }
 
 const STATUS_CONFIG: Record<
@@ -96,6 +145,44 @@ function formatElapsed(startedAt: number | null): string {
   return `${m}m ${s}s`
 }
 
+function repoBasename(repoRoot: string): string {
+  if (!repoRoot) return ''
+  const parts = repoRoot.replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || repoRoot
+}
+
+// --- Module A: Workspace grouping ---
+
+interface WorkspaceGroup {
+  key: string
+  repoRoot: string
+  relpath: string
+  isolationMode: string
+  tasks: TaskItem[]
+}
+
+function groupByWorkspace(tasks: TaskItem[]): WorkspaceGroup[] {
+  const map = new Map<string, WorkspaceGroup>()
+  for (const task of tasks) {
+    const wk = task.workspace_key || ''
+    let group = map.get(wk)
+    if (!group) {
+      group = {
+        key: wk,
+        repoRoot: task.repo_root || '',
+        relpath: task.workdir_relpath || '',
+        isolationMode: task.isolation_mode || 'inplace',
+        tasks: [],
+      }
+      map.set(wk, group)
+    }
+    group.tasks.push(task)
+  }
+  return Array.from(map.values())
+}
+
+// --- Components ---
+
 function StatusBadge({ status }: { status: TaskItem['status'] }) {
   const cfg = STATUS_CONFIG[status]
   const Icon = cfg.icon
@@ -107,11 +194,158 @@ function StatusBadge({ status }: { status: TaskItem['status'] }) {
   )
 }
 
-const TASK_TYPE_LABELS: Record<string, string> = {
-  claude_code: 'Claude Code',
-  codex: 'Codex',
-  coding: 'Coding',
+// --- Module C: Todo progress bar ---
+
+function TodoProgressBar({ summary }: { summary: Record<string, number> }) {
+  const done = summary.done || 0
+  const doing = summary.doing || 0
+  const todo = summary.todo || 0
+  const total = done + doing + todo
+  if (total === 0) return null
+
+  const donePct = (done / total) * 100
+  const doingPct = (doing / total) * 100
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
+        {donePct > 0 && (
+          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${donePct}%` }} />
+        )}
+        {doingPct > 0 && (
+          <div className="h-full bg-blue-500 transition-all" style={{ width: `${doingPct}%` }} />
+        )}
+      </div>
+      <span className="text-[10px] text-[var(--text-secondary)] whitespace-nowrap">
+        {done}/{total} done
+      </span>
+    </div>
+  )
 }
+
+// --- Module D: Filter bar ---
+
+type TypeFilter = 'all' | 'claude_code' | 'codex' | 'coding'
+type StatusFilter = 'all' | 'running' | 'succeeded' | 'failed'
+
+function FilterBar({
+  typeFilter,
+  statusFilter,
+  onTypeChange,
+  onStatusChange,
+  onClear,
+}: {
+  typeFilter: TypeFilter
+  statusFilter: StatusFilter
+  onTypeChange: (v: TypeFilter) => void
+  onStatusChange: (v: StatusFilter) => void
+  onClear: () => void
+}) {
+  const hasFilter = typeFilter !== 'all' || statusFilter !== 'all'
+
+  const typeOptions: { value: TypeFilter; label: string }[] = [
+    { value: 'all', label: '全部' },
+    { value: 'claude_code', label: 'Claude Code' },
+    { value: 'codex', label: 'Codex' },
+    { value: 'coding', label: 'Coding' },
+  ]
+
+  const statusOptions: { value: StatusFilter; label: string }[] = [
+    { value: 'all', label: '全部' },
+    { value: 'running', label: '运行中' },
+    { value: 'succeeded', label: '成功' },
+    { value: 'failed', label: '失败' },
+  ]
+
+  return (
+    <div className="flex items-center gap-3 mb-4 flex-wrap">
+      <div className="flex items-center gap-1 rounded-lg bg-[var(--bg-secondary)] p-0.5">
+        {typeOptions.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => onTypeChange(opt.value)}
+            className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+              typeFilter === opt.value
+                ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] font-medium'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-1 rounded-lg bg-[var(--bg-secondary)] p-0.5">
+        {statusOptions.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => onStatusChange(opt.value)}
+            className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+              statusFilter === opt.value
+                ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] font-medium'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {hasFilter && (
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          <X className="w-3 h-3" />
+          清除筛选
+        </button>
+      )}
+    </div>
+  )
+}
+
+// --- Workspace group header (Module A) ---
+
+function WorkspaceGroupHeader({ group, collapsed, onToggle }: {
+  group: WorkspaceGroup
+  collapsed: boolean
+  onToggle: () => void
+}) {
+  const name = repoBasename(group.repoRoot)
+  const isUnclassified = !group.key
+
+  return (
+    <button
+      onClick={onToggle}
+      className="flex items-center gap-2 w-full text-left py-1.5 px-2 rounded-lg hover:bg-[var(--bg-secondary)] transition-colors group"
+    >
+      {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> : <ChevronDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />}
+      <FolderOpen className="w-3.5 h-3.5 text-[var(--accent)]" />
+      {isUnclassified ? (
+        <span className="text-xs font-medium text-[var(--text-secondary)]">未分类</span>
+      ) : (
+        <>
+          <span className="text-xs font-medium text-[var(--text-primary)]">{name}</span>
+          {group.relpath && group.relpath !== '.' && (
+            <span className="text-xs text-[var(--text-secondary)] font-mono">: {group.relpath}</span>
+          )}
+        </>
+      )}
+      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+        group.isolationMode === 'worktree'
+          ? 'bg-amber-500/10 text-amber-500'
+          : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+      }`}>
+        {group.isolationMode}
+      </span>
+      <span className="text-[10px] text-[var(--text-secondary)] ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+        {group.tasks.length} 个任务
+      </span>
+    </button>
+  )
+}
+
+// --- TaskCard with Module B + C + D ---
 
 interface TaskDetail {
   full_prompt: string
@@ -129,6 +363,9 @@ function TaskCard({
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const isActive = task.status === 'queued' || task.status === 'running'
+
+  const typeStyle = TASK_TYPE_STYLE[task.task_type] || DEFAULT_TYPE_STYLE
+  const TypeIcon = typeStyle.icon
 
   const handleToggle = () => {
     const next = !expanded
@@ -157,17 +394,14 @@ function TaskCard({
         </div>
 
         <div className="flex-1 min-w-0">
+          {/* Module B: type icon + accent badge */}
           <div className="flex items-center gap-2 mb-1">
             <StatusBadge status={task.status} />
-            <span className="text-xs text-[var(--text-secondary)] font-mono">{task.task_id}</span>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
-              {TASK_TYPE_LABELS[task.task_type] || task.task_type}
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${typeStyle.accentBg} ${typeStyle.accent}`}>
+              <TypeIcon className="w-3 h-3" />
+              {typeStyle.label}
             </span>
-            {task.execution_mode === 'sync' && (
-              <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-500/10 text-blue-400 font-medium">
-                sync
-              </span>
-            )}
+            <span className="text-xs text-[var(--text-secondary)] font-mono">{task.task_id}</span>
           </div>
 
           <p
@@ -179,20 +413,42 @@ function TaskCard({
 
           <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
             <span>{formatTime(task.started_at)}</span>
+            {/* Module C: elapsed badge */}
             {isActive ? (
-              <span className="text-blue-400">{formatElapsed(task.started_at)} elapsed</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">
+                <Clock className="w-3 h-3" />
+                {formatElapsed(task.started_at)}
+              </span>
             ) : task.elapsed_ms > 0 ? (
               <span>{formatDuration(task.elapsed_ms)}</span>
             ) : null}
-            {task.project_path && (
-              <span className="font-mono truncate max-w-[360px]" title={task.project_path}>
-                {task.project_path}
+            {task.phase && isActive && (
+              <span className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+                {task.phase}
+              </span>
+            )}
+            {task.repo_root && (
+              <span className="inline-flex items-center gap-1 font-mono truncate max-w-[240px]" title={task.workspace_key}>
+                <FolderOpen className="w-3 h-3 shrink-0" />
+                {repoBasename(task.repo_root)}
+                {task.workdir_relpath && task.workdir_relpath !== '.' && <>:{task.workdir_relpath}</>}
+              </span>
+            )}
+            {task.branch_name && (
+              <span className="inline-flex items-center gap-1" title={task.branch_name}>
+                <GitBranch className="w-3 h-3 shrink-0" />
+                {task.branch_name}
               </span>
             )}
           </div>
+
+          {/* Module C: progress bar */}
+          {isActive && task.todo_summary && (
+            <TodoProgressBar summary={task.todo_summary} />
+          )}
         </div>
 
-        {isActive && task.execution_mode !== 'sync' && (
+        {isActive && (
           <button
             onClick={e => {
               e.stopPropagation();
@@ -227,6 +483,42 @@ function TaskCard({
               </div>
             )}
 
+            {/* Module D: workspace metadata row */}
+            {task.workspace_key && (
+              <div>
+                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-1">Workspace</h4>
+                <div className="flex items-center gap-3 flex-wrap text-xs bg-[var(--bg-primary)] rounded-lg px-3 py-2">
+                  <span className="inline-flex items-center gap-1 font-mono text-[var(--text-primary)]">
+                    <FolderOpen className="w-3 h-3 text-[var(--accent)]" />
+                    {task.workspace_id}
+                  </span>
+                  <span className={`px-1.5 py-0.5 rounded font-medium ${
+                    task.isolation_mode === 'worktree'
+                      ? 'bg-amber-500/10 text-amber-500'
+                      : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+                  }`}>
+                    {task.isolation_mode}
+                  </span>
+                  {task.branch_name && (
+                    <span className="inline-flex items-center gap-1 text-[var(--text-secondary)]">
+                      <GitBranch className="w-3 h-3" />
+                      {task.branch_name}
+                    </span>
+                  )}
+                  {task.execution_cwd && (
+                    <span className="text-[var(--text-secondary)] font-mono truncate max-w-[300px]" title={task.execution_cwd}>
+                      CWD: {task.execution_cwd}
+                    </span>
+                  )}
+                  {task.worktree_path && (
+                    <span className="text-[var(--text-secondary)] font-mono truncate max-w-[300px]" title={task.worktree_path}>
+                      WT: {task.worktree_path}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div>
               <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-1">详情</h4>
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
@@ -235,8 +527,8 @@ function TaskCard({
                   <span className="font-mono">{task.origin_session_key}</span>
                 </div>
                 <div>
-                  <span className="text-[var(--text-secondary)]">CLI Session: </span>
-                  <span className="font-mono">{task.cli_session_id || '-'}</span>
+                  <span className="text-[var(--text-secondary)]">CLI Run: </span>
+                  <span className="font-mono">{task.cli_run_id || task.cli_session_id || '-'}</span>
                 </div>
                 <div>
                   <span className="text-[var(--text-secondary)]">Phase: </span>
@@ -334,6 +626,22 @@ export default function BgTasksPage() {
   const { isMockTester } = useAuth()
   const mockMode = isMockTester()
 
+  // Module D: filter state
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+
+  // Module A: workspace collapse state
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
   const connectWs = useCallback(() => {
     if (mockMode) {
       setWsConnected(false)
@@ -423,10 +731,38 @@ export default function BgTasksPage() {
     }
   }
 
-  const activeTasks = data?.tasks.filter(t => t.status === 'queued' || t.status === 'running') ?? []
-  const recentFinished = data?.tasks.filter(t => t.status !== 'queued' && t.status !== 'running') ?? []
+  const clearFilters = useCallback(() => {
+    setTypeFilter('all')
+    setStatusFilter('all')
+  }, [])
+
+  const applyFilters = useCallback((tasks: TaskItem[]) => {
+    let filtered = tasks
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(t => t.task_type === typeFilter)
+    }
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'running') {
+        filtered = filtered.filter(t => t.status === 'queued' || t.status === 'running')
+      } else {
+        filtered = filtered.filter(t => t.status === statusFilter)
+      }
+    }
+    return filtered
+  }, [typeFilter, statusFilter])
+
+  const allTasks = data?.tasks ?? []
+  const filteredTasks = useMemo(() => applyFilters(allTasks), [allTasks, applyFilters])
+
+  const activeTasks = filteredTasks.filter(t => t.status === 'queued' || t.status === 'running')
+  const recentFinished = filteredTasks.filter(t => t.status !== 'queued' && t.status !== 'running')
+
+  // Module A: group active tasks by workspace
+  const workspaceGroups = useMemo(() => groupByWorkspace(activeTasks), [activeTasks])
 
   const historyTotalPages = history ? Math.ceil(history.total / PAGE_SIZE) : 0
+
+  const hasFilter = typeFilter !== 'all' || statusFilter !== 'all'
 
   return (
     <div className="h-[calc(100vh-3rem)] flex flex-col">
@@ -454,6 +790,17 @@ export default function BgTasksPage() {
         </div>
       </div>
 
+      {/* Module D: filter bar */}
+      {data && (allTasks.length > 0 || hasFilter) && (
+        <FilterBar
+          typeFilter={typeFilter}
+          statusFilter={statusFilter}
+          onTypeChange={setTypeFilter}
+          onStatusChange={setStatusFilter}
+          onClear={clearFilters}
+        />
+      )}
+
       {error && (
         <div className="mb-3 p-3 rounded-lg text-sm bg-[var(--danger)]/10 text-[var(--danger)]">
           {error}
@@ -466,11 +813,11 @@ export default function BgTasksPage() {
             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
             加载中...
           </div>
-        ) : activeTasks.length === 0 && recentFinished.length === 0 && !showHistory ? (
+        ) : activeTasks.length === 0 && recentFinished.length === 0 && !showHistory && !hasFilter ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Clock className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p>暂无活跃任务</p>
-            <p className="text-xs mt-1">通过 Claude Code 工具提交的异步编程任务将显示在这里</p>
+            <p className="text-xs mt-1">通过 Claude Code 或 Codex 工具提交的异步编程任务将显示在这里</p>
             <button
               onClick={() => setShowHistory(true)}
               className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
@@ -480,16 +827,33 @@ export default function BgTasksPage() {
           </div>
         ) : (
           <>
-            {activeTasks.length > 0 && (
+            {/* Module A: workspace-grouped active tasks */}
+            {workspaceGroups.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                  进行中 ({activeTasks.length})
+                  活跃 Workspace ({workspaceGroups.length})
                 </h2>
-                <div className="space-y-2">
-                  {activeTasks.map(t => (
-                    <TaskCard key={t.task_id} task={t} onCancel={handleCancel} />
-                  ))}
+                <div className="space-y-3">
+                  {workspaceGroups.map(group => {
+                    const isCollapsed = collapsedGroups.has(group.key)
+                    return (
+                      <div key={group.key || '__unclassified__'} className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)]/50 overflow-hidden">
+                        <WorkspaceGroupHeader
+                          group={group}
+                          collapsed={isCollapsed}
+                          onToggle={() => toggleGroup(group.key)}
+                        />
+                        {!isCollapsed && (
+                          <div className="px-2 pb-2 space-y-2">
+                            {group.tasks.map(t => (
+                              <TaskCard key={t.task_id} task={t} onCancel={handleCancel} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </section>
             )}
@@ -505,6 +869,15 @@ export default function BgTasksPage() {
                   ))}
                 </div>
               </section>
+            )}
+
+            {hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
+              <div className="text-center py-12 text-[var(--text-secondary)]">
+                <p className="text-sm">无匹配任务</p>
+                <button onClick={clearFilters} className="mt-2 text-xs text-[var(--accent)] hover:underline">
+                  清除筛选条件
+                </button>
+              </div>
             )}
           </>
         )}

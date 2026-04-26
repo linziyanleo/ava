@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useResponsiveMode } from '../hooks/useResponsiveMode';
 import ConversationHistoryView from '../components/ConversationHistoryView';
-import type { TurnGroup as ChatTurnGroup } from './ChatPage/types';
+import type { ConversationMeta, TurnGroup as ChatTurnGroup } from './ChatPage/types';
 import { getContentText, groupTurns } from './ChatPage/utils';
 import {
   BarChart,
@@ -110,6 +110,8 @@ interface TurnIterationRecord {
 }
 
 type TokenStatsView = 'records' | 'turns' | 'charts';
+type ConversationScope = string | null;
+type ChatTurnMap = Record<string, ChatTurnGroup>;
 
 const PIE_COLORS = ['#3b82f6', '#8b5cf6'];
 
@@ -149,6 +151,42 @@ function parseTurnSeq(value: string | null): number | null {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+function makeTurnKey(convId: string, turnSeq: number): string {
+  return `${convId}::${turnSeq}`;
+}
+
+function parseTurnKey(value: string | null): { conversationId: string; turnSeq: number } | null {
+  if (!value) return null;
+  const separator = value.lastIndexOf('::');
+  if (separator < 0) return null;
+  const turnSeq = Number(value.slice(separator + 2));
+  if (!Number.isInteger(turnSeq)) return null;
+  return {
+    conversationId: value.slice(0, separator),
+    turnSeq,
+  };
+}
+
+function buildConversationQuery(conversationId: ConversationScope): string {
+  if (conversationId === null) return '';
+  return `&conversation_id=${encodeURIComponent(conversationId)}`;
+}
+
+function buildSessionDebugScope(sessionKey: string, conversationId: ConversationScope): string {
+  return `${sessionKey}::${conversationId === null ? '__all__' : conversationId}`;
+}
+
+function matchesSessionDebugScope(currentScope: string, sessionKey: string, conversationId: string): boolean {
+  return (
+    currentScope === buildSessionDebugScope(sessionKey, conversationId) ||
+    currentScope === buildSessionDebugScope(sessionKey, null)
+  );
+}
+
+function turnDomId(turnKey: string): string {
+  return `token-turn-${encodeURIComponent(turnKey)}`;
 }
 
 function truncateLine(text: string, maxLength: number = 96): string {
@@ -208,6 +246,7 @@ const MODEL_ROLE_CONFIG: Record<string, { icon: string; label: string }> = {
   voice: { icon: '🎙️', label: '语音模型' },
   imageGen: { icon: '🎨', label: '图像生成' },
   claude_code: { icon: '💻', label: 'Claude Code' },
+  codex: { icon: '💻', label: 'Codex' },
   'page-agent': { icon: '🌐', label: 'Page Agent' },
   pending: { icon: '⏳', label: 'Processing...' },
   error: { icon: '❌', label: '异常终止' },
@@ -349,11 +388,11 @@ function getPresetRange(preset: TimePreset): { start?: string; end?: string } {
   return {};
 }
 
-type ModelRoleFilter = 'all' | 'claude_code' | 'chat' | 'page-agent' | 'mini' | 'voice' | 'vision' | 'error';
+type ModelRoleFilter = 'all' | 'coder' | 'chat' | 'page-agent' | 'mini' | 'voice' | 'vision' | 'error';
 
 const MODEL_ROLE_FILTER_OPTIONS: { value: ModelRoleFilter; label: string; icon: string }[] = [
   { value: 'all', label: '全部', icon: '📊' },
-  { value: 'claude_code', label: 'Claude Code', icon: '💻' },
+  { value: 'coder', label: 'Coder', icon: '💻' },
   { value: 'chat', label: '主模型', icon: '🤖' },
   { value: 'page-agent', label: 'Page Agent', icon: '🌐' },
   { value: 'mini', label: 'Mini', icon: '⚡' },
@@ -395,19 +434,27 @@ export default function TokenStatsPage() {
   const { isMobile } = useResponsiveMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedSessionKey = searchParams.get('session_key') || '';
-  const appliedConversationId = searchParams.get('conversation_id') || '';
+  const hasAppliedConversationFilter = searchParams.has('conversation_id');
+  const appliedConversationScope: ConversationScope = hasAppliedConversationFilter
+    ? (searchParams.get('conversation_id') ?? '')
+    : null;
+  const appliedConversationId = appliedConversationScope ?? '';
   const appliedTurnSeq = parseTurnSeq(searchParams.get('turn_seq'));
+  const appliedTurnKey =
+    appliedTurnSeq != null && appliedConversationScope !== null
+      ? makeTurnKey(appliedConversationId, appliedTurnSeq)
+      : null;
   const isSessionMode = Boolean(appliedSessionKey);
   const [view, setView] = useState<TokenStatsView>(() => (searchParams.get('session_key') ? 'turns' : 'records'));
   const [summary, setSummary] = useState<TokenSummary | null>(null);
   const [records, setRecords] = useState<TokenRecord[]>([]);
   const [sessionTurnSummaries, setSessionTurnSummaries] = useState<TurnSummaryRecord[]>([]);
   const [sessionTurnIterations, setSessionTurnIterations] = useState<TurnIterationRecord[]>([]);
-  const [sessionChatTurns, setSessionChatTurns] = useState<ChatTurnGroup[]>([]);
-  const [expandedTurnSeq, setExpandedTurnSeq] = useState<number | null>(appliedTurnSeq);
+  const [sessionChatTurnsByKey, setSessionChatTurnsByKey] = useState<ChatTurnMap>({});
+  const [expandedTurnKey, setExpandedTurnKey] = useState<string | null>(appliedTurnKey);
   const [loadingSessionTurns, setLoadingSessionTurns] = useState(false);
-  const [turnRecordsBySeq, setTurnRecordsBySeq] = useState<Record<number, TokenRecord[]>>({});
-  const [loadingTurnRecords, setLoadingTurnRecords] = useState<Record<number, boolean>>({});
+  const [turnRecordsByKey, setTurnRecordsByKey] = useState<Record<string, TokenRecord[]>>({});
+  const [loadingTurnRecords, setLoadingTurnRecords] = useState<Record<string, boolean>>({});
   const [filtersExpanded, setFiltersExpanded] = useState(!isMobile);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -425,7 +472,7 @@ export default function TokenStatsPage() {
   const [timePreset, setTimePreset] = useState<TimePreset>('all');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  const sessionDebugScopeRef = useRef(`${appliedSessionKey}::${appliedConversationId}`);
+  const sessionDebugScopeRef = useRef(buildSessionDebugScope(appliedSessionKey, appliedConversationScope));
 
   const filtersRef = useRef({
     filterSessionKey,
@@ -439,8 +486,8 @@ export default function TokenStatsPage() {
     customEnd,
   });
   useEffect(() => {
-    sessionDebugScopeRef.current = `${appliedSessionKey}::${appliedConversationId}`;
-  }, [appliedConversationId, appliedSessionKey]);
+    sessionDebugScopeRef.current = buildSessionDebugScope(appliedSessionKey, appliedConversationScope);
+  }, [appliedConversationScope, appliedSessionKey]);
   useEffect(() => {
     filtersRef.current = {
       filterSessionKey,
@@ -502,56 +549,96 @@ export default function TokenStatsPage() {
     setLoading(false);
   }, []);
 
-  const loadSessionDebugData = useCallback(async (sessionKey: string, conversationId: string = '') => {
+  const loadSessionDebugData = useCallback(async (sessionKey: string, conversationId: ConversationScope = null) => {
     setLoadingSessionTurns(true);
-    const convFilter = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : '';
-    const [turnSummaryResult, turnIterationResult, sessionMessagesResult] = await Promise.allSettled([
+    const convFilter = buildConversationQuery(conversationId);
+    const [turnSummaryResult, turnIterationResult, chatTurnsResult] = await Promise.allSettled([
       api<TurnSummaryRecord[]>(`/stats/tokens/by-session?session_key=${encodeURIComponent(sessionKey)}${convFilter}`),
       api<TurnIterationRecord[]>(
         `/stats/tokens/by-session/detailed?session_key=${encodeURIComponent(sessionKey)}${convFilter}`,
       ),
-      api(`/chat/messages?session_key=${encodeURIComponent(sessionKey)}`),
+      (async (): Promise<ChatTurnMap> => {
+        const toTurnMap = (messages: Parameters<typeof groupTurns>[0], scope: string): ChatTurnMap => {
+          const grouped = groupTurns(messages);
+          return grouped.reduce<ChatTurnMap>((acc, turn) => {
+            if (turn.turnSeq != null) {
+              acc[makeTurnKey(scope, turn.turnSeq)] = turn;
+            }
+            return acc;
+          }, {});
+        };
+
+        if (conversationId !== null) {
+          const messages = await api<Parameters<typeof groupTurns>[0]>(
+            `/chat/messages?session_key=${encodeURIComponent(sessionKey)}${convFilter}`,
+          );
+          return toTurnMap(messages, conversationId);
+        }
+
+        const conversations = await api<ConversationMeta[]>(
+          `/chat/conversations?session_key=${encodeURIComponent(sessionKey)}`,
+        );
+        const messageResults = await Promise.allSettled(
+          conversations.map(async conversation => {
+            const messages = await api<Parameters<typeof groupTurns>[0]>(
+              `/chat/messages?session_key=${encodeURIComponent(sessionKey)}${buildConversationQuery(conversation.conversation_id)}`,
+            );
+            return {
+              conversationId: conversation.conversation_id,
+              messages,
+            };
+          }),
+        );
+
+        return messageResults.reduce<ChatTurnMap>((acc, result) => {
+          if (result.status !== 'fulfilled') return acc;
+          return {
+            ...acc,
+            ...toTurnMap(result.value.messages, result.value.conversationId),
+          };
+        }, {});
+      })(),
     ]);
 
-    if (sessionDebugScopeRef.current !== `${sessionKey}::${conversationId}`) {
+    if (sessionDebugScopeRef.current !== buildSessionDebugScope(sessionKey, conversationId)) {
       return;
     }
 
     setSessionTurnSummaries(turnSummaryResult.status === 'fulfilled' ? turnSummaryResult.value : []);
     setSessionTurnIterations(turnIterationResult.status === 'fulfilled' ? turnIterationResult.value : []);
-    setSessionChatTurns(
-      sessionMessagesResult.status === 'fulfilled'
-        ? groupTurns(sessionMessagesResult.value as Parameters<typeof groupTurns>[0])
-        : [],
-    );
+    setSessionChatTurnsByKey(chatTurnsResult.status === 'fulfilled' ? chatTurnsResult.value : {});
     setLoadingSessionTurns(false);
   }, []);
 
   const ensureTurnRecords = useCallback(
-    async (sessionKey: string, turnSeq: number, force: boolean = false, conversationId: string = '') => {
-      if (!force && (turnRecordsBySeq[turnSeq] || loadingTurnRecords[turnSeq])) return;
+    async (sessionKey: string, turnKey: string, force: boolean = false) => {
+      const hasCachedRecords = Object.prototype.hasOwnProperty.call(turnRecordsByKey, turnKey);
+      if (!force && (hasCachedRecords || loadingTurnRecords[turnKey])) return;
 
-      setLoadingTurnRecords(prev => ({ ...prev, [turnSeq]: true }));
+      const parsed = parseTurnKey(turnKey);
+      if (!parsed) return;
+
+      setLoadingTurnRecords(prev => ({ ...prev, [turnKey]: true }));
       try {
-        const convFilter = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : '';
+        const convFilter = buildConversationQuery(parsed.conversationId);
         const result = await api<RecordsResponse>(
-          `/stats/tokens/records?session_key=${encodeURIComponent(sessionKey)}${convFilter}&turn_seq=${turnSeq}&limit=200`,
+          `/stats/tokens/records?session_key=${encodeURIComponent(sessionKey)}${convFilter}&turn_seq=${parsed.turnSeq}&limit=200`,
         );
-        if (sessionDebugScopeRef.current !== `${sessionKey}::${conversationId}`) {
+        if (!matchesSessionDebugScope(sessionDebugScopeRef.current, sessionKey, parsed.conversationId)) {
           return;
         }
-        setTurnRecordsBySeq(prev => ({ ...prev, [turnSeq]: sortTurnRecords(result.records) }));
+        setTurnRecordsByKey(prev => ({ ...prev, [turnKey]: sortTurnRecords(result.records) }));
       } catch {
-        if (sessionDebugScopeRef.current === `${sessionKey}::${conversationId}`) {
-          setTurnRecordsBySeq(prev => ({ ...prev, [turnSeq]: [] }));
+        if (matchesSessionDebugScope(sessionDebugScopeRef.current, sessionKey, parsed.conversationId)) {
+          setTurnRecordsByKey(prev => ({ ...prev, [turnKey]: [] }));
         }
       } finally {
-        if (sessionDebugScopeRef.current === `${sessionKey}::${conversationId}`) {
-          setLoadingTurnRecords(prev => ({ ...prev, [turnSeq]: false }));
+        if (matchesSessionDebugScope(sessionDebugScopeRef.current, sessionKey, parsed.conversationId)) {
+          setLoadingTurnRecords(prev => ({ ...prev, [turnKey]: false }));
         }
       }
     },
-    [loadingTurnRecords, turnRecordsBySeq],
+    [loadingTurnRecords, turnRecordsByKey],
   );
 
   // Initial load
@@ -572,9 +659,9 @@ export default function TokenStatsPage() {
 
     const timer = setInterval(() => {
       if (shouldRefreshTurns) {
-        void loadSessionDebugData(appliedSessionKey, appliedConversationId);
-        if (expandedTurnSeq != null) {
-          void ensureTurnRecords(appliedSessionKey, expandedTurnSeq, true, appliedConversationId);
+        void loadSessionDebugData(appliedSessionKey, appliedConversationScope);
+        if (expandedTurnKey != null) {
+          void ensureTurnRecords(appliedSessionKey, expandedTurnKey, true);
         }
       } else {
         void loadRecords(page);
@@ -582,10 +669,10 @@ export default function TokenStatsPage() {
     }, AUTO_REFRESH_MS);
     return () => clearInterval(timer);
   }, [
-    appliedConversationId,
+    appliedConversationScope,
     appliedSessionKey,
     ensureTurnRecords,
-    expandedTurnSeq,
+    expandedTurnKey,
     isSessionMode,
     loadRecords,
     loadSessionDebugData,
@@ -630,43 +717,34 @@ export default function TokenStatsPage() {
     if (!appliedSessionKey) {
       setSessionTurnSummaries([]);
       setSessionTurnIterations([]);
-      setSessionChatTurns([]);
-      setExpandedTurnSeq(null);
-      setTurnRecordsBySeq({});
+      setSessionChatTurnsByKey({});
+      setExpandedTurnKey(null);
+      setTurnRecordsByKey({});
       setLoadingTurnRecords({});
       setLoadingSessionTurns(false);
       return;
     }
 
-    setTurnRecordsBySeq({});
+    setTurnRecordsByKey({});
     setLoadingTurnRecords({});
-    void loadSessionDebugData(appliedSessionKey, appliedConversationId);
-  }, [appliedConversationId, appliedSessionKey, loadSessionDebugData]);
+    void loadSessionDebugData(appliedSessionKey, appliedConversationScope);
+  }, [appliedConversationScope, appliedSessionKey, loadSessionDebugData]);
 
   useEffect(() => {
-    setExpandedTurnSeq(appliedTurnSeq);
-  }, [appliedSessionKey, appliedTurnSeq]);
+    setExpandedTurnKey(appliedTurnKey);
+  }, [appliedSessionKey, appliedTurnKey]);
 
   useEffect(() => {
-    if (!appliedSessionKey || expandedTurnSeq == null) return;
-    if (turnRecordsBySeq[expandedTurnSeq] || loadingTurnRecords[expandedTurnSeq]) return;
-    void ensureTurnRecords(appliedSessionKey, expandedTurnSeq, false, appliedConversationId);
+    if (!appliedSessionKey || expandedTurnKey == null) return;
+    if (Object.prototype.hasOwnProperty.call(turnRecordsByKey, expandedTurnKey) || loadingTurnRecords[expandedTurnKey]) return;
+    void ensureTurnRecords(appliedSessionKey, expandedTurnKey, false);
   }, [
-    appliedConversationId,
     appliedSessionKey,
     ensureTurnRecords,
-    expandedTurnSeq,
+    expandedTurnKey,
     loadingTurnRecords,
-    turnRecordsBySeq,
+    turnRecordsByKey,
   ]);
-
-  useEffect(() => {
-    if (view !== 'turns' || appliedTurnSeq == null || loadingSessionTurns) return;
-    const frame = requestAnimationFrame(() => {
-      document.getElementById(`token-turn-${appliedTurnSeq}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [view, appliedTurnSeq, loadingSessionTurns, sessionTurnSummaries.length]);
 
   const handleSearch = () => {
     const newParams: Record<string, string> = {};
@@ -733,24 +811,25 @@ export default function TokenStatsPage() {
       ]
     : [];
 
-  const turnIterationsBySeq = new Map<number, TurnIterationRecord[]>();
+  const turnIterationsByKey = new Map<string, TurnIterationRecord[]>();
   for (const item of sessionTurnIterations) {
     if (item.turn_seq == null) continue;
-    const existing = turnIterationsBySeq.get(item.turn_seq) || [];
+    const key = makeTurnKey(item.conversation_id || '', item.turn_seq);
+    const existing = turnIterationsByKey.get(key) || [];
     existing.push(item);
-    turnIterationsBySeq.set(item.turn_seq, existing);
-  }
-
-  const chatTurnsBySeq = new Map<number, ChatTurnGroup>();
-  for (const turn of sessionChatTurns) {
-    if (turn.turnSeq != null) {
-      chatTurnsBySeq.set(turn.turnSeq, turn);
-    }
+    turnIterationsByKey.set(key, existing);
   }
 
   // When turn_seq is specified, filter turn summaries to only show matching turns
-  const filteredTurnSummaries =
-    appliedTurnSeq != null ? sessionTurnSummaries.filter(t => t.turn_seq === appliedTurnSeq) : sessionTurnSummaries;
+  const filteredTurnSummaries = sessionTurnSummaries.filter(turn => {
+    if (appliedConversationScope !== null && (turn.conversation_id || '') !== appliedConversationId) {
+      return false;
+    }
+    if (appliedTurnSeq != null && turn.turn_seq !== appliedTurnSeq) {
+      return false;
+    }
+    return true;
+  });
 
   let sessionPromptTokens = 0;
   let sessionCompletionTokens = 0;
@@ -770,9 +849,40 @@ export default function TokenStatsPage() {
   }
   const sessionTurnCount =
     filteredTurnSummaries.length ||
-    sessionChatTurns.filter(turn => turn.turnSeq != null && (appliedTurnSeq == null || turn.turnSeq === appliedTurnSeq))
-      .length;
+    Object.entries(sessionChatTurnsByKey).filter(([key, turn]) => {
+      if (turn.turnSeq == null) return false;
+      if (appliedConversationScope !== null && !key.startsWith(`${appliedConversationId}::`)) {
+        return false;
+      }
+      return appliedTurnSeq == null || turn.turnSeq === appliedTurnSeq;
+    }).length;
   const activeTurnLabel = appliedTurnSeq != null ? `Turn #${appliedTurnSeq}` : '全部 Turn';
+  const scrollTargetTurnKey =
+    appliedTurnKey ??
+    (appliedTurnSeq != null && filteredTurnSummaries.length === 1 && filteredTurnSummaries[0]?.turn_seq != null
+      ? makeTurnKey(filteredTurnSummaries[0].conversation_id || '', filteredTurnSummaries[0].turn_seq)
+      : null);
+
+  useEffect(() => {
+    if (appliedTurnKey) {
+      setExpandedTurnKey(appliedTurnKey);
+      return;
+    }
+    if (appliedTurnSeq == null) {
+      return;
+    }
+    if (filteredTurnSummaries.length === 1 && filteredTurnSummaries[0]?.turn_seq != null) {
+      setExpandedTurnKey(makeTurnKey(filteredTurnSummaries[0].conversation_id || '', filteredTurnSummaries[0].turn_seq));
+    }
+  }, [appliedTurnKey, appliedTurnSeq, filteredTurnSummaries]);
+
+  useEffect(() => {
+    if (view !== 'turns' || scrollTargetTurnKey == null || loadingSessionTurns) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(turnDomId(scrollTargetTurnKey))?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loadingSessionTurns, scrollTargetTurnKey, view]);
 
   return (
     <div>
@@ -837,9 +947,9 @@ export default function TokenStatsPage() {
                 loadRecords(page);
               }
               if (isSessionMode) {
-                void loadSessionDebugData(appliedSessionKey, appliedConversationId);
-                if (view === 'turns' && expandedTurnSeq != null) {
-                  void ensureTurnRecords(appliedSessionKey, expandedTurnSeq, true, appliedConversationId);
+                void loadSessionDebugData(appliedSessionKey, appliedConversationScope);
+                if (view === 'turns' && expandedTurnKey != null) {
+                  void ensureTurnRecords(appliedSessionKey, expandedTurnKey, true);
                 }
               } else {
                 loadSummary();
@@ -955,12 +1065,12 @@ export default function TokenStatsPage() {
             <div className="font-mono text-sm text-[var(--text-primary)] truncate" title={appliedSessionKey}>
               {appliedSessionKey}
             </div>
-            {appliedConversationId && (
+            {appliedConversationScope !== null && (
               <div
                 className="font-mono text-xs text-[var(--text-secondary)] mt-0.5 truncate"
-                title={appliedConversationId}
+                title={appliedConversationId || 'legacy'}
               >
-                conversation: {appliedConversationId}
+                conversation: {appliedConversationId || 'legacy'}
               </div>
             )}
             <div className="flex flex-wrap gap-2 mt-2 text-xs text-[var(--text-secondary)]">
@@ -1245,15 +1355,17 @@ export default function TokenStatsPage() {
         <TurnClusterList
           loading={loadingSessionTurns}
           sessionKey={appliedSessionKey}
+          activeTurnKey={appliedTurnKey}
           activeTurnSeq={appliedTurnSeq}
-          expandedTurnSeq={expandedTurnSeq}
-          onToggleTurn={turnSeq => {
-            setExpandedTurnSeq(prev => (prev === turnSeq ? null : turnSeq));
+          expandedTurnKey={expandedTurnKey}
+          onToggleTurn={turnKey => {
+            setExpandedTurnKey(prev => (prev === turnKey ? null : turnKey));
           }}
           turnSummaries={filteredTurnSummaries}
-          turnIterationsBySeq={turnIterationsBySeq}
-          chatTurnsBySeq={chatTurnsBySeq}
-          turnRecordsBySeq={turnRecordsBySeq}
+          turnIterationsByKey={turnIterationsByKey}
+          turnKey={makeTurnKey}
+          chatTurnsByKey={sessionChatTurnsByKey}
+          turnRecordsByKey={turnRecordsByKey}
           loadingTurnRecords={loadingTurnRecords}
         />
       ) : (
@@ -1434,6 +1546,52 @@ function CopyablePre({ children, className }: { children: string; className?: st
   );
 }
 
+function TraceIdField({ traceId, label = 'Trace ID' }: { traceId: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!traceId) return null;
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(traceId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[var(--text-secondary)] text-xs">{label}:</span>
+      <span
+        className="font-mono text-xs text-[var(--text-primary)] break-all select-all"
+        title={traceId}
+      >
+        {traceId}
+      </span>
+      <button
+        onClick={handleCopy}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        title="复制 Trace ID"
+      >
+        {copied ? (
+          <>
+            <Check className="w-3 h-3 text-[var(--success)]" />
+            已复制
+          </>
+        ) : (
+          <>
+            <Copy className="w-3 h-3" />
+            复制
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
 function ClaudeCodeMeta({ record }: { record: TokenRecord }) {
   const { user_message, cost_usd, prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens } = record;
   const parsed: Record<string, string> = {};
@@ -1591,6 +1749,7 @@ function RecordRow({
         <tr className="bg-[var(--bg-tertiary)]/20 border-b border-[var(--border)]/50">
           <td colSpan={11} className="px-4 py-3 overflow-hidden">
             <div className="space-y-2 text-xs min-w-0">
+              {r.conversation_id && <TraceIdField traceId={r.conversation_id} />}
               <div>
                 <span className="text-[var(--text-secondary)]">Session:</span>{' '}
                 <span className="font-mono">{r.session_key || '—'}</span>
@@ -1626,7 +1785,7 @@ function RecordRow({
               </div>
               {r.conversation_history && (
                 <div>
-                  <p className="text-[var(--text-secondary)] mb-1">对话历史:</p>
+                  <p className="text-[var(--text-secondary)] mb-1">请求上下文（发送给模型前的快照）:</p>
                   <div className="bg-[var(--bg-primary)] rounded-lg p-3">
                     <ConversationHistoryView historyJson={r.conversation_history} />
                   </div>
@@ -1657,25 +1816,29 @@ function RecordRow({
 function TurnClusterList({
   loading,
   sessionKey,
+  activeTurnKey,
   activeTurnSeq,
-  expandedTurnSeq,
+  expandedTurnKey,
   onToggleTurn,
   turnSummaries,
-  turnIterationsBySeq,
-  chatTurnsBySeq,
-  turnRecordsBySeq,
+  turnIterationsByKey,
+  turnKey,
+  chatTurnsByKey,
+  turnRecordsByKey,
   loadingTurnRecords,
 }: {
   loading: boolean;
   sessionKey: string;
+  activeTurnKey: string | null;
   activeTurnSeq: number | null;
-  expandedTurnSeq: number | null;
-  onToggleTurn: (turnSeq: number) => void;
+  expandedTurnKey: string | null;
+  onToggleTurn: (turnKey: string) => void;
   turnSummaries: TurnSummaryRecord[];
-  turnIterationsBySeq: Map<number, TurnIterationRecord[]>;
-  chatTurnsBySeq: Map<number, ChatTurnGroup>;
-  turnRecordsBySeq: Record<number, TokenRecord[]>;
-  loadingTurnRecords: Record<number, boolean>;
+  turnIterationsByKey: Map<string, TurnIterationRecord[]>;
+  turnKey: (convId: string, turnSeq: number) => string;
+  chatTurnsByKey: ChatTurnMap;
+  turnRecordsByKey: Record<string, TokenRecord[]>;
+  loadingTurnRecords: Record<string, boolean>;
 }) {
   if (loading) {
     return (
@@ -1699,26 +1862,27 @@ function TurnClusterList({
         if (summary.turn_seq == null) return null;
 
         const turnSeq = summary.turn_seq;
-        const iterations = turnIterationsBySeq.get(turnSeq) || [];
-        const detailRecords = turnRecordsBySeq[turnSeq] || [];
-        const chatTurn = chatTurnsBySeq.get(turnSeq);
-        const expanded = expandedTurnSeq === turnSeq;
-        const highlighted = activeTurnSeq === turnSeq;
+        const currentTurnKey = turnKey(summary.conversation_id || '', turnSeq);
+        const iterations = turnIterationsByKey.get(currentTurnKey) || [];
+        const detailRecords = turnRecordsByKey[currentTurnKey] || [];
+        const chatTurn = chatTurnsByKey[currentTurnKey];
+        const expanded = expandedTurnKey === currentTurnKey;
+        const highlighted = activeTurnKey ? activeTurnKey === currentTurnKey : activeTurnSeq === turnSeq;
         const status = getTurnStatus(detailRecords, iterations);
         const finalAssistantText = getTurnFinalAssistantText(chatTurn);
         const userMessage = getTurnUserMessage(chatTurn);
 
         return (
           <div
-            key={turnSeq}
-            id={`token-turn-${turnSeq}`}
+            key={currentTurnKey}
+            id={turnDomId(currentTurnKey)}
             className={cn(
               'bg-[var(--bg-secondary)] border rounded-xl overflow-hidden transition-colors',
               highlighted ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)]' : 'border-[var(--border)]',
             )}
           >
             <button
-              onClick={() => onToggleTurn(turnSeq)}
+              onClick={() => onToggleTurn(currentTurnKey)}
               className="w-full px-4 py-4 text-left hover:bg-[var(--bg-tertiary)]/20 transition-colors"
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1789,6 +1953,7 @@ function TurnClusterList({
 
             {expanded && (
               <div className="border-t border-[var(--border)] bg-[var(--bg-tertiary)]/15 px-4 py-4 space-y-4">
+                {summary.conversation_id && <TraceIdField traceId={summary.conversation_id} />}
                 <div className="text-[11px] text-[var(--text-secondary)]">
                   Session: <span className="font-mono text-[var(--text-primary)] break-all">{sessionKey}</span>
                 </div>
@@ -1818,7 +1983,7 @@ function TurnClusterList({
                       {detailRecords.length || iterations.length} 条
                     </span>
                   </div>
-                  {loadingTurnRecords[turnSeq] ? (
+                  {loadingTurnRecords[currentTurnKey] ? (
                     <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-4 text-xs text-[var(--text-secondary)]">
                       加载调用详情中...
                     </div>
@@ -1915,7 +2080,7 @@ function TurnCallEntry({ record }: { record: TokenRecord }) {
 
           {record.conversation_history && (
             <div>
-              <p className="text-[var(--text-secondary)] mb-1 text-xs">对话历史</p>
+              <p className="text-[var(--text-secondary)] mb-1 text-xs">请求上下文（发送给模型前的快照）</p>
               <div className="bg-[var(--bg-secondary)] rounded-lg p-3">
                 <ConversationHistoryView historyJson={record.conversation_history} />
               </div>

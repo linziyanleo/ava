@@ -1,5 +1,6 @@
 """Tests for loop_patch — AgentLoop attribute injection + token stats."""
 
+import asyncio
 import gc
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Consolidator
+from nanobot.session.manager import Session
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +35,45 @@ def _restore_agent_loop():
 
 
 class TestLoopPatch:
+    @pytest.mark.asyncio
+    async def test_mutating_tool_guard_blocks_mismatched_summary(self):
+        from ava.patches.loop_patch import _wrap_mutating_tool_execute
+
+        loop = SimpleNamespace(
+            _pending_tool_guard={
+                "declared_tool": "exec",
+                "actual_tool_names": ["write_file"],
+            }
+        )
+
+        async def original_execute(**kwargs):
+            return "should not run"
+
+        guarded = _wrap_mutating_tool_execute(loop, "write_file", original_execute)
+        result = await guarded(path="/tmp/x.md", content="x")
+
+        assert result.startswith("Error: blocked tool execution")
+        assert "Tool: exec" in result
+
+    @pytest.mark.asyncio
+    async def test_mutating_tool_guard_allows_matching_summary(self):
+        from ava.patches.loop_patch import _wrap_mutating_tool_execute
+
+        loop = SimpleNamespace(
+            _pending_tool_guard={
+                "declared_tool": "write_file",
+                "actual_tool_names": ["write_file"],
+            }
+        )
+
+        async def original_execute(**kwargs):
+            return "ok"
+
+        guarded = _wrap_mutating_tool_execute(loop, "write_file", original_execute)
+        result = await guarded(path="/tmp/x.md", content="x")
+
+        assert result == "ok"
+
     def test_set_shared_db(self):
         """T3.7: set_shared_db stores the db reference."""
         from ava.patches.loop_patch import set_shared_db, _get_or_create_db
@@ -76,6 +117,92 @@ class TestLoopPatch:
 
         assert AgentLoop._process_message is not original
 
+    def test_save_turn_skips_pre_persisted_multimodal_user_text(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+        from nanobot.config.schema import AgentDefaults
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
+        loop._last_build_msg_count = 0
+
+        session = Session(key="test:duplicate-user")
+        session.messages.append({
+            "role": "user",
+            "content": "你看这是什么",
+            "timestamp": "2026-04-22T00:00:00+00:00",
+        })
+
+        loop._save_turn(
+            session,
+            [
+                {"role": "system", "content": "system"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "[image: /tmp/example.png]"},
+                        {"type": "text", "text": "你看这是什么"},
+                    ],
+                },
+                {"role": "assistant", "content": "这是一张图"},
+            ],
+            skip=999,
+        )
+
+        assert [item["role"] for item in session.messages] == ["user", "assistant"]
+        assert session.messages[-1]["content"] == "这是一张图"
+
+    def test_save_turn_upgrades_pre_persisted_user_to_multimodal_content(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+        from nanobot.config.schema import AgentDefaults
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
+        loop._last_build_msg_count = 0
+
+        session = Session(key="test:upgrade-user-image")
+        session.messages.append({
+            "role": "user",
+            "content": "你怎么看这个spec anchor的新logo？",
+            "timestamp": "2026-04-22T00:00:00+00:00",
+        })
+
+        loop._save_turn(
+            session,
+            [
+                {"role": "system", "content": "system"},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,abc"},
+                            "_meta": {"path": "/Users/fanghu/.nanobot/media/chat-uploads/chat-b14f11c46c1d-image.png"},
+                        },
+                        {"type": "text", "text": "你怎么看这个spec anchor的新logo？"},
+                    ],
+                },
+                {"role": "assistant", "content": "这个 logo 概念挺完整的。"},
+            ],
+            skip=999,
+        )
+
+        assert [item["role"] for item in session.messages] == ["user", "assistant"]
+        assert session.messages[0]["content"] == [
+            {
+                "type": "text",
+                "text": "[image: /Users/fanghu/.nanobot/media/chat-uploads/chat-b14f11c46c1d-image.png]",
+            },
+            {"type": "text", "text": "你怎么看这个spec anchor的新logo？"},
+        ]
+
     def test_patch_result_mentions_new_modules(self):
         """New attributes mentioned in patch result string."""
         from ava.patches.a_schema_patch import apply_schema_patch
@@ -86,6 +213,7 @@ class TestLoopPatch:
         assert "categorized_memory" in result
         assert "summarizer" in result
         assert "compressor" in result
+        assert "guarded" in result
 
     def test_idempotent(self):
         """T3.6: 连续应用两次不应重复包装。"""
@@ -117,6 +245,53 @@ class TestLoopPatch:
             assert loop_patch_module.get_agent_loop() is None
         finally:
             loop_patch_module._agent_loop_ref = original_ref
+
+    @pytest.mark.asyncio
+    async def test_patched_maybe_consolidate_accepts_session_summary(self):
+        # 回归：上游 nanobot.agent.loop 升级后会以 kwarg 传入 session_summary；
+        # patched 版本若未透传，会抛 TypeError 并整条消息处理链中断，
+        # 导致 chat 页面出现部分 turn 缺失 model name / token cost 的半成品。
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        consolidator = Consolidator.__new__(Consolidator)
+        consolidator.context_window_tokens = 0  # 命中方法内早退分支，无需构造真实依赖
+
+        session = SimpleNamespace(key="telegram:999", messages=[])
+
+        await consolidator.maybe_consolidate_by_tokens(session, session_summary="hi")
+
+        assert getattr(consolidator, "_ava_current_session_key", None) is None
+
+    def test_snapshot_content_limit_reads_config(self, monkeypatch):
+        """snapshot_content_max_chars should come from config when available."""
+        from ava.patches.loop_patch import _get_snapshot_content_max_chars
+
+        monkeypatch.setattr(
+            "nanobot.config.loader.load_config",
+            lambda: SimpleNamespace(token_stats=SimpleNamespace(snapshot_content_max_chars=1234)),
+        )
+
+        assert _get_snapshot_content_max_chars() == 1234
+
+    def test_snapshot_content_limit_falls_back_on_invalid_config(self, monkeypatch):
+        """Invalid config values should not break token snapshot recording."""
+        from ava.patches.loop_patch import _get_snapshot_content_max_chars
+
+        monkeypatch.setattr(
+            "nanobot.config.loader.load_config",
+            lambda: SimpleNamespace(token_stats=SimpleNamespace(snapshot_content_max_chars=0)),
+        )
+        assert _get_snapshot_content_max_chars() == 3000
+
+        def _raise():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("nanobot.config.loader.load_config", _raise)
+        assert _get_snapshot_content_max_chars() == 3000
 
     @pytest.mark.asyncio
     async def test_process_message_preserves_upstream_kwargs(self):
@@ -306,9 +481,9 @@ class TestTokenStatsRecordId:
         conn.commit()
 
         per_turn = collector.get_by_session("telegram:1")
-        assert [row["turn_seq"] for row in per_turn] == [0, 1]
+        assert [row["turn_seq"] for row in per_turn] == [0, 2]
 
-        filtered = collector.get_records(limit=10, session_key="telegram:1", turn_seq=1)
+        filtered = collector.get_records(limit=10, session_key="telegram:1", turn_seq=2)
         assert len(filtered) == 1
         assert filtered[0]["model"] == "model-b"
 
@@ -349,6 +524,109 @@ class TestTokenStatsRecordId:
         )
         assert len(filtered) == 1
         assert filtered[0]["model"] == "current-model"
+
+    def test_explicit_empty_conversation_id_filters_legacy_records(self, tmp_path):
+        from ava.storage import Database
+        db = Database(tmp_path / "test.db")
+        from ava.console.services.token_stats_service import TokenStatsCollector
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+
+        collector.record(
+            model="legacy-model",
+            provider="provider",
+            usage={"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12},
+            session_key="telegram:1",
+            conversation_id="",
+            turn_seq=0,
+            finish_reason="stop",
+            model_role="chat",
+        )
+        collector.record(
+            model="current-model",
+            provider="provider",
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            session_key="telegram:1",
+            conversation_id="conv_current",
+            turn_seq=0,
+            finish_reason="stop",
+            model_role="chat",
+        )
+
+        legacy_records = collector.get_records(
+            limit=10,
+            session_key="telegram:1",
+            conversation_id="",
+        )
+        assert len(legacy_records) == 1
+        assert legacy_records[0]["model"] == "legacy-model"
+
+        legacy_turns = collector.get_by_session("telegram:1", conversation_id="")
+        assert len(legacy_turns) == 1
+        assert legacy_turns[0]["conversation_id"] == ""
+
+    def test_session_query_backfills_legacy_iteration_and_is_idempotent(self, tmp_path):
+        from ava.storage import Database
+        db = Database(tmp_path / "test.db")
+        from ava.console.services.token_stats_service import TokenStatsCollector
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+
+        conn = db._get_conn()
+        rows = [
+            ("2026-04-05T20:00:01", "telegram:1", "", 0, 0, "legacy-a"),
+            ("2026-04-05T20:00:02", "telegram:1", "", 0, 0, "legacy-b"),
+            ("2026-04-05T20:00:03", "telegram:1", "", 0, 0, "legacy-c"),
+            ("2026-04-05T20:01:01", "telegram:1", "conv_keep", 1, 0, "keep-a"),
+            ("2026-04-05T20:01:02", "telegram:1", "conv_keep", 1, 1, "keep-b"),
+        ]
+        for timestamp, session_key, conversation_id, turn_seq, iteration, model in rows:
+            conn.execute(
+                """INSERT INTO token_usage
+                   (timestamp, model, provider, prompt_tokens, completion_tokens, total_tokens,
+                    session_key, conversation_id, turn_seq, iteration, user_message, output_content,
+                    system_prompt_preview, conversation_history, full_request_payload, finish_reason,
+                    model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
+                    tool_names)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    timestamp,
+                    model,
+                    "provider",
+                    10,
+                    5,
+                    15,
+                    session_key,
+                    conversation_id,
+                    turn_seq,
+                    iteration,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "stop",
+                    "chat",
+                    0,
+                    0,
+                    0.0,
+                    0,
+                    "",
+                ),
+            )
+        conn.commit()
+
+        legacy_details = collector.get_by_session_detailed("telegram:1", conversation_id="")
+        assert [row["iteration"] for row in legacy_details] == [0, 1, 2]
+
+        preserved = conn.execute(
+            """SELECT iteration
+                 FROM token_usage
+                WHERE session_key = ? AND conversation_id = ? AND turn_seq = ?
+                ORDER BY timestamp, id""",
+            ("telegram:1", "conv_keep", 1),
+        ).fetchall()
+        assert [row["iteration"] for row in preserved] == [0, 1]
+
+        assert db.backfill_iteration(session_key="telegram:1") == 0
 
     @pytest.mark.asyncio
     async def test_new_rotates_conversation_id_and_keeps_turn_zero_separate(self, tmp_path):
@@ -467,3 +745,197 @@ class TestTokenStatsRecordId:
         )
         assert len(filtered) == 1
         assert filtered[0]["model"] == "model-new"
+
+    @pytest.mark.asyncio
+    async def test_turn_completed_event_includes_conversation_and_turn_identity(self):
+        from ava.patches.loop_patch import apply_loop_patch
+
+        class DummySession:
+            def __init__(self):
+                self.key = "telegram:1"
+                self.metadata = {"conversation_id": "conv_live"}
+                self.messages = []
+
+            def clear(self):
+                self.messages = []
+
+        class DummySessions:
+            def __init__(self, session):
+                self._session = session
+
+            def get_or_create(self, key):
+                assert key == self._session.key
+                return self._session
+
+            def save(self, session):
+                self._session = session
+
+        observe_events: list[dict] = []
+
+        class DummyBus:
+            def dispatch_observe_event(self, session_key, event):
+                observe_events.append({"session_key": session_key, **event})
+
+        async def original_process_message(self, msg, **kwargs):
+            live_session = self.sessions.get_or_create(kwargs.get("session_key") or msg.session_key)
+            live_session.messages.append({"role": "user", "content": msg.content})
+            live_session.messages.append({"role": "assistant", "content": "reply"})
+            self.sessions.save(live_session)
+            return SimpleNamespace(content="reply")
+
+        AgentLoop._process_message = original_process_message
+        apply_loop_patch()
+
+        session = DummySession()
+        loop = SimpleNamespace(
+            sessions=DummySessions(session),
+            bg_tasks=None,
+            token_stats=None,
+            bus=DummyBus(),
+        )
+
+        await AgentLoop._process_message(loop, SimpleNamespace(content="fresh question", session_key=session.key))
+
+        completed = next(event for event in observe_events if event["type"] == "turn_completed")
+
+        assert completed["session_key"] == session.key
+        assert completed["conversation_id"] == "conv_live"
+        assert completed["turn_seq"] == 0
+
+    @pytest.mark.asyncio
+    async def test_run_agent_loop_observe_events_include_conversation_and_turn_identity(self):
+        from ava.patches.loop_patch import apply_loop_patch
+
+        observe_events: list[dict] = []
+
+        class DummyBus:
+            def dispatch_observe_event(self, session_key, event):
+                observe_events.append({"session_key": session_key, **event})
+
+        class DummyProvider:
+            async def chat_with_retry(self, *args, **kwargs):
+                return SimpleNamespace(content="reply", usage={}, finish_reason="stop")
+
+            async def chat_stream_with_retry(self, *args, **kwargs):
+                return SimpleNamespace(content="reply", usage={}, finish_reason="stop")
+
+        async def original_run_agent_loop(self, initial_messages, **kwargs):
+            return SimpleNamespace(content="reply")
+
+        AgentLoop._run_agent_loop = original_run_agent_loop
+        apply_loop_patch()
+
+        loop = SimpleNamespace(
+            bus=DummyBus(),
+            token_stats=None,
+            provider=DummyProvider(),
+            model="test-model",
+            _current_session_key="telegram:1",
+            _current_conversation_id="conv_live",
+            _current_user_message="fresh question",
+            _current_turn_seq=0,
+        )
+
+        await AgentLoop._run_agent_loop(loop, initial_messages=[])
+
+        arrived = next(event for event in observe_events if event["type"] == "message_arrived")
+        started = next(event for event in observe_events if event["type"] == "processing_started")
+
+        for event in (arrived, started):
+            assert event["session_key"] == "telegram:1"
+            assert event["conversation_id"] == "conv_live"
+            assert event["turn_seq"] == 0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_turns_do_not_double_record_token_usage(self, tmp_path):
+        from ava.patches.loop_patch import apply_loop_patch
+        from ava.storage import Database
+        from ava.console.services.token_stats_service import TokenStatsCollector
+
+        first_waiting = asyncio.Event()
+        second_wrapped = asyncio.Event()
+
+        class DummySession:
+            def __init__(self, key: str):
+                self.key = key
+                self.metadata = {"conversation_id": f"conv_{key.split(':', 1)[1]}"}
+                self.messages = []
+
+        class DummySessions:
+            def __init__(self):
+                self._sessions: dict[str, DummySession] = {}
+
+            def get_or_create(self, key):
+                return self._sessions.setdefault(key, DummySession(key))
+
+            def save(self, session):
+                self._sessions[session.key] = session
+
+        class DummyProvider:
+            async def chat_with_retry(self, *args, messages=None, **kwargs):
+                prompt = messages[-1]["content"]
+                await asyncio.sleep(0)
+                return SimpleNamespace(
+                    content=f"reply:{prompt}",
+                    usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                    finish_reason="stop",
+                )
+
+            async def chat_stream_with_retry(self, *args, messages=None, **kwargs):
+                return await self.chat_with_retry(*args, messages=messages, **kwargs)
+
+        async def original_run_agent_loop(self, initial_messages, **kwargs):
+            prompt = initial_messages[-1]["content"]
+            if prompt == "first":
+                first_waiting.set()
+                await second_wrapped.wait()
+            else:
+                await first_waiting.wait()
+                second_wrapped.set()
+            return await self.provider.chat_with_retry(messages=initial_messages)
+
+        async def original_process_message(self, msg, **kwargs):
+            key = kwargs.get("session_key") or msg.session_key
+            session = self.sessions.get_or_create(key)
+            session.messages.append({"role": "user", "content": msg.content})
+            result = await AgentLoop._run_agent_loop(
+                self,
+                initial_messages=[{"role": "user", "content": msg.content}],
+            )
+            session.messages.append({"role": "assistant", "content": result.content})
+            self.sessions.save(session)
+            return result
+
+        AgentLoop._run_agent_loop = original_run_agent_loop
+        AgentLoop._process_message = original_process_message
+        apply_loop_patch()
+
+        db = Database(tmp_path / "test.db")
+        collector = TokenStatsCollector(data_dir=tmp_path, db=db)
+        loop = SimpleNamespace(
+            sessions=DummySessions(),
+            bg_tasks=None,
+            token_stats=collector,
+            bus=None,
+            provider=DummyProvider(),
+            model="test-model",
+        )
+
+        await asyncio.gather(
+            AgentLoop._process_message(loop, SimpleNamespace(content="first", session_key="telegram:1")),
+            AgentLoop._process_message(loop, SimpleNamespace(content="second", session_key="telegram:2")),
+        )
+
+        rows = db.fetchall(
+            """SELECT session_key, conversation_id, turn_seq, iteration, output_content
+                 FROM token_usage
+                ORDER BY session_key, id""",
+        )
+
+        assert [
+            (row["session_key"], row["conversation_id"], row["turn_seq"], row["iteration"], row["output_content"])
+            for row in rows
+        ] == [
+            ("telegram:1", "conv_1", 0, 0, "reply:first"),
+            ("telegram:2", "conv_2", 0, 0, "reply:second"),
+        ]

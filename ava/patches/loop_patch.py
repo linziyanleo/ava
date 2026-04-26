@@ -22,11 +22,15 @@ Execution order note:
 
 from __future__ import annotations
 
+import contextvars
+import re
 import weakref
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from loguru import logger
+
+from nanobot.agent.hook import AgentHook
 
 from ava.launcher import register_patch
 
@@ -35,6 +39,14 @@ from ava.launcher import register_patch
 _shared_db = None
 # Module-level reference to the most recently created AgentLoop (for console_patch)
 _agent_loop_ref: weakref.ReferenceType | None = None
+_token_record_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "ava_token_record_context",
+    default=None,
+)
+_MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
+_TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
+_IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image(?:: .+)?\]$")
+_IMAGE_PLACEHOLDER_INLINE_RE = re.compile(r"\[image(?:: ([^\]]+))?\]")
 
 
 def set_shared_db(db) -> None:
@@ -111,6 +123,164 @@ def _get_latest_history_entry(store, previous_cursor: int | None) -> str:
     return content if isinstance(content, str) else ""
 
 
+def _normalize_user_text_block(text: object) -> str:
+    from nanobot.agent.context import ContextBuilder
+
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    if normalized.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+        parts = normalized.split("\n\n", 1)
+        normalized = parts[1].strip() if len(parts) > 1 else ""
+    return normalized
+
+
+def _extract_user_text_candidates(content: object) -> set[str]:
+    if isinstance(content, str):
+        normalized = _normalize_user_text_block(content)
+        return {normalized} if normalized else set()
+    if not isinstance(content, list):
+        return set()
+
+    candidates: set[str] = set()
+    combined_text_parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        normalized = _normalize_user_text_block(block.get("text", ""))
+        if not normalized:
+            continue
+        candidates.add(normalized)
+        if not _IMAGE_PLACEHOLDER_RE.fullmatch(normalized):
+            combined_text_parts.append(normalized)
+    if combined_text_parts:
+        candidates.add("\n".join(combined_text_parts))
+    return candidates
+
+
+def _user_contents_match(existing: object, candidate: object) -> bool:
+    existing_texts = _extract_user_text_candidates(existing)
+    candidate_texts = _extract_user_text_candidates(candidate)
+    return bool(existing_texts and candidate_texts and existing_texts.intersection(candidate_texts))
+
+
+def _persist_user_content_for_history(loop, content: object) -> object:
+    if not isinstance(content, list):
+        return content
+    try:
+        filtered = loop._sanitize_persisted_blocks(content, drop_runtime=True)
+    except Exception:
+        return content
+    return filtered if filtered else content
+
+
+def _image_placeholder_signature(content: object) -> tuple[int, int]:
+    total = 0
+    with_path = 0
+
+    def _scan_text(text: object) -> None:
+        nonlocal total, with_path
+        if not isinstance(text, str):
+            return
+        for match in _IMAGE_PLACEHOLDER_INLINE_RE.finditer(_normalize_user_text_block(text)):
+            total += 1
+            if (match.group(1) or "").strip():
+                with_path += 1
+
+    if isinstance(content, str):
+        _scan_text(content)
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                continue
+            _scan_text(block.get("text"))
+
+    return total, with_path
+
+
+def _get_snapshot_content_max_chars() -> int:
+    """Read the configured snapshot truncation limit with a safe fallback."""
+    default_limit = 3000
+    try:
+        from nanobot.config.loader import load_config
+
+        cfg = load_config()
+        raw_limit = getattr(getattr(cfg, "token_stats", None), "snapshot_content_max_chars", default_limit)
+        limit = int(raw_limit)
+        return limit if limit > 0 else default_limit
+    except Exception:
+        return default_limit
+
+
+def _extract_declared_tool_name(content: str | None) -> str:
+    if not isinstance(content, str):
+        return ""
+    match = _TOOL_SUMMARY_RE.match(content)
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _tool_guard_error(
+    declared_tool: str,
+    actual_tool_names: list[str],
+    target_tool_name: str,
+) -> str | None:
+    if not declared_tool:
+        return None
+    if declared_tool in actual_tool_names:
+        return None
+    if target_tool_name not in actual_tool_names:
+        return None
+    return (
+        "Error: blocked tool execution because assistant content declared "
+        f"`Tool: {declared_tool}` while actual tool_calls are {', '.join(actual_tool_names)}"
+    )
+
+
+def _wrap_mutating_tool_execute(loop, tool_name: str, original_execute):
+    async def guarded_execute(*args, **kwargs):
+        guard = getattr(loop, "_pending_tool_guard", None) or {}
+        declared_tool = guard.get("declared_tool", "")
+        actual_tool_names = guard.get("actual_tool_names", [])
+        error = _tool_guard_error(declared_tool, actual_tool_names, tool_name)
+        if error:
+            logger.warning(
+                "Blocked {} due to assistant/tool mismatch: declared={}, actual={}",
+                tool_name,
+                declared_tool,
+                actual_tool_names,
+            )
+            return error
+        return await original_execute(*args, **kwargs)
+
+    guarded_execute._ava_tool_guard_wrapped = True
+    return guarded_execute
+
+
+def _install_provider_token_recording_wrappers(provider) -> None:
+    """Wrap provider retry entrypoints once and delegate recording via ContextVar."""
+
+    def _wrap(method_name: str) -> None:
+        original = getattr(provider, method_name, None)
+        if not callable(original) or getattr(original, "_ava_token_record_wrapped", False):
+            return
+
+        async def wrapped(*args, __original=original, **kwargs):
+            response = await __original(*args, **kwargs)
+            turn_state = _token_record_context.get()
+            recorder = turn_state.get("record_immediately") if isinstance(turn_state, dict) else None
+            if callable(recorder):
+                recorder(response)
+            return response
+
+        wrapped._ava_token_record_wrapped = True
+        setattr(provider, method_name, wrapped)
+
+    _wrap("chat_with_retry")
+    _wrap("chat_stream_with_retry")
+
+
 def _sync_categorized_memory(consolidator, session_key: str | None, history_entry: str) -> None:
     if not session_key or not history_entry:
         return
@@ -129,6 +299,34 @@ def _sync_categorized_memory(consolidator, session_key: str | None, history_entr
         categorized_memory.on_consolidate(channel, chat_id, history_entry, "")
     except Exception as exc:
         logger.warning("Failed to sync categorized memory for {}: {}", session_key, exc)
+
+
+class _ToolGuardHook(AgentHook):
+    """Track the current assistant tool-call summary so mutating tools can validate it."""
+
+    def __init__(self, agent_loop):
+        super().__init__()
+        self._loop = agent_loop
+
+    async def before_iteration(self, context) -> None:
+        self._loop._pending_tool_guard = None
+
+    async def before_execute_tools(self, context) -> None:
+        response = getattr(context, "response", None)
+        declared_tool = _extract_declared_tool_name(
+            getattr(response, "content", None) if response else None
+        )
+        actual_tool_names = [tc.name for tc in getattr(context, "tool_calls", []) if getattr(tc, "name", "")]
+        if not declared_tool or not actual_tool_names:
+            self._loop._pending_tool_guard = None
+            return
+        self._loop._pending_tool_guard = {
+            "declared_tool": declared_tool,
+            "actual_tool_names": actual_tool_names,
+        }
+
+    async def after_iteration(self, context) -> None:
+        self._loop._pending_tool_guard = None
 
 
 def _register_bg_task_commands(router, bg_store) -> None:
@@ -242,6 +440,14 @@ def apply_loop_patch() -> str:
         db = _get_or_create_db(self.workspace)
         self.db = db
         self._current_conversation_id = ""
+        self._pending_tool_guard = None
+
+        try:
+            extra_hooks = list(getattr(self, "_extra_hooks", []))
+            extra_hooks.append(_ToolGuardHook(self))
+            self._extra_hooks = extra_hooks
+        except Exception as exc:
+            logger.warning("Failed to register tool guard hook: {}", exc)
 
         # TokenStatsCollector
         try:
@@ -365,6 +571,16 @@ def apply_loop_patch() -> str:
             token_stats = getattr(self, "token_stats", None)
             media_service = getattr(self, "media_service", None)
             if hasattr(self, "tools"):
+                for tool_name in _MUTATING_FILE_TOOLS:
+                    tool = self.tools.get(tool_name)
+                    if not tool:
+                        continue
+                    original_execute = getattr(tool, "execute", None)
+                    if not callable(original_execute):
+                        continue
+                    if getattr(original_execute, "_ava_tool_guard_wrapped", False):
+                        continue
+                    tool.execute = _wrap_mutating_tool_execute(self, tool_name, original_execute)
                 if vision_tool := self.tools.get("vision"):
                     if hasattr(vision_tool, "_token_stats"):
                         vision_tool._token_stats = token_stats
@@ -422,11 +638,12 @@ def apply_loop_patch() -> str:
             )
         return result
 
-    async def patched_maybe_consolidate_by_tokens(self, session):
+    async def patched_maybe_consolidate_by_tokens(self, session, *args, **kwargs):
+        # 透传上游新增 kwarg（如 session_summary），避免签名漂移导致 TypeError
         previous_session_key = getattr(self, "_ava_current_session_key", None)
         self._ava_current_session_key = getattr(session, "key", None)
         try:
-            return await original_maybe_consolidate(self, session)
+            return await original_maybe_consolidate(self, session, *args, **kwargs)
         finally:
             self._ava_current_session_key = previous_session_key
 
@@ -473,19 +690,40 @@ def apply_loop_patch() -> str:
         import json as _json
         from datetime import datetime as _dt
 
-        sk = getattr(self, "_current_session_key", "") or ""
-        conversation_id = getattr(self, "_current_conversation_id", "") or ""
-        user_msg = getattr(self, "_current_user_message", "") or ""
-        turn_seq = getattr(self, "_current_turn_seq", None)
+        turn_state = _token_record_context.get()
+        owns_turn_state = False
+        turn_state_token = None
+        if not isinstance(turn_state, dict):
+            turn_state = {
+                "session_key": getattr(self, "_current_session_key", "") or "",
+                "conversation_id": getattr(self, "_current_conversation_id", "") or "",
+                "user_message": getattr(self, "_current_user_message", "") or "",
+                "turn_seq": getattr(self, "_current_turn_seq", None),
+                "record_ids": [],
+                "turn_iteration": 0,
+                "phase0_record_id": None,
+            }
+            turn_state_token = _token_record_context.set(turn_state)
+            owns_turn_state = True
+
+        turn_state.setdefault("record_ids", [])
+        turn_state.setdefault("turn_iteration", 0)
+        turn_state.setdefault("phase0_record_id", None)
+
+        sk = turn_state.get("session_key", "") or ""
+        conversation_id = turn_state.get("conversation_id", "") or ""
+        user_msg = turn_state.get("user_message", "") or ""
+        turn_seq = turn_state.get("turn_seq")
 
         # === 实时广播 + Phase 0 预记录（LLM 调用前，slash command 已过）===
-        self._phase0_record_id = None
         if sk and user_msg:
             bus = getattr(self, "bus", None)
             if bus and hasattr(bus, "dispatch_observe_event"):
                 bus.dispatch_observe_event(sk, {
                     "type": "message_arrived",
                     "session_key": sk,
+                    "conversation_id": conversation_id,
+                    "turn_seq": turn_seq,
                     "role": "user",
                     "content": user_msg[:500],
                     "timestamp": _dt.now().isoformat(),
@@ -494,8 +732,9 @@ def apply_loop_patch() -> str:
             token_stats = getattr(self, "token_stats", None)
             if token_stats:
                 try:
+                    snapshot_limit = _get_snapshot_content_max_chars()
                     conv_history = _json.dumps(
-                        [{"role": m.get("role", ""), "content": str(m.get("content", ""))[:200]}
+                        [{"role": m.get("role", ""), "content": str(m.get("content", ""))[:snapshot_limit]}
                          for m in initial_messages if m.get("role") != "system"],
                         ensure_ascii=False,
                     )
@@ -515,7 +754,7 @@ def apply_loop_patch() -> str:
                     finish_reason="pending",
                     model_role="pending",
                 )
-                self._phase0_record_id = phase0_id
+                turn_state["phase0_record_id"] = phase0_id
                 if bus and hasattr(bus, "dispatch_observe_event") and phase0_id is not None:
                     bus.dispatch_observe_event(sk, {
                         "type": "token_recorded",
@@ -528,13 +767,10 @@ def apply_loop_patch() -> str:
                 bus.dispatch_observe_event(sk, {
                     "type": "processing_started",
                     "session_key": sk,
+                    "conversation_id": conversation_id,
+                    "turn_seq": turn_seq,
                     "model": self.model,
                 })
-
-        original_chat = self.provider.chat_with_retry
-        original_chat_stream = self.provider.chat_stream_with_retry
-        self._turn_record_ids = []
-        self._turn_iteration = 0
 
         def _record_immediately(response):
             """Extract usage + tool names from response and write to DB now."""
@@ -554,16 +790,26 @@ def apply_loop_patch() -> str:
                 pass
             tool_names_str = ", ".join(tool_names_list)
 
-            sk_inner = getattr(self, "_current_session_key", "") or ""
+            # Extract text content from response for output_content
+            output_text = ""
+            try:
+                if response.content:
+                    output_text = response.content
+            except Exception:
+                pass
+
+            sk_inner = turn_state.get("session_key", "") or ""
+            conversation_id_inner = turn_state.get("conversation_id", "") or ""
+            turn_seq_inner = turn_state.get("turn_seq")
             provider_name = type(self.provider).__name__.lower().replace("provider", "")
-            iteration = self._turn_iteration
-            self._turn_iteration += 1
+            iteration = int(turn_state.get("turn_iteration", 0) or 0)
+            turn_state["turn_iteration"] = iteration + 1
 
             current_turn_tokens = 0
             if iteration == 0:
                 try:
                     from nanobot.utils.helpers import estimate_prompt_tokens
-                    u_msg = getattr(self, "_current_user_message", "") or ""
+                    u_msg = turn_state.get("user_message", "") or ""
                     if u_msg:
                         current_turn_tokens = estimate_prompt_tokens(
                             [{"role": "user", "content": u_msg}]
@@ -580,7 +826,7 @@ def apply_loop_patch() -> str:
                 self._prev_recorded_system_prompt = system_prompt
 
             # Phase 0 UPDATE: 第一次 LLM 调用完成后更新已有的 pending 记录
-            phase0_id = getattr(self, "_phase0_record_id", None)
+            phase0_id = turn_state.get("phase0_record_id")
             if iteration == 0 and phase0_id is not None:
                 try:
                     token_stats.update_record(
@@ -595,8 +841,8 @@ def apply_loop_patch() -> str:
                         current_turn_tokens=current_turn_tokens,
                         tool_names=tool_names_str,
                     )
-                    self._turn_record_ids.append(phase0_id)
-                    self._phase0_record_id = None
+                    turn_state["record_ids"].append(phase0_id)
+                    turn_state["phase0_record_id"] = None
                     bus = getattr(self, "bus", None)
                     if bus and hasattr(bus, "dispatch_observe_event"):
                         bus.dispatch_observe_event(sk_inner, {
@@ -615,11 +861,11 @@ def apply_loop_patch() -> str:
                     provider=provider_name,
                     usage=usage_data,
                     session_key=sk_inner,
-                    conversation_id=conversation_id,
-                    turn_seq=turn_seq,
+                    conversation_id=conversation_id_inner,
+                    turn_seq=turn_seq_inner,
                     iteration=iteration,
                     user_message="",
-                    output_content="",
+                    output_content=output_text,
                     system_prompt=system_prompt_to_store,
                     conversation_history="",
                     finish_reason=finish_reason,
@@ -630,31 +876,22 @@ def apply_loop_patch() -> str:
                     tool_names=tool_names_str,
                 )
                 if rec_id is not None:
-                    self._turn_record_ids.append(rec_id)
+                    turn_state["record_ids"].append(rec_id)
                 elif token_stats._use_db:
                     row = token_stats._db.fetchone("SELECT last_insert_rowid() as id")
                     if row:
-                        self._turn_record_ids.append(row["id"])
+                        turn_state["record_ids"].append(row["id"])
             except Exception as exc:
                 logger.warning("Failed to record token stats inline: {}", exc)
 
-        async def intercepted_chat(*args, **kw):
-            response = await original_chat(*args, **kw)
-            _record_immediately(response)
-            return response
-
-        async def intercepted_chat_stream(*args, **kw):
-            response = await original_chat_stream(*args, **kw)
-            _record_immediately(response)
-            return response
-
-        self.provider.chat_with_retry = intercepted_chat
-        self.provider.chat_stream_with_retry = intercepted_chat_stream
+        _install_provider_token_recording_wrappers(self.provider)
+        turn_state["record_immediately"] = _record_immediately
         try:
             return await original_run_agent_loop(self, initial_messages, **kwargs)
         finally:
-            self.provider.chat_with_retry = original_chat
-            self.provider.chat_stream_with_retry = original_chat_stream
+            turn_state.pop("record_immediately", None)
+            if owns_turn_state:
+                _token_record_context.reset(turn_state_token)
 
     def _extract_usage(response) -> dict:
         """Extract and pre-parse all token fields from an LLM response."""
@@ -695,6 +932,27 @@ def apply_loop_patch() -> str:
         corrected = getattr(self_loop, "_last_build_msg_count", None)
         if corrected is not None:
             skip = 1 + corrected  # 1 for system + compressed history (excl. user)
+            current_user_idx = skip
+            if (
+                current_user_idx < len(messages)
+                and session.messages
+                and messages[current_user_idx].get("role") == "user"
+                and session.messages[-1].get("role") == "user"
+                and _user_contents_match(
+                    session.messages[-1].get("content"),
+                    messages[current_user_idx].get("content"),
+                )
+            ):
+                existing_content = session.messages[-1].get("content")
+                candidate_content = _persist_user_content_for_history(
+                    self_loop,
+                    messages[current_user_idx].get("content"),
+                )
+                if _image_placeholder_signature(candidate_content) > _image_placeholder_signature(existing_content):
+                    session.messages[-1]["content"] = candidate_content
+                # Upstream may have already persisted the current user message
+                # before _run_agent_loop starts. Preserve that extra skip.
+                skip += 1
         original_save_turn(self_loop, session, messages, skip)
 
     fixed_save_turn._ava_loop_patched = True
@@ -720,12 +978,19 @@ def apply_loop_patch() -> str:
         sk = session_key or getattr(msg, "session_key", "")
         raw = (getattr(msg, "content", "") or "").strip()
         is_new_command = _is_new_command(raw)
+        turn_state = {
+            "session_key": sk,
+            "user_message": getattr(msg, "content", "") or "",
+            "conversation_id": "",
+            "turn_seq": None,
+            "record_ids": [],
+            "turn_iteration": 0,
+            "phase0_record_id": None,
+        }
         self._current_session_key = sk
-        self._current_user_message = getattr(msg, "content", "") or ""
+        self._current_user_message = turn_state["user_message"]
         self._current_conversation_id = ""
         self._current_turn_seq = None
-        self._turn_record_ids = []
-        self._turn_iteration = 0
         pending_rotation_event: dict[str, str] | None = None
 
         if sk:
@@ -748,129 +1013,128 @@ def apply_loop_patch() -> str:
                     self._current_conversation_id = conversation_id
                     if changed:
                         self.sessions.save(session)
+                turn_state["conversation_id"] = self._current_conversation_id
                 existing_messages = getattr(session, "messages", []) or []
                 self._current_turn_seq = sum(
                     1
                     for item in existing_messages
                     if isinstance(item, dict) and item.get("role") == "user"
                 )
+                turn_state["turn_seq"] = self._current_turn_seq
             except Exception:
                 self._current_turn_seq = None
+                turn_state["turn_seq"] = None
 
         bg_store = getattr(self, "bg_tasks", None)
         if bg_store and hasattr(bg_store, "reset_continuation_budget") and sk:
             bg_store.reset_continuation_budget(sk)
 
         import asyncio as _asyncio_pm
+        turn_state_token = _token_record_context.set(turn_state)
         try:
-            result = await original_process_message(
-                self, msg,
-                session_key=session_key,
-                on_progress=on_progress,
-                on_stream=on_stream,
-                on_stream_end=on_stream_end,
-                pending_queue=pending_queue,
-                **kwargs,
-            )
-        except BaseException as exc:
-            phase0_id = getattr(self, "_phase0_record_id", None)
-            token_stats = getattr(self, "token_stats", None)
-            is_cancel = isinstance(exc, _asyncio_pm.CancelledError)
-            if token_stats:
-                reason = "cancelled" if is_cancel else "error"
-                if phase0_id is not None:
-                    try:
-                        token_stats.update_record(phase0_id, finish_reason=reason, model_role="error")
-                    except Exception:
-                        pass
-                record_ids = getattr(self, "_turn_record_ids", [])
-                if record_ids:
-                    try:
-                        user_msg = (getattr(msg, "content", "") or "")[:1000]
-                        first_id = record_ids[0]
-                        token_stats._db.execute(
-                            "UPDATE token_usage SET user_message = ? WHERE id = ? AND user_message = ''",
-                            (user_msg, first_id),
-                        )
-                        last_id = record_ids[-1]
-                        token_stats._db.execute(
-                            "UPDATE token_usage SET output_content = ?, model_role = ? WHERE id = ?",
-                            (f"[{reason}] {type(exc).__name__}: {str(exc)[:200]}", "error", last_id),
-                        )
-                        token_stats._db.commit()
-                    except Exception:
-                        pass
-            self._current_turn_seq = None
-            self._turn_record_ids = []
-            self._turn_iteration = 0
-            self._phase0_record_id = None
-            self._current_conversation_id = ""
-            raise
-
-        # Backfill user_message, output_content on DB records
-        token_stats = getattr(self, "token_stats", None)
-        record_ids = getattr(self, "_turn_record_ids", [])
-        if token_stats and token_stats._use_db and record_ids:
             try:
-                user_msg = (getattr(msg, "content", "") or "")[:1000]
-                output_content = (getattr(result, "content", "") or "")[:4000]
-
-                first_id = record_ids[0]
-                token_stats._db.execute(
-                    "UPDATE token_usage SET user_message = ? WHERE id = ? AND user_message = ''",
-                    (user_msg, first_id),
+                result = await original_process_message(
+                    self, msg,
+                    session_key=session_key,
+                    on_progress=on_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                    pending_queue=pending_queue,
+                    **kwargs,
                 )
+            except BaseException as exc:
+                phase0_id = turn_state.get("phase0_record_id")
+                token_stats = getattr(self, "token_stats", None)
+                is_cancel = isinstance(exc, _asyncio_pm.CancelledError)
+                if token_stats:
+                    reason = "cancelled" if is_cancel else "error"
+                    if phase0_id is not None:
+                        try:
+                            token_stats.update_record(phase0_id, finish_reason=reason, model_role="error")
+                        except Exception:
+                            pass
+                    record_ids = turn_state.get("record_ids", [])
+                    if record_ids:
+                        try:
+                            user_msg = (getattr(msg, "content", "") or "")[:1000]
+                            first_id = record_ids[0]
+                            token_stats._db.execute(
+                                "UPDATE token_usage SET user_message = ? WHERE id = ? AND user_message = ''",
+                                (user_msg, first_id),
+                            )
+                            last_id = record_ids[-1]
+                            token_stats._db.execute(
+                                "UPDATE token_usage SET output_content = ?, model_role = ? WHERE id = ?",
+                                (f"[{reason}] {type(exc).__name__}: {str(exc)[:200]}", "error", last_id),
+                            )
+                            token_stats._db.commit()
+                        except Exception:
+                            pass
+                raise
 
-                last_id = record_ids[-1]
-                token_stats._db.execute(
-                    "UPDATE token_usage SET output_content = ? WHERE id = ?",
-                    (output_content, last_id),
-                )
-                token_stats._db.commit()
-            except Exception as exc:
-                logger.warning("Failed to backfill token stats: {}", exc)
-
-        if sk and pending_rotation_event:
-            bus = getattr(self, "bus", None)
-            if bus and hasattr(bus, "dispatch_observe_event"):
+            # Backfill user_message, output_content on DB records
+            token_stats = getattr(self, "token_stats", None)
+            record_ids = turn_state.get("record_ids", [])
+            if token_stats and token_stats._use_db and record_ids:
                 try:
-                    bus.dispatch_observe_event(sk, {
-                        "type": "conversation_rotated",
-                        "session_key": sk,
-                        "old_conversation_id": pending_rotation_event["old_conversation_id"],
-                        "new_conversation_id": pending_rotation_event["new_conversation_id"],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                except Exception:
-                    pass
+                    user_msg = (getattr(msg, "content", "") or "")[:1000]
+                    output_content = (getattr(result, "content", "") or "")[:4000]
 
-        # 广播 turn_completed（此时 _save_turn + sessions.save 已完成，DB 中消息已持久化）
-        if sk:
-            bus = getattr(self, "bus", None)
-            if bus and hasattr(bus, "dispatch_observe_event"):
-                try:
-                    session = self.sessions.get_or_create(sk)
-                    bus.dispatch_observe_event(sk, {
-                        "type": "turn_completed",
-                        "session_key": sk,
-                        "message_count": len(session.messages) if session else 0,
-                    })
-                except Exception:
-                    pass
+                    first_id = record_ids[0]
+                    token_stats._db.execute(
+                        "UPDATE token_usage SET user_message = ? WHERE id = ? AND user_message = ''",
+                        (user_msg, first_id),
+                    )
 
-        # Clear turn state
-        self._turn_record_ids = []
-        self._turn_iteration = 0
-        self._phase0_record_id = None
-        self._current_turn_seq = None
-        self._current_conversation_id = ""
+                    last_id = record_ids[-1]
+                    token_stats._db.execute(
+                        "UPDATE token_usage SET output_content = ? WHERE id = ?",
+                        (output_content, last_id),
+                    )
+                    token_stats._db.commit()
+                except Exception as exc:
+                    logger.warning("Failed to backfill token stats: {}", exc)
 
-        return result
+            if sk and pending_rotation_event:
+                bus = getattr(self, "bus", None)
+                if bus and hasattr(bus, "dispatch_observe_event"):
+                    try:
+                        bus.dispatch_observe_event(sk, {
+                            "type": "conversation_rotated",
+                            "session_key": sk,
+                            "old_conversation_id": pending_rotation_event["old_conversation_id"],
+                            "new_conversation_id": pending_rotation_event["new_conversation_id"],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                    except Exception:
+                        pass
+
+            # 广播 turn_completed（此时 _save_turn + sessions.save 已完成，DB 中消息已持久化）
+            if sk:
+                bus = getattr(self, "bus", None)
+                if bus and hasattr(bus, "dispatch_observe_event"):
+                    try:
+                        session = self.sessions.get_or_create(sk)
+                        bus.dispatch_observe_event(sk, {
+                            "type": "turn_completed",
+                            "session_key": sk,
+                            "conversation_id": self._current_conversation_id,
+                            "turn_seq": self._current_turn_seq,
+                            "message_count": len(session.messages) if session else 0,
+                        })
+                    except Exception:
+                        pass
+
+            return result
+        finally:
+            _token_record_context.reset(turn_state_token)
+            self._current_turn_seq = None
+            self._current_conversation_id = ""
 
     patched_process_message._ava_loop_patched = True
     AgentLoop._process_message = patched_process_message
 
-    return "AgentLoop patched: injected db/token_stats/media_service/categorized_memory/summarizer/compressor; _process_message records rich token usage"
+    return "AgentLoop patched: injected db/token_stats/media_service/categorized_memory/summarizer/compressor; _process_message records rich token usage; mutating tools guarded against assistant/tool mismatch"
 
 
 register_patch("agent_loop", apply_loop_patch)

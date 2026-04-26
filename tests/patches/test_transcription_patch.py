@@ -28,11 +28,10 @@ def _restore_transcription_targets(monkeypatch):
 class TestTranscriptionPatch:
     def test_skip_when_no_proxy_configured(self, monkeypatch, tmp_path):
         """T11.1: patch skips when config contains no proxy."""
-        fake_home = tmp_path / "home"
-        nanobot_dir = fake_home / ".nanobot"
-        nanobot_dir.mkdir(parents=True)
-        (nanobot_dir / "config.json").write_text(json.dumps({"tools": {"web": {}}}), encoding="utf-8")
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        ava_home = tmp_path / "ava-home"
+        ava_home.mkdir(parents=True)
+        (ava_home / "config.json").write_text(json.dumps({"tools": {"web": {}}}), encoding="utf-8")
+        monkeypatch.setenv("AVA_HOME", str(ava_home))
 
         from ava.patches.transcription_patch import apply_transcription_patch
 
@@ -41,14 +40,13 @@ class TestTranscriptionPatch:
 
     def test_patch_applies_with_proxy(self, monkeypatch, tmp_path):
         """T11.2: patch applies when proxy config exists."""
-        fake_home = tmp_path / "home"
-        nanobot_dir = fake_home / ".nanobot"
-        nanobot_dir.mkdir(parents=True)
-        (nanobot_dir / "config.json").write_text(
+        ava_home = tmp_path / "ava-home"
+        ava_home.mkdir(parents=True)
+        (ava_home / "config.json").write_text(
             json.dumps({"tools": {"web": {"proxy": "socks5://127.0.0.1:1080"}}}),
             encoding="utf-8",
         )
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        monkeypatch.setenv("AVA_HOME", str(ava_home))
 
         from nanobot.providers.transcription import GroqTranscriptionProvider
         from ava.patches.transcription_patch import apply_transcription_patch
@@ -59,14 +57,13 @@ class TestTranscriptionPatch:
 
     def test_idempotent(self, monkeypatch, tmp_path):
         """T11.3: repeated apply returns skipped once patched."""
-        fake_home = tmp_path / "home"
-        nanobot_dir = fake_home / ".nanobot"
-        nanobot_dir.mkdir(parents=True)
-        (nanobot_dir / "config.json").write_text(
+        ava_home = tmp_path / "ava-home"
+        ava_home.mkdir(parents=True)
+        (ava_home / "config.json").write_text(
             json.dumps({"tools": {"web": {"proxy": "socks5://127.0.0.1:1080"}}}),
             encoding="utf-8",
         )
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        monkeypatch.setenv("AVA_HOME", str(ava_home))
 
         from ava.patches.transcription_patch import apply_transcription_patch
 
@@ -76,11 +73,10 @@ class TestTranscriptionPatch:
 
     def test_channel_manager_routes_gemini_and_zenmux_keys(self, monkeypatch, tmp_path):
         """T11.4: gemini/zenmux transcription provider 应路由到对应 key。"""
-        fake_home = tmp_path / "home"
-        nanobot_dir = fake_home / ".nanobot"
-        nanobot_dir.mkdir(parents=True)
-        (nanobot_dir / "config.json").write_text(json.dumps({"tools": {"web": {}}}), encoding="utf-8")
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        ava_home = tmp_path / "ava-home"
+        ava_home.mkdir(parents=True)
+        (ava_home / "config.json").write_text(json.dumps({"tools": {"web": {}}}), encoding="utf-8")
+        monkeypatch.setenv("AVA_HOME", str(ava_home))
 
         from ava.patches.transcription_patch import apply_transcription_patch
         from nanobot.channels.manager import ChannelManager
@@ -103,10 +99,9 @@ class TestTranscriptionPatch:
     @pytest.mark.asyncio
     async def test_base_channel_transcribes_with_gemini_vertex(self, monkeypatch, tmp_path):
         """T11.5: gemini transcription provider 应走 ZenMux Vertex generateContent。"""
-        fake_home = tmp_path / "home"
-        nanobot_dir = fake_home / ".nanobot"
-        nanobot_dir.mkdir(parents=True)
-        (nanobot_dir / "config.json").write_text(
+        ava_home = tmp_path / "ava-home"
+        ava_home.mkdir(parents=True)
+        (ava_home / "config.json").write_text(
             json.dumps(
                 {
                     "channels": {"transcriptionProvider": "gemini"},
@@ -121,7 +116,7 @@ class TestTranscriptionPatch:
             ),
             encoding="utf-8",
         )
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        monkeypatch.setenv("AVA_HOME", str(ava_home))
 
         captured: dict[str, object] = {}
 

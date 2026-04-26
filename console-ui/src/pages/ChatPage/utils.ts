@@ -1,4 +1,5 @@
-import type { SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
+import type { MessageContentBlock, SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
+import { normalizeBackgroundTaskMessages } from './backgroundTask'
 
 export interface FileTreeNode {
   name: string
@@ -6,6 +7,14 @@ export interface FileTreeNode {
   type: 'file' | 'directory'
   children?: FileTreeNode[]
 }
+
+export interface MessageImageRef {
+  rawPath: string
+  displayPath: string
+  previewUrl: string
+}
+
+const IMAGE_PLACEHOLDER_RE = /\[image:\s*([^\]]+?)\]/gi
 
 export function parseScene(filename: string): SceneType {
   const name = filename.replace(/\.jsonl$/, '')
@@ -68,11 +77,22 @@ export function parseJsonl(content: string, filename: string): { meta: SessionMe
 }
 
 export function groupTurns(messages: RawMessage[]): TurnGroup[] {
+  const normalizedMessages = normalizeBackgroundTaskMessages(messages)
   const turns: TurnGroup[] = []
   let current: TurnGroup | null = null
   let nextTurnSeq = 0
+  let nextIteration = 0
 
-  for (const msg of messages) {
+  const appendToolCalls = (turn: TurnGroup, msg: RawMessage) => {
+    if (msg.role !== 'assistant' || !msg.tool_calls?.length) return
+    const iteration = nextIteration
+    nextIteration += 1
+    for (const tc of msg.tool_calls) {
+      turn.toolCalls.push({ call: tc, callTimestamp: msg.timestamp, iteration })
+    }
+  }
+
+  for (const msg of normalizedMessages) {
     if (msg.role === 'user') {
       if (current) {
         current.isComplete = checkTurnComplete(current)
@@ -87,6 +107,7 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
         toolCalls: [],
       }
       nextTurnSeq += 1
+      nextIteration = 0
     } else if (!current) {
       // Orphan assistant/tool message without a preceding user message.
       // Create a turn with a synthetic user placeholder so it still renders.
@@ -99,20 +120,11 @@ export function groupTurns(messages: RawMessage[]): TurnGroup[] {
         toolCalls: [],
       }
       current.assistantSteps.push(msg)
-
-      if (msg.role === 'assistant' && msg.tool_calls?.length) {
-        for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc })
-        }
-      }
+      nextIteration = 0
+      appendToolCalls(current, msg)
     } else {
       current.assistantSteps.push(msg)
-
-      if (msg.role === 'assistant' && msg.tool_calls?.length) {
-        for (const tc of msg.tool_calls) {
-          current.toolCalls.push({ call: tc })
-        }
-      }
+      appendToolCalls(current, msg)
 
       if (msg.role === 'tool' && msg.tool_call_id) {
         const match = current.toolCalls.find((tc) => tc.call.id === msg.tool_call_id)
@@ -156,7 +168,7 @@ function checkTurnComplete(turn: TurnGroup): boolean {
   return false
 }
 
-export function getContentText(content: string | null | Array<{ type: string; text?: string }>): string {
+export function getContentText(content: string | null | MessageContentBlock[]): string {
   if (content === null || content === undefined) return ''
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -168,33 +180,54 @@ export function getContentText(content: string | null | Array<{ type: string; te
   return String(content)
 }
 
-export function formatTimestamp(ts?: string): string {
-  if (!ts) return ''
-  try {
-    const d = new Date(ts)
-    return d.toLocaleString('zh-CN', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
-    return ts
+function parseTimestamp(ts?: string | number): Date | null {
+  if (ts === undefined || ts === null || ts === '') return null
+
+  if (typeof ts === 'number') {
+    const normalized = ts < 1e12 ? ts * 1000 : ts
+    const date = new Date(normalized)
+    return Number.isNaN(date.getTime()) ? null : date
   }
+
+  const trimmed = ts.trim()
+  if (!trimmed) return null
+
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numeric = Number(trimmed)
+    if (!Number.isNaN(numeric)) {
+      const normalized = numeric < 1e12 ? numeric * 1000 : numeric
+      const date = new Date(normalized)
+      return Number.isNaN(date.getTime()) ? null : date
+    }
+  }
+
+  const date = new Date(trimmed)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
-export function calcDuration(start?: string, end?: string): string {
+export function formatTimestamp(ts?: string | number): string {
+  if (!ts) return ''
+  const d = parseTimestamp(ts)
+  if (!d) return ''
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+export function calcDuration(start?: string | number, end?: string | number): string {
   if (!start || !end) return ''
-  try {
-    const ms = new Date(end).getTime() - new Date(start).getTime()
-    if (ms < 0) return ''
-    if (ms < 1000) return `${ms}ms`
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-    return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
-  } catch {
-    return ''
-  }
+  const startDate = parseTimestamp(start)
+  const endDate = parseTimestamp(end)
+  if (!startDate || !endDate) return ''
+  const ms = endDate.getTime() - startDate.getTime()
+  if (ms < 0) return ''
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
 export function extractSessionTitle(meta: SessionMeta, messages: RawMessage[]): string {
@@ -242,6 +275,43 @@ export function formatTokenCount(n: number): string {
 export function imageUrl(path: string): string {
   const filename = path.split('/').pop() || path
   return `/api/media/images/${filename}`
+}
+
+export function displayImagePath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const filename = normalized.split('/').pop() || path
+  for (const marker of ['chat-uploads', 'generated', 'screenshots']) {
+    const token = `/${marker}/`
+    if (normalized.includes(token)) {
+      return `${marker}/${filename}`
+    }
+  }
+  return filename
+}
+
+export function extractMessageImages(
+  content: string | null | MessageContentBlock[],
+): { text: string; images: MessageImageRef[] } {
+  const source = getContentText(content)
+  const seen = new Set<string>()
+  const images: MessageImageRef[] = []
+
+  const text = source
+    .replace(IMAGE_PLACEHOLDER_RE, (_match, rawPath: string) => {
+      const trimmed = rawPath.trim()
+      if (!trimmed || seen.has(trimmed)) return ''
+      seen.add(trimmed)
+      images.push({
+        rawPath: trimmed,
+        displayPath: displayImagePath(trimmed),
+        previewUrl: imageUrl(trimmed),
+      })
+      return ''
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return { text, images }
 }
 
 const GENERATED_RE = /Generated image\(s\):\s*(.+)/

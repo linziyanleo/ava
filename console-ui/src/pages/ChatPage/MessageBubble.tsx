@@ -1,18 +1,13 @@
 import { Copy, Check, Brain, ChevronDown, ChevronRight, Info, Eye, Mic } from 'lucide-react';
-import React, { useState, useRef, useEffect, useMemo, Suspense } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer';
 import { cn } from '../../lib/utils';
 import { useResponsiveMode } from '../../hooks/useResponsiveMode';
 import type { RawMessage, TurnTokenStats } from './types';
-import { getContentText, formatTimestamp, formatTokenCount } from './utils';
+import { extractMessageImages, getContentText, formatTimestamp, formatTokenCount } from './utils';
+import { ImageCarousel } from './ImageCarousel';
 import { TokenInfoPopover } from './TokenInfoPopover';
-
-const SyntaxHighlighter = React.lazy(() =>
-  import('react-syntax-highlighter').then(m => ({ default: m.Prism }))
-);
 
 interface MediaBlock {
   type: 'vision' | 'voice'
@@ -57,7 +52,10 @@ function MediaBlockIndicator({ block }: { block: MediaBlock }) {
       </button>
       {expanded && (
         <div className="px-2.5 pb-1.5 border-t border-white/10">
-          <pre className="whitespace-pre-wrap font-[inherit] text-[11px] text-white/70 leading-relaxed mt-1 break-words max-h-[200px] overflow-y-auto">
+          <pre
+            className="whitespace-pre-wrap font-[inherit] text-[11px] text-white/70 leading-relaxed mt-1 break-words max-h-[200px] overflow-y-auto"
+            style={{ lineHeight: 'var(--cjk-line-height)' }}
+          >
             {block.content}
           </pre>
         </div>
@@ -66,93 +64,60 @@ function MediaBlockIndicator({ block }: { block: MediaBlock }) {
   )
 }
 
-const MarkdownRenderer = React.memo(function MarkdownRenderer({ content }: { content: string }) {
-  const components = useMemo(() => ({
-    code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
-      const match = /language-(\w+)/.exec(className || '');
-      const isInline = !match && !String(children).includes('\n');
-      const codeString = String(children).replace(/\n$/, '');
-      return isInline ? (
-        <code className="px-1 py-0.5 rounded text-[0.85em] font-mono bg-black/20 text-[var(--accent)]" {...props}>
-          {children}
-        </code>
-      ) : (
-        <Suspense
-          fallback={
-            <pre className="p-3 rounded-lg bg-[#282c34] text-sm overflow-x-auto my-2">
-              <code>{codeString}</code>
-            </pre>
-          }
-        >
-          <SyntaxHighlighter
-            style={oneDark}
-            language={match ? match[1] : 'text'}
-            PreTag="div"
-            customStyle={{
-              margin: '0.5em 0',
-              borderRadius: '0.5rem',
-              fontSize: '0.8rem',
-              overflowX: 'auto',
-              maxWidth: '100%',
-            }}
-          >
-            {codeString}
-          </SyntaxHighlighter>
-        </Suspense>
-      );
-    },
-    a({ children, href }: { children?: React.ReactNode; href?: string }) {
-      return (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--accent)] underline hover:opacity-80"
-        >
-          {children}
-        </a>
-      );
-    },
-    table({ children }: { children?: React.ReactNode }) {
-      return (
-        <div className="overflow-x-auto my-2">
-          <table className="min-w-full border-collapse text-sm">
-            {children}
-          </table>
-        </div>
-      );
-    },
-    th({ children }: { children?: React.ReactNode }) {
-      return (
-        <th className="border border-[var(--border)] px-3 py-1.5 bg-[var(--bg-tertiary,var(--bg-secondary))] font-semibold text-left">
-          {children}
-        </th>
-      );
-    },
-    td({ children }: { children?: React.ReactNode }) {
-      return (
-        <td className="border border-[var(--border)] px-3 py-1.5">
-          {children}
-        </td>
-      );
-    },
-  }), [])
+function AttachmentPreview({ urls, paths, isUser }: { urls: string[]; paths: string[]; isUser: boolean }) {
+  if (urls.length === 0) return null
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components as never}>
-      {content}
-    </ReactMarkdown>
+    <div
+      className={cn(
+        'rounded-2xl overflow-hidden border',
+        isUser
+          ? 'border-[var(--accent)]/30 bg-[var(--accent)]/10'
+          : 'border-[var(--border)] bg-[var(--bg-secondary)]',
+      )}
+    >
+      <div className="p-2.5">
+        <ImageCarousel urls={urls} alt="Chat attachment" maxHeight={180} />
+      </div>
+      <div className={cn(
+        'border-t px-3 py-2 space-y-1',
+        isUser ? 'border-[var(--accent)]/20 bg-black/10' : 'border-[var(--border)] bg-[var(--bg-tertiary)]/70',
+      )}>
+        {paths.map((path, index) => (
+          <div
+            key={`${path}-${index}`}
+            className={cn(
+              'font-mono text-[11px] break-all',
+              isUser ? 'text-white/85' : 'text-[var(--text-secondary)]',
+            )}
+          >
+            {path}
+          </div>
+        ))}
+      </div>
+    </div>
   )
-})
+}
 
 interface MessageBubbleProps {
   message: RawMessage;
   isUser: boolean;
   tokenStats?: TurnTokenStats;
   sessionKey?: string;
+  showFooter?: boolean;
+  streamingCursor?: boolean;
+  markdownInstanceKey?: string | number;
 }
 
-export const MessageBubble = React.memo(function MessageBubble({ message, isUser, tokenStats, sessionKey }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({
+  message,
+  isUser,
+  tokenStats,
+  sessionKey,
+  showFooter = true,
+  streamingCursor = false,
+  markdownInstanceKey,
+}: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [showTokenInfo, setShowTokenInfo] = useState(false);
@@ -161,6 +126,7 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
   const mobilePopoverRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useResponsiveMode();
   const navigate = useNavigate();
+  const { text: textWithoutImages, images } = extractMessageImages(message.content);
   const text = getContentText(message.content);
   const reasoning = message.reasoning_content;
   useEffect(() => {
@@ -177,10 +143,10 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
     return () => document.removeEventListener('mousedown', handler);
   }, [showTokenInfo, showMobileTokenInfo]);
 
-  if (!text && !reasoning) return null;
+  if (!textWithoutImages && !reasoning && images.length === 0) return null;
 
-  const { mainText, blocks: mediaBlocks } = isUser ? parseMediaBlocks(text) : { mainText: text, blocks: [] }
-  const displayText = isUser ? mainText : text
+  const { mainText, blocks: mediaBlocks } = isUser ? parseMediaBlocks(textWithoutImages) : { mainText: textWithoutImages, blocks: [] }
+  const displayText = isUser ? mainText : textWithoutImages
 
   const handleCopy = () => {
     navigator.clipboard.writeText(text);
@@ -212,11 +178,24 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
             </button>
             {reasoningExpanded && (
               <div className="px-3 pb-2 border-t border-[var(--border)]">
-                <pre className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[300px] overflow-y-auto mt-1.5 break-words">
+                <pre
+                  className="whitespace-pre-wrap font-[inherit] text-[12px] text-[var(--text-secondary)] italic leading-relaxed max-h-[300px] overflow-y-auto mt-1.5 break-words"
+                  style={{ lineHeight: 'var(--cjk-line-height)' }}
+                >
                   {reasoning}
                 </pre>
               </div>
             )}
+          </div>
+        )}
+
+        {images.length > 0 && (
+          <div className={displayText || mediaBlocks.length > 0 ? 'mb-2' : ''}>
+            <AttachmentPreview
+              urls={images.map((image) => image.previewUrl)}
+              paths={images.map((image) => image.displayPath)}
+              isUser={isUser}
+            />
           </div>
         )}
 
@@ -235,50 +214,55 @@ export const MessageBubble = React.memo(function MessageBubble({ message, isUser
                 (isUser ? (
                   <pre className="whitespace-pre-wrap font-[inherit] break-words">{displayText}</pre>
                 ) : (
-                  <div className="markdown-body">
-                    <MarkdownRenderer content={displayText} />
-                  </div>
+                  <>
+                    <MarkdownRenderer key={markdownInstanceKey} content={displayText} />
+                    {streamingCursor && (
+                      <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5" />
+                    )}
+                  </>
                 ))}
               {mediaBlocks.map((block, i) => (
                 <MediaBlockIndicator key={i} block={block} />
               ))}
             </div>
-            <div
-              className={cn(
-                'flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-secondary)]',
-                isUser ? 'justify-end' : 'justify-start',
-              )}
-            >
-              {message.timestamp && <span>{formatTimestamp(message.timestamp)}</span>}
-              <button
-                onClick={handleCopy}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--text-primary)]"
-                title="Copy"
+            {showFooter && (
+              <div
+                className={cn(
+                  'flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-secondary)]',
+                  isUser ? 'justify-end' : 'justify-start',
+                )}
               >
-                {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-              </button>
-              {tokenStats && !isUser && (
-                <div className="relative" ref={popoverRef}>
-                  <button
-                    onClick={() => setShowTokenInfo(!showTokenInfo)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)] flex items-center gap-0.5"
-                    title="Token usage"
-                  >
-                    <Info className="w-3 h-3" />
-                    <span>{formatTokenCount(tokenStats.total_tokens)}</span>
-                  </button>
-                  {showTokenInfo && (
-                    <TokenInfoPopover
-                      stats={tokenStats}
-                      sessionKey={sessionKey}
-                      turnSeq={tokenStats.turn_seq ?? undefined}
-                      isMobile={isMobile}
-                      onClose={() => setShowTokenInfo(false)}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
+                {message.timestamp && <span>{formatTimestamp(message.timestamp)}</span>}
+                <button
+                  onClick={handleCopy}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--text-primary)]"
+                  title="Copy"
+                >
+                  {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                </button>
+                {tokenStats && !isUser && (
+                  <div className="relative" ref={popoverRef}>
+                    <button
+                      onClick={() => setShowTokenInfo(!showTokenInfo)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)] flex items-center gap-0.5"
+                      title="Token usage"
+                    >
+                      <Info className="w-3 h-3" />
+                      <span>{formatTokenCount(tokenStats.total_tokens)}</span>
+                    </button>
+                    {showTokenInfo && (
+                      <TokenInfoPopover
+                        stats={tokenStats}
+                        sessionKey={sessionKey}
+                        turnSeq={tokenStats.turn_seq ?? undefined}
+                        isMobile={isMobile}
+                        onClose={() => setShowTokenInfo(false)}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
