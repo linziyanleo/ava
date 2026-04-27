@@ -35,6 +35,7 @@ export interface AgentDefaults {
   visionModel: string | null
   miniModel: string | null
   voiceModel: string | null
+  imageGenModel: string | null
   memoryTier?: string | null
   provider?: string
   maxTokens: number
@@ -83,9 +84,17 @@ export interface ExecToolConfig {
   autoVenv?: boolean
 }
 
+export interface ImageGenToolConfig {
+  timeout: number
+  background: boolean
+  autoContinue: boolean
+  autoSend: boolean
+}
+
 export interface ToolsConfig {
   web?: WebToolsConfig
   exec?: ExecToolConfig
+  imageGen?: ImageGenToolConfig
   restrictToWorkspace: boolean
   restrictConfigFile: boolean
   mcpServers?: Record<string, MCPServerConfig>

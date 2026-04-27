@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock3, XCircle } from 'lucide-react'
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { cn } from '../../lib/utils'
-import { formatTimestamp } from './utils'
+import { displayImagePath, extractImagePaths, formatTimestamp, imageUrl } from './utils'
 import { parseBackgroundTaskMessage } from './backgroundTask'
+import { ImageCarousel } from './ImageCarousel'
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs == null || Number.isNaN(durationMs)) return 'unknown'
@@ -33,6 +34,10 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
   const parsed = parseBackgroundTaskMessage(content)
   const [expanded, setExpanded] = useState(() => (parsed?.body.length || 0) <= 220)
   const preview = useMemo(() => getBackgroundTaskPreview(content), [content])
+  const imagePaths = useMemo(
+    () => parsed?.taskType === 'image_gen' ? extractImagePaths(parsed.body) : [],
+    [parsed?.body, parsed?.taskType],
+  )
 
   if (!parsed) return null
 
@@ -87,6 +92,22 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
 
             {expanded && (
               <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]">
+                {imagePaths.length > 0 && (
+                  <div className="mb-2 space-y-1.5">
+                    <ImageCarousel urls={imagePaths.map((path) => imageUrl(path))} alt="Generated image" maxHeight={220} />
+                    <div className="flex flex-wrap gap-1.5">
+                      {imagePaths.map((path) => (
+                        <span
+                          key={path}
+                          className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]"
+                          title={path}
+                        >
+                          {displayImagePath(path)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <MarkdownRenderer content={parsed.body} />
               </div>
             )}

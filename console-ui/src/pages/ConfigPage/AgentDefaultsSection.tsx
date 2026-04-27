@@ -7,6 +7,7 @@ const MODEL_FIELDS: Array<{ key: keyof AgentDefaults; label: string }> = [
   { key: 'visionModel', label: 'visionModel' },
   { key: 'miniModel', label: 'miniModel' },
   { key: 'voiceModel', label: 'voiceModel' },
+  { key: 'imageGenModel', label: 'imageGenModel' },
 ]
 
 const KNOWN_PROVIDERS = ['openai', 'anthropic', 'google', 'zenmux', 'ollama']

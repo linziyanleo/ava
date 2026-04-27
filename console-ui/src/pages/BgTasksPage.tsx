@@ -16,12 +16,17 @@ import {
   Terminal,
   Zap,
   Code,
+  Image as ImageIcon,
   FolderOpen,
   GitBranch,
+  Copy,
+  Check,
+  ExternalLink,
   X,
 } from 'lucide-react'
 import { api, wsUrl } from '../api/client'
 import { useAuth } from '../stores/auth'
+import { displayImagePath, extractImagePaths, imageUrl } from './ChatPage/utils'
 
 interface TimelineEvent {
   timestamp: number
@@ -95,6 +100,12 @@ const TASK_TYPE_STYLE: Record<string, {
     accent: 'text-violet-500',
     accentBg: 'bg-violet-500/10',
     label: 'Coding',
+  },
+  image_gen: {
+    icon: ImageIcon,
+    accent: 'text-fuchsia-500',
+    accentBg: 'bg-fuchsia-500/10',
+    label: 'Image Gen',
   },
 }
 
@@ -225,7 +236,7 @@ function TodoProgressBar({ summary }: { summary: Record<string, number> }) {
 
 // --- Module D: Filter bar ---
 
-type TypeFilter = 'all' | 'claude_code' | 'codex' | 'coding'
+type TypeFilter = 'all' | 'claude_code' | 'codex' | 'coding' | 'image_gen'
 type StatusFilter = 'all' | 'running' | 'succeeded' | 'failed'
 
 function FilterBar({
@@ -248,6 +259,7 @@ function FilterBar({
     { value: 'claude_code', label: 'Claude Code' },
     { value: 'codex', label: 'Codex' },
     { value: 'coding', label: 'Coding' },
+    { value: 'image_gen', label: 'Image Gen' },
   ]
 
   const statusOptions: { value: StatusFilter; label: string }[] = [
@@ -362,6 +374,7 @@ function TaskCard({
   const [expanded, setExpanded] = useState(false)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
   const isActive = task.status === 'queued' || task.status === 'running'
 
   const typeStyle = TASK_TYPE_STYLE[task.task_type] || DEFAULT_TYPE_STYLE
@@ -381,6 +394,21 @@ function TaskCard({
 
   const promptText = detail?.full_prompt || task.prompt_preview || '(no prompt)'
   const resultText = detail?.full_result || task.result_preview || ''
+  const imagePaths = useMemo(
+    () => task.task_type === 'image_gen' ? extractImagePaths(resultText) : [],
+    [resultText, task.task_type],
+  )
+
+  const handleCopyPrompt = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(promptText)
+      setCopiedPrompt(true)
+      setTimeout(() => setCopiedPrompt(false), 1500)
+    } catch {
+      setCopiedPrompt(false)
+    }
+  }
 
   return (
     <div
@@ -466,6 +494,71 @@ function TaskCard({
       {expanded && (
         <div className="px-4 pb-4 border-t border-[var(--border)]">
           <div className="pt-3 space-y-3">
+            {task.task_type === 'image_gen' && (
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-medium text-[var(--text-secondary)]">提示词</h4>
+                  <button
+                    type="button"
+                    onClick={handleCopyPrompt}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    {copiedPrompt ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                    {copiedPrompt ? '已复制' : '复制'}
+                  </button>
+                </div>
+                <pre className="text-xs bg-[var(--bg-primary)] rounded-lg p-3 overflow-x-auto text-[var(--text-primary)] whitespace-pre-wrap break-words">
+                  {promptText}
+                </pre>
+              </div>
+            )}
+
+            {imagePaths.length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-2">生成图片</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {imagePaths.map((path) => (
+                    <a
+                      key={path}
+                      href={imageUrl(path)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] overflow-hidden hover:border-[var(--accent)] transition-colors"
+                      title={path}
+                    >
+                      <div className="aspect-square bg-[var(--bg-tertiary)] flex items-center justify-center">
+                        <img
+                          src={imageUrl(path)}
+                          alt={displayImagePath(path)}
+                          className="max-h-full max-w-full object-contain"
+                          loading="lazy"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1 px-2 py-1.5 text-[11px] font-mono text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
+                        <span className="truncate">{displayImagePath(path)}</span>
+                        <ExternalLink className="w-3 h-3 shrink-0" />
+                      </div>
+                    </a>
+                  ))}
+                </div>
+                <div className="mt-2 space-y-1">
+                  {imagePaths.map((path) => (
+                    <a
+                      key={`path-${path}`}
+                      href={imageUrl(path)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex max-w-full items-center gap-1 rounded bg-[var(--bg-primary)] px-2 py-1 text-xs font-mono text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                      title={path}
+                    >
+                      <span className="truncate">{path}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {resultText && (
               <div>
                 <h4 className="text-xs font-medium text-[var(--text-secondary)] mb-1">结果</h4>
