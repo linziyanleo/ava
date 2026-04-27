@@ -273,7 +273,7 @@
       "content": [
         {
           "type": "text",
-          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code and Codex.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
+          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code, Codex, and image generation.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
         }
       ],
       "timestamp": "2026-04-07T09:10:36+08:00"
@@ -632,6 +632,46 @@
       "full_result": ""
     },
     {
+      "task_id": "mock-task-img-run-1",
+      "task_type": "image_gen",
+      "origin_session_key": "console:mock-session-2",
+      "status": "running",
+      "prompt_preview": "Generate a transparent PNG of Rowlet writing code.",
+      "started_at": 1775527900,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "generating",
+      "last_tool_name": "image_gen",
+      "todo_summary": null,
+      "project_path": "workspace/media/generated",
+      "cli_run_id": "",
+      "cli_session_id": "",
+      "repo_root": "",
+      "workdir_relpath": "",
+      "workspace_key": "",
+      "workspace_id": "",
+      "execution_cwd": "workspace/media/generated",
+      "isolation_mode": "inplace",
+      "branch_name": "",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527900,
+          "event": "submitted",
+          "detail": "Generate a transparent PNG of Rowlet writing code."
+        },
+        {
+          "timestamp": 1775527903,
+          "event": "started",
+          "detail": ""
+        }
+      ],
+      "full_prompt": "Generate a transparent PNG of Rowlet writing code.",
+      "full_result": ""
+    },
+    {
       "task_id": "mock-task-queue-1",
       "task_type": "codex",
       "origin_session_key": "console:mock-session-3",
@@ -672,6 +712,51 @@
     }
   ],
   "bg_tasks_history": [
+    {
+      "task_id": "mock-task-image-ok-1",
+      "task_type": "image_gen",
+      "origin_session_key": "console:mock-session-2",
+      "status": "succeeded",
+      "prompt_preview": "Generate Rowlet writing code on a transparent background as PNG.",
+      "started_at": 1775527600,
+      "finished_at": 1775527720,
+      "elapsed_ms": 120000,
+      "result_preview": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png",
+      "error_message": "",
+      "phase": "completed",
+      "last_tool_name": "image_gen",
+      "todo_summary": null,
+      "project_path": "workspace/media/generated",
+      "cli_run_id": "",
+      "cli_session_id": "",
+      "repo_root": "",
+      "workdir_relpath": "",
+      "workspace_key": "",
+      "workspace_id": "",
+      "execution_cwd": "workspace/media/generated",
+      "isolation_mode": "inplace",
+      "branch_name": "",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527600,
+          "event": "submitted",
+          "detail": "Generate Rowlet writing code on a transparent background as PNG."
+        },
+        {
+          "timestamp": 1775527604,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775527720,
+          "event": "succeeded",
+          "detail": "Generated two PNG files"
+        }
+      ],
+      "full_prompt": "Generate Rowlet writing code on a transparent background as PNG.",
+      "full_result": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png\nTransparent PNG mock output is ready."
+    },
     {
       "task_id": "mock-task-ok-1",
       "task_type": "coding",

@@ -7,6 +7,7 @@
       "visionModel": "google/gemini-2.5-flash",
       "miniModel": "openai/gpt-4.1-mini",
       "voiceModel": "openai/gpt-4o-mini-tts",
+      "imageGenModel": "openai/gpt-image-2",
       "maxTokens": 16384,
       "temperature": 0.7,
       "maxToolIterations": 24,
@@ -158,6 +159,12 @@
       "timeout": 120,
       "pathAppend": "",
       "autoVenv": true
+    },
+    "imageGen": {
+      "timeout": 300,
+      "background": true,
+      "autoContinue": false,
+      "autoSend": true
     },
     "claudeCode": {
       "defaultProject": "/workspace/mock-project",

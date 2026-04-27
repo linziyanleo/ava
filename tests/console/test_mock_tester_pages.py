@@ -110,10 +110,17 @@ def test_mock_tester_can_open_mock_safe_console_pages(tmp_path, monkeypatch):
     assert history.status_code == 200
     history_statuses = {task["status"] for task in history.json()["tasks"]}
     assert {"succeeded", "failed", "cancelled"} <= history_statuses
+    image_task = next(task for task in history.json()["tasks"] if task["task_type"] == "image_gen")
+    assert "workspace/media/generated/mock-sky.png" in image_task["result_preview"]
 
     detail = client.get("/api/bg-tasks/mock-task-run-1/detail")
     assert detail.status_code == 200
     assert "mock_tester coverage" in detail.json()["full_prompt"]
+
+    image_detail = client.get("/api/bg-tasks/mock-task-image-ok-1/detail")
+    assert image_detail.status_code == 200
+    assert "Rowlet writing code" in image_detail.json()["full_prompt"]
+    assert "Generated image(s): workspace/media/generated/mock-sky.png" in image_detail.json()["full_result"]
 
     token_turns = client.get(
         "/api/stats/tokens/by-session",
