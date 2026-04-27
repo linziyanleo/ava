@@ -467,12 +467,13 @@ def _seed_mock_db(db: Database, *, console_port: int, media_dir: Path) -> None:
                 continue
             db.execute(
                 """INSERT INTO session_messages
-                   (session_id, seq, conversation_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_row["id"],
                     msg["seq"],
                     msg.get("conversation_id", ""),
+                    msg.get("trace_id", ""),
                     msg["role"],
                     _encode_message_content(msg.get("content", "")),
                     json.dumps(msg.get("tool_calls"), ensure_ascii=False) if msg.get("tool_calls") else None,

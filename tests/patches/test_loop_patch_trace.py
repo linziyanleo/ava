@@ -72,19 +72,37 @@ async def test_loop_patch_creates_root_build_context_and_chat_span(tmp_path):
         _current_turn_seq=0,
     )
 
-    result = await AgentLoop._run_agent_loop(
-        loop,
-        [{"role": "user", "content": "hello"}],
-    )
+    from ava.patches.loop_patch import _token_record_context
+
+    trace_id = "fedcba9876543210fedcba9876543210"
+    token = _token_record_context.set({
+        "session_key": "console:trace",
+        "conversation_id": "conv-trace",
+        "user_message": "hello",
+        "turn_seq": 0,
+        "trace_id": trace_id,
+        "record_ids": [],
+        "turn_iteration": 0,
+        "phase0_record_id": None,
+    })
+    try:
+        result = await AgentLoop._run_agent_loop(
+            loop,
+            [{"role": "user", "content": "hello"}],
+        )
+    finally:
+        _token_record_context.reset(token)
 
     assert result.content == "hello"
     rows = db.fetchall("SELECT trace_id, span_id, parent_span_id, prompt_tokens FROM token_usage")
     assert len(rows) == 1
+    assert rows[0]["trace_id"] == trace_id
     assert rows[0]["prompt_tokens"] == 3
 
     spans = db.fetchall(
-        "SELECT span_id, parent_span_id, operation_name, status, end_ns FROM trace_spans ORDER BY start_ns, id"
+        "SELECT trace_id, span_id, parent_span_id, operation_name, status, end_ns FROM trace_spans ORDER BY start_ns, id"
     )
+    assert {row["trace_id"] for row in spans} == {trace_id}
     operations = [row["operation_name"] for row in spans]
     assert operations == ["invoke_agent", "build_context", "chat"]
     assert rows[0]["span_id"] == spans[2]["span_id"]

@@ -909,6 +909,7 @@ def apply_loop_patch() -> str:
                 "conversation_id": getattr(self, "_current_conversation_id", "") or "",
                 "user_message": getattr(self, "_current_user_message", "") or "",
                 "turn_seq": getattr(self, "_current_turn_seq", None),
+                "trace_id": "",
                 "record_ids": [],
                 "turn_iteration": 0,
                 "phase0_record_id": None,
@@ -919,6 +920,13 @@ def apply_loop_patch() -> str:
         turn_state.setdefault("record_ids", [])
         turn_state.setdefault("turn_iteration", 0)
         turn_state.setdefault("phase0_record_id", None)
+        if not turn_state.get("trace_id"):
+            try:
+                from ava.console.services.trace_context import new_trace_id
+
+                turn_state["trace_id"] = new_trace_id()
+            except Exception:
+                turn_state["trace_id"] = ""
 
         sk = turn_state.get("session_key", "") or ""
         conversation_id = turn_state.get("conversation_id", "") or ""
@@ -948,6 +956,7 @@ def apply_loop_patch() -> str:
                     },
                     store=trace_spans,
                     parent=current_trace_context.get(),
+                    trace_id=turn_state.get("trace_id", "") or "",
                     session_key=sk,
                     conversation_id=conversation_id,
                     turn_seq=turn_seq,
@@ -1379,10 +1388,17 @@ def apply_loop_patch() -> str:
             "user_message": getattr(msg, "content", "") or "",
             "conversation_id": "",
             "turn_seq": None,
+            "trace_id": "",
             "record_ids": [],
             "turn_iteration": 0,
             "phase0_record_id": None,
         }
+        try:
+            from ava.console.services.trace_context import new_trace_id
+
+            turn_state["trace_id"] = new_trace_id()
+        except Exception:
+            turn_state["trace_id"] = ""
         self._current_session_key = sk
         self._current_user_message = turn_state["user_message"]
         self._current_conversation_id = ""

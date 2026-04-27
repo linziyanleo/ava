@@ -143,7 +143,9 @@ class TestStoragePatch:
         indexes = {row["name"] for row in db.fetchall("PRAGMA index_list(session_messages)")}
 
         assert "conversation_id" in columns
+        assert "trace_id" in columns
         assert "idx_msg_session_conv_seq" in indexes
+        assert "idx_msg_trace" in indexes
 
     def test_patch_applies_without_error(self, tmp_path):
         """T5.0: apply_storage_patch runs without error."""
@@ -168,6 +170,47 @@ class TestStoragePatch:
         assert len(loaded.messages) == 2
         assert loaded.messages[0]["role"] == "user"
         assert loaded.messages[0]["content"] == "hello"
+
+    def test_save_uses_token_record_context_trace_id_for_new_messages(self, patched_manager):
+        from ava.patches.loop_patch import _token_record_context
+        from ava.storage import get_db
+
+        trace_id = "0123456789abcdef0123456789abcdef"
+        session = _make_session(
+            messages=[
+                {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00"},
+            ],
+            metadata={"token_stats": {}, "conversation_id": "conv_trace"},
+        )
+        token = _token_record_context.set({"trace_id": trace_id})
+        try:
+            patched_manager.save(session)
+            session.messages.append(
+                {"role": "assistant", "content": "hi", "timestamp": "2026-01-01T00:00:01"}
+            )
+            patched_manager.save(session)
+        finally:
+            _token_record_context.reset(token)
+
+        db = get_db()
+        rows = db.fetchall(
+            """
+            SELECT seq, role, trace_id
+              FROM session_messages sm
+              JOIN sessions s ON s.id = sm.session_id
+             WHERE s.key = ? AND sm.conversation_id = ?
+             ORDER BY seq
+            """,
+            ("test:123", "conv_trace"),
+        )
+        assert [(row["seq"], row["role"], row["trace_id"]) for row in rows] == [
+            (0, "user", trace_id),
+            (1, "assistant", trace_id),
+        ]
+
+        loaded = patched_manager._load("test:123")
+        assert loaded is not None
+        assert [msg.get("trace_id") for msg in loaded.messages] == [trace_id, trace_id]
 
     def test_load_nonexistent(self, patched_manager):
         """T5.5: loading nonexistent key returns None."""

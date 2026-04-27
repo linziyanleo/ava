@@ -71,6 +71,10 @@ class Database:
             conn.execute("ALTER TABLE session_messages ADD COLUMN conversation_id TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE session_messages ADD COLUMN trace_id TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         for sql in _SAFE_POST_MIGRATION_SQL:
             try:
                 conn.execute(sql)
@@ -331,12 +335,13 @@ class Database:
             tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False) if msg.get("tool_calls") else None
             conn.execute(
                 """INSERT INTO session_messages
-                   (session_id, seq, conversation_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     seq,
                     conversation_id,
+                    msg.get("trace_id", ""),
                     msg.get("role", ""),
                     msg.get("content") if isinstance(msg.get("content"), str) else json.dumps(msg.get("content"), ensure_ascii=False) if msg.get("content") else None,
                     tool_calls_json,
@@ -461,6 +466,7 @@ _SAFE_TOKEN_USAGE_COLUMNS: list[tuple[str, str, str]] = [
 _SAFE_POST_MIGRATION_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_tu_conv_turn ON token_usage(session_key, conversation_id, turn_seq)",
     "CREATE INDEX IF NOT EXISTS idx_msg_session_conv_seq ON session_messages(session_id, conversation_id, seq)",
+    "CREATE INDEX IF NOT EXISTS idx_msg_trace ON session_messages(trace_id)",
     "CREATE INDEX IF NOT EXISTS idx_tu_trace ON token_usage(trace_id)",
     "CREATE INDEX IF NOT EXISTS idx_tu_span ON token_usage(trace_id, span_id)",
 ]
@@ -488,6 +494,7 @@ CREATE TABLE IF NOT EXISTS session_messages (
     session_id INTEGER NOT NULL,
     seq INTEGER NOT NULL,
     conversation_id TEXT DEFAULT '',
+    trace_id TEXT DEFAULT '',
     role TEXT NOT NULL,
     content TEXT,
     tool_calls TEXT,
