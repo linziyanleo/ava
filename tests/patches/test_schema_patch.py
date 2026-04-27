@@ -114,6 +114,9 @@ class TestSchemaPatch:
         assert dumped["agents"]["defaults"]["heartbeat"]["interval_s"] == 1800
         assert dumped["gateway"]["console"]["enabled"] is True
         assert dumped["tools"]["exec"]["autoVenv"] is True
+        assert dumped["tools"]["imageGen"]["timeout"] == 300
+        assert dumped["tools"]["imageGen"]["autoContinue"] is False
+        assert dumped["tools"]["imageGen"]["autoSend"] is True
         assert dumped["tools"]["claudeCode"]["model"] == "claude-sonnet-4-20250514"
         assert dumped["token_stats"]["snapshot_content_max_chars"] == 3000
         assert dumped["token_stats"]["record_full_request_payload"] is False

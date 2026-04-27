@@ -501,6 +501,23 @@ class ClaudeCodeConfig(Base):
     base_url: str = ""
 
 
+class ImageGenConfig(Base):
+    """Image generation tool config."""
+
+    timeout: int = 300
+    background: bool = True
+    auto_continue: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("auto_continue", "autoContinue"),
+        serialization_alias="autoContinue",
+    )
+    auto_send: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("auto_send", "autoSend"),
+        serialization_alias="autoSend",
+    )
+
+
 class PageAgentConfig(Base):
     """通用 PageAgent 页面操作工具配置。"""
 
@@ -566,6 +583,11 @@ class ToolsConfig(_UPSTREAM.ToolsConfig):
 
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
+    image_gen: ImageGenConfig = Field(
+        default_factory=ImageGenConfig,
+        validation_alias=AliasChoices("image_gen", "imageGen"),
+        serialization_alias="imageGen",
+    )
     page_agent: PageAgentConfig = Field(
         default_factory=PageAgentConfig,
         validation_alias=AliasChoices("page_agent", "pageAgent"),

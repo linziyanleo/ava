@@ -203,6 +203,56 @@ class TestLoopPatch:
 
         assert AgentLoop._process_message is not original
 
+    def test_set_tool_context_accepts_upstream_session_key(self):
+        """Ava wrapper must stay compatible with upstream _set_tool_context kwargs."""
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        class DummyTool:
+            def __init__(self):
+                self.calls = []
+
+            def set_context(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+
+        class DummyTools:
+            def __init__(self, tools):
+                self._tools = tools
+                self.tool_names = list(tools)
+
+            def get(self, name):
+                return self._tools.get(name)
+
+        message = DummyTool()
+        cron = DummyTool()
+        image_gen = DummyTool()
+        loop = SimpleNamespace(
+            _unified_session=False,
+            _current_session_key="fallback:session",
+            tools=DummyTools({
+                "message": message,
+                "cron": cron,
+                "image_gen": image_gen,
+            }),
+        )
+
+        AgentLoop._set_tool_context(
+            loop,
+            "telegram",
+            "chat1",
+            "msg1",
+            {"message_id": "msg1"},
+            session_key="telegram:chat1",
+        )
+
+        assert cron.calls[0][1]["session_key"] == "telegram:chat1"
+        assert image_gen.calls == [
+            (("telegram", "chat1"), {"session_key": "telegram:chat1"})
+        ]
+
     def test_save_turn_skips_pre_persisted_multimodal_user_text(self):
         from ava.patches.a_schema_patch import apply_schema_patch
         from ava.patches.loop_patch import apply_loop_patch

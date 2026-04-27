@@ -75,7 +75,7 @@ class TaskSnapshot:
 
 @dataclass
 class SubmitResult:
-    """Returned by submit_coding_task to give callers workspace-aware context."""
+    """Returned by submit_task to give callers workspace-aware context."""
     task_id: str
     reused: bool
     replaced_task_id: str | None
@@ -83,7 +83,7 @@ class SubmitResult:
     active_in_session: list[str]
 
 
-CodingExecutor = Callable[..., Awaitable[dict[str, Any]]]
+TaskExecutor = Callable[..., Awaitable[dict[str, Any]]]
 
 
 class BackgroundTaskStore:
@@ -161,9 +161,9 @@ class BackgroundTaskStore:
     # 写入接口
     # ------------------------------------------------------------------
 
-    def submit_coding_task(
+    def submit_task(
         self,
-        executor: CodingExecutor,
+        executor: TaskExecutor,
         *,
         origin_session_key: str,
         prompt: str,
@@ -284,6 +284,14 @@ class BackgroundTaskStore:
             workspace_id=ws_id,
             active_in_session=active_ids,
         )
+
+    def submit_coding_task(
+        self,
+        executor: TaskExecutor,
+        **kwargs: Any,
+    ) -> SubmitResult:
+        """Backward-compatible alias. New code should call submit_task."""
+        return self.submit_task(executor, **kwargs)
 
     def record_event(
         self, task_id: str, event: str, detail: str = "",
@@ -492,6 +500,19 @@ class BackgroundTaskStore:
                 return error_text
         return snapshot.error_message or snapshot.result_preview or "(no output)"
 
+    @classmethod
+    def _resolve_result_media(cls, result: dict[str, Any] | None = None) -> list[str]:
+        if not result:
+            return []
+        media = result.get("media") or result.get("media_paths") or []
+        if not isinstance(media, list):
+            return []
+        return [
+            item.strip()
+            for item in media
+            if isinstance(item, str) and item.strip()
+        ]
+
     # ------------------------------------------------------------------
     # 完成回调
     # ------------------------------------------------------------------
@@ -506,6 +527,7 @@ class BackgroundTaskStore:
 
         status_label = "SUCCESS" if snapshot.status == "succeeded" else "ERROR"
         result_text = self._resolve_result_text(snapshot, result)
+        media = self._resolve_result_media(result) if snapshot.status == "succeeded" else []
         formatted = (
             f"[Background Task {snapshot.task_id} {status_label}]\n"
             f"Type: {snapshot.task_type} | Duration: {snapshot.elapsed_ms}ms\n\n"
@@ -545,6 +567,7 @@ class BackgroundTaskStore:
                     channel=channel,
                     chat_id=chat_id,
                     content=formatted,
+                    media=media,
                 ))
                 if asyncio.iscoroutine(result_or_coro):
                     await result_or_coro

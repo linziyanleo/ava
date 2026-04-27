@@ -89,9 +89,15 @@ def apply_tools_patch() -> str:
                 codex_config=codex_cfg,
             ))
 
+        image_cfg = getattr(getattr(config, "tools", None), "image_gen", None)
         self.tools.register(ImageGenTool(
             token_stats=getattr(self, 'token_stats', None),
             media_service=getattr(self, 'media_service', None),
+            task_store=getattr(self, 'bg_tasks', None),
+            timeout=getattr(image_cfg, "timeout", 300) if image_cfg else 300,
+            background=getattr(image_cfg, "background", True) if image_cfg else True,
+            auto_continue=getattr(image_cfg, "auto_continue", False) if image_cfg else False,
+            auto_send=getattr(image_cfg, "auto_send", True) if image_cfg else True,
         ))
 
         # Vision tool: prefer vision_model if configured

@@ -331,18 +331,20 @@ vision(url: str, prompt: str = "描述这张图片的内容。") -> str
 生成或编辑图片。
 
 ```
-image_gen(prompt: str, reference_image: str = None) -> str
+image_gen(prompt: str, reference_image: str = None, continue_after_completion: bool = False) -> str
 ```
 
 **Parameters:**
 
 - `prompt`：生成图片的描述，或编辑指令
 - `reference_image`：可选，本地参考图路径；提供后进入编辑模式
+- `continue_after_completion`：可选；图片生成完成后是否继续触发 agent 后续工作流，默认 `false`
 
 **Notes:**
 
 - 生成结果保存到 `~/.nanobot/media/generated/`
-- 需要发给用户时，再调用 `message(media=[...])`
+- 默认作为后台任务执行，完成后会自动把生成图片发送到当前 channel
+- 只有需要在生成结束后继续多步骤工作流时，才显式设置 `continue_after_completion=true`
 - 依赖 `agents.defaults.image_gen_model` 和对应 provider 的 API key
 
 ## Claude Code

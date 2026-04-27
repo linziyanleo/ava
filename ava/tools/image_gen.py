@@ -1,5 +1,6 @@
 """Image generation and editing tool with provider-aware routing."""
 
+import asyncio
 import base64
 import json
 import uuid
@@ -103,6 +104,11 @@ class ImageGenTool(Tool):
         self,
         token_stats: Any | None = None,
         media_service: Any | None = None,
+        task_store: Any | None = None,
+        timeout: int = 300,
+        background: bool = True,
+        auto_continue: bool = False,
+        auto_send: bool = True,
     ) -> None:
         model, provider_name, api_key, api_base = _load_image_gen_config()
         self._api_key = api_key
@@ -111,10 +117,25 @@ class ImageGenTool(Tool):
         self._provider_name = _effective_provider_name(model, provider_name, api_base)
         self._token_stats = token_stats
         self._media_service = media_service
+        self._task_store = task_store
+        self._timeout = timeout
+        self._background = background
+        self._auto_continue = auto_continue
+        self._auto_send = auto_send
         self._client = None
         self._generated_dir = _get_generated_dir()
         self._records_file = _get_records_file()
         self._generated_dir.mkdir(parents=True, exist_ok=True)
+        self._channel = "cli"
+        self._chat_id = "direct"
+        self._session_key = "cli:direct"
+
+    def set_context(
+        self, channel: str, chat_id: str, *, session_key: str | None = None,
+    ) -> None:
+        self._channel = channel
+        self._chat_id = chat_id
+        self._session_key = session_key or f"{channel}:{chat_id}"
 
     @property
     def name(self) -> str:
@@ -126,7 +147,8 @@ class ImageGenTool(Tool):
             "Generate or edit images using AI. "
             "For generation: provide a text prompt describing the desired image. "
             "For editing: provide a reference_image path and an edit instruction as prompt. "
-            "Returns the file path(s) of generated images which can be sent via the message tool."
+            "By default this runs as a background task and the generated image is sent to the current channel when complete. "
+            "Set continue_after_completion=true only when you need the agent to continue a multi-step workflow after generation."
         )
 
     @property
@@ -146,6 +168,13 @@ class ImageGenTool(Tool):
                     "description": (
                         "Optional: file path to a reference image for editing. "
                         "When provided, the prompt is treated as an edit instruction."
+                    ),
+                },
+                "continue_after_completion": {
+                    "type": "boolean",
+                    "description": (
+                        "Optional: trigger agent continuation after the background image task completes. "
+                        "Default is false because generated images are sent automatically."
                     ),
                 },
             },
@@ -223,7 +252,83 @@ class ImageGenTool(Tool):
         self,
         prompt: str,
         reference_image: str | None = None,
+        continue_after_completion: bool | None = None,
         **kwargs: Any,
+    ) -> str:
+        ref_error = self._validate_reference_image(reference_image)
+        if ref_error:
+            return ref_error
+
+        if self._background and self._task_store:
+            auto_continue = (
+                self._auto_continue
+                if continue_after_completion is None
+                else bool(continue_after_completion)
+            )
+            submit = self._task_store.submit_task(
+                executor=self._execute_background,
+                origin_session_key=self._session_key,
+                prompt=prompt,
+                project_path=str(self._generated_dir),
+                timeout=self._timeout,
+                auto_continue=auto_continue,
+                task_type="image_gen",
+                workspace_exclusive=False,
+                reference_image=reference_image,
+                auto_send=self._auto_send,
+            )
+            return self._format_submit_result(submit)
+
+        try:
+            return await asyncio.wait_for(
+                self._execute_generation(prompt, reference_image),
+                timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            return f"Error generating image: Timed out after {self._timeout}s"
+
+    def _validate_reference_image(self, reference_image: str | None) -> str:
+        if reference_image and not Path(reference_image).is_file():
+            return f"Error: Reference image not found: {reference_image}"
+        return ""
+
+    @staticmethod
+    def _format_submit_result(result: Any) -> str:
+        return (
+            f"Image generation task started (id: {result.task_id}). "
+            "Use /task or /bg-tasks to check progress."
+        )
+
+    @staticmethod
+    def _extract_generated_image_paths(result_text: str) -> list[str]:
+        marker = "Generated image(s):"
+        for line in result_text.splitlines():
+            if line.startswith(marker):
+                return [
+                    item.strip()
+                    for item in line[len(marker):].split(",")
+                    if item.strip()
+                ]
+        return []
+
+    async def _execute_background(
+        self,
+        *,
+        prompt: str = "",
+        reference_image: str | None = None,
+        auto_send: bool = True,
+        **_kw: Any,
+    ) -> dict[str, Any]:
+        result_text = await self._execute_generation(prompt, reference_image)
+        if result_text.startswith("Error"):
+            raise RuntimeError(result_text)
+        media = self._extract_generated_image_paths(result_text) if auto_send else []
+        return {"result": result_text, "media": media}
+
+    async def _execute_generation(
+        self,
+        prompt: str,
+        reference_image: str | None = None,
     ) -> str:
         record_id = uuid.uuid4().hex[:12]
         record = {
@@ -291,7 +396,7 @@ class ImageGenTool(Tool):
                         model=self._model,
                         provider=self._provider_name,
                         usage=usage,
-                        session_key="image_gen",
+                        session_key=self._session_key,
                         turn_seq=0,
                         user_message=prompt[:500],
                         output_content=output_content,

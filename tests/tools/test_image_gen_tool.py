@@ -163,3 +163,96 @@ def test_execute_reports_missing_google_genai_dependency(monkeypatch, tmp_path: 
 
     assert "Missing image generation dependency" in result
     assert "google" in result
+
+
+def test_execute_submits_background_task_by_default(monkeypatch, tmp_path: Path):
+    import ava.tools.image_gen as image_gen_module
+
+    monkeypatch.setattr(
+        image_gen_module,
+        "_load_image_gen_config",
+        lambda: ("openai/gpt-image-2", "openai", "secret-key", "https://zenmux.ai/openai/v1"),
+    )
+    monkeypatch.setattr(image_gen_module, "_get_generated_dir", lambda: tmp_path)
+    monkeypatch.setattr(image_gen_module, "_get_records_file", lambda: tmp_path / "records.jsonl")
+
+    class FakeTaskStore:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def submit_task(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(task_id="img_001")
+
+    store = FakeTaskStore()
+    tool = image_gen_module.ImageGenTool(task_store=store, timeout=300)
+    tool.set_context("telegram", "chat1", session_key="telegram:chat1")
+
+    result = asyncio.run(
+        tool.execute(
+            prompt="draw Rowlet writing code on transparent background",
+            continue_after_completion=True,
+        )
+    )
+
+    assert "Image generation task started (id: img_001)" in result
+    assert len(store.calls) == 1
+    call = store.calls[0]
+    assert call["origin_session_key"] == "telegram:chat1"
+    assert call["timeout"] == 300
+    assert call["task_type"] == "image_gen"
+    assert call["auto_continue"] is True
+    assert call["workspace_exclusive"] is False
+    assert call["auto_send"] is True
+    assert list(tmp_path.glob("*.png")) == []
+
+
+def test_execute_generation_timeout_is_configured(monkeypatch, tmp_path: Path):
+    import ava.tools.image_gen as image_gen_module
+
+    monkeypatch.setattr(
+        image_gen_module,
+        "_load_image_gen_config",
+        lambda: ("openai/gpt-image-2", "openai", "secret-key", "https://zenmux.ai/openai/v1"),
+    )
+    monkeypatch.setattr(image_gen_module, "_get_generated_dir", lambda: tmp_path)
+    monkeypatch.setattr(image_gen_module, "_get_records_file", lambda: tmp_path / "records.jsonl")
+
+    tool = image_gen_module.ImageGenTool(timeout=0.01, background=False)
+
+    async def slow_generation(prompt: str, reference_image: str | None = None) -> str:
+        await asyncio.sleep(1)
+        return "Generated image(s): /tmp/late.png"
+
+    monkeypatch.setattr(tool, "_execute_generation", slow_generation)
+
+    result = asyncio.run(tool.execute(prompt="draw an owl avatar"))
+
+    assert result == "Error generating image: Timed out after 0.01s"
+
+
+def test_background_executor_returns_media_paths(monkeypatch, tmp_path: Path):
+    import ava.tools.image_gen as image_gen_module
+
+    monkeypatch.setattr(
+        image_gen_module,
+        "_load_image_gen_config",
+        lambda: ("openai/gpt-image-2", "openai", "secret-key", "https://zenmux.ai/openai/v1"),
+    )
+    monkeypatch.setattr(image_gen_module, "_get_generated_dir", lambda: tmp_path)
+    monkeypatch.setattr(image_gen_module, "_get_records_file", lambda: tmp_path / "records.jsonl")
+
+    output_path = str(tmp_path / "owl.png")
+    tool = image_gen_module.ImageGenTool(background=False)
+
+    async def fake_generation(prompt: str, reference_image: str | None = None) -> str:
+        return f"Generated image(s): {output_path}"
+
+    monkeypatch.setattr(tool, "_execute_generation", fake_generation)
+
+    result = asyncio.run(tool._execute_background(prompt="draw owl", auto_send=True))
+
+    assert result == {
+        "result": f"Generated image(s): {output_path}",
+        "media": [output_path],
+    }

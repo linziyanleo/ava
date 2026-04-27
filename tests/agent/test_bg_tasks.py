@@ -74,7 +74,7 @@ class _CapturingTaskStore:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def submit_coding_task(self, **kwargs):
+    def submit_task(self, **kwargs):
         self.calls.append(kwargs)
         return SubmitResult(
             task_id="task_codex_001",
@@ -119,6 +119,36 @@ async def test_on_complete_is_idempotent_for_same_task():
     assert len(bus.messages) == 1
     assert store._run_post_task_hooks.await_count == 1
     store._trigger_continuation.assert_awaited_once_with(snapshot, "", result=result)
+
+
+@pytest.mark.asyncio
+async def test_on_complete_publishes_image_media_paths():
+    sessions = _SessionBackedSessions()
+    bus = _FakeBus()
+    loop = SimpleNamespace(sessions=sessions, bus=bus)
+    store = BackgroundTaskStore(db=None)
+    store.set_agent_loop(loop)
+    store._run_post_task_hooks = AsyncMock(return_value="")
+    store._trigger_continuation = AsyncMock()
+
+    image_path = "/tmp/generated/owl.png"
+    snapshot = TaskSnapshot(
+        task_id="img123",
+        task_type="image_gen",
+        origin_session_key="telegram:1",
+        status="succeeded",
+        prompt_preview="draw Rowlet writing code",
+        elapsed_ms=250,
+        auto_continue=False,
+    )
+    result = {"result": f"Generated image(s): {image_path}", "media": [image_path]}
+
+    await store._on_complete(snapshot, result)
+
+    assert len(bus.messages) == 1
+    assert getattr(bus.messages[0], "media") == [image_path]
+    assert "Generated image(s): /tmp/generated/owl.png" in bus.messages[0].content
+    store._trigger_continuation.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -175,7 +205,7 @@ async def test_bg_tasks_persist_codex_thread_id_as_general_run_id(tmp_path: Path
             "thread_id": "thread_codex_123",
         }
 
-    submit = store.submit_coding_task(
+    submit = store.submit_task(
         executor=_executor,
         origin_session_key="console:mock-session-9",
         prompt="Review the workspace with Codex.",
@@ -225,7 +255,7 @@ async def test_workspace_aware_submit_and_query(tmp_path: Path):
     async def _executor(**_kw):
         return {"result": "done", "session_id": "s1"}
 
-    submit = store.submit_coding_task(
+    submit = store.submit_task(
         executor=_executor,
         origin_session_key="test:sess-1",
         prompt="Test workspace-aware submit",
@@ -286,7 +316,7 @@ async def test_workspace_exclusive_replaces_existing(tmp_path: Path):
         await asyncio.sleep(60)
         return {"result": "should not complete"}
 
-    submit1 = store.submit_coding_task(
+    submit1 = store.submit_task(
         executor=_slow_executor,
         origin_session_key="test:sess-2",
         prompt="First task",
@@ -295,7 +325,7 @@ async def test_workspace_exclusive_replaces_existing(tmp_path: Path):
         workspace=ws,
     )
 
-    submit2 = store.submit_coding_task(
+    submit2 = store.submit_task(
         executor=_slow_executor,
         origin_session_key="test:sess-2",
         prompt="Replacing task",

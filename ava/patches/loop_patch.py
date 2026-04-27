@@ -698,6 +698,8 @@ def apply_loop_patch() -> str:
                         image_gen_tool._token_stats = token_stats
                     if hasattr(image_gen_tool, "_media_service"):
                         image_gen_tool._media_service = media_service
+                    if hasattr(image_gen_tool, "_task_store"):
+                        image_gen_tool._task_store = getattr(self, "bg_tasks", None)
                 if cc_tool := self.tools.get("claude_code"):
                     if hasattr(cc_tool, "_token_stats"):
                         cc_tool._token_stats = token_stats
@@ -772,9 +774,23 @@ def apply_loop_patch() -> str:
     # ------------------------------------------------------------------
     original_set_tool_context = AgentLoop._set_tool_context
 
-    def patched_set_tool_context(self: AgentLoop, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        original_set_tool_context(self, channel, chat_id, message_id)
-        session_key = getattr(self, "_current_session_key", None) or f"{channel}:{chat_id}"
+    def patched_set_tool_context(
+        self: AgentLoop,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        original_set_tool_context(
+            self,
+            channel,
+            chat_id,
+            message_id,
+            metadata=metadata,
+            session_key=session_key,
+        )
+        session_key = session_key or getattr(self, "_current_session_key", None) or f"{channel}:{chat_id}"
         for tool_name in self.tools.tool_names:
             tool = self.tools.get(tool_name)
             if tool and hasattr(tool, "set_context"):

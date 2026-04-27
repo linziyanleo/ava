@@ -138,7 +138,7 @@ class CodexTool(Tool):
             ws_id = f"{self._session_key}:{target.workspace_key}"
             workspace = make_inplace_workspace(target, workspace_id=ws_id)
 
-        result = self._task_store.submit_coding_task(
+        result = self._task_store.submit_task(
             executor=self._run_background,
             origin_session_key=self._session_key,
             prompt=prompt,
