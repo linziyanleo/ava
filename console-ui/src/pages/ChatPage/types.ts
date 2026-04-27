@@ -63,6 +63,7 @@ export interface RawMessage {
   tool_call_id?: string
   name?: string
   reasoning_content?: string
+  trace_id?: string
   metadata?: Record<string, unknown>
 }
 
@@ -81,6 +82,8 @@ export interface TurnTokenStats {
   total_tokens: number
   llm_calls: number
   models: string
+  trace_id?: string
+  span_id?: string
 }
 
 export interface IterationTokenStats {
@@ -96,6 +99,9 @@ export interface IterationTokenStats {
   model_role: string
   tool_names: string
   finish_reason: string
+  trace_id?: string
+  span_id?: string
+  parent_span_id?: string
 }
 
 export interface ContextPreviewSection {

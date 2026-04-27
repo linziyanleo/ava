@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import { useResponsiveMode } from '../../hooks/useResponsiveMode';
 import type { RawMessage, TurnTokenStats } from './types';
 import { extractMessageImages, getContentText, formatTimestamp, formatTokenCount } from './utils';
+import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav';
 import { ImageCarousel } from './ImageCarousel';
 import { TokenInfoPopover } from './TokenInfoPopover';
 
@@ -292,10 +293,13 @@ export const MessageBubble = React.memo(function MessageBubble({
       {!isUser && !isMobile && tokenStats && (
         <button
           onClick={() => {
-            const params = new URLSearchParams({ session_key: sessionKey || '' })
-            if (tokenStats.conversation_id) params.set('conversation_id', tokenStats.conversation_id)
-            if (tokenStats.turn_seq != null) params.set('turn_seq', String(tokenStats.turn_seq))
-            navigate(`/tokens?${params.toString()}`)
+            navigate(buildTokenStatsNavUrl({
+              sessionKey,
+              conversationId: tokenStats.conversation_id,
+              turnSeq: tokenStats.turn_seq,
+              traceId: tokenStats.trace_id,
+              spanId: tokenStats.span_id,
+            }))
           }}
           className="text-[10px] font-mono text-[var(--text-secondary)] whitespace-nowrap ml-2 self-center hover:text-[var(--accent)] transition-colors"
           title="查看 Token 统计"

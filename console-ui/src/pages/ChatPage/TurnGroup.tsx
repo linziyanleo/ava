@@ -95,10 +95,12 @@ export function TurnGroupComponent({
               turn_seq: lastIter.turn_seq,
               prompt_tokens: lastIter.prompt_tokens,
               completion_tokens: lastIter.completion_tokens,
-              total_tokens: lastIter.total_tokens,
-              llm_calls: 1,
-              models: lastIter.model,
-            }
+	              total_tokens: lastIter.total_tokens,
+	              llm_calls: 1,
+	              models: lastIter.model,
+	              trace_id: lastIter.trace_id,
+	              span_id: lastIter.span_id,
+	            }
           }
         }
         return (

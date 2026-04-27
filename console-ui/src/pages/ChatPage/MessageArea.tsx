@@ -12,6 +12,7 @@ import { InFlightTurnBlock } from './InFlightTurnBlock'
 import type { InFlightTurn } from './inFlightTurn'
 import { formatTokenCount } from './utils'
 import { api } from '../../api/client';
+import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 
 interface MessageAreaProps {
   session: SessionMeta | null
@@ -197,13 +198,14 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
             )}
             <button
               onClick={() => {
-                const params = new URLSearchParams({ session_key: session.key })
-                if (conversationId) params.set('conversation_id', conversationId)
-                navigate(`/tokens?${params.toString()}`)
+                navigate(buildTokenStatsNavUrl({
+                  sessionKey: session.key,
+                  conversationId,
+                }))
               }}
-            className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
-            title="查看当前会话的 Token 统计"
-          >
+              className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
+              title="查看当前会话的 Token 统计"
+            >
               <span>⚡ {formatTokenCount(headerTotalTokens)} tokens · {headerLlmCalls} calls</span>
               <ExternalLink className="w-3 h-3" />
             </button>
