@@ -24,6 +24,7 @@ from typing import Any
 
 import typer
 
+from ava.runtime import config_overlay
 from ava.runtime import paths as runtime_paths
 
 
@@ -231,6 +232,11 @@ def migrate_home(
             _symlink_entry(source, target)
 
     if not dry_run:
+        if mode in {"copy", "move"} and target_home.resolve(strict=False) == runtime_paths.resolve_ava_home():
+            overlay = config_overlay.normalize_config_overlay(target_home / "config.json")
+            lines.append(
+                f"normalized: config.json rewritten as Ava overlay ({len(overlay)} top-level key(s))"
+            )
         _write_drift_notice(target_home, source_home, mode)
     return lines
 

@@ -50,22 +50,22 @@ function commitAssistantDraft(turn: InFlightTurn): InFlightTurn {
   }
 }
 
-function settleLastLoadingTool(entries: InFlightTurnEntry[]): InFlightTurnEntry[] {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i]
-    if (entry.kind !== 'tool') continue
-    if (!entry.tool.isLoading) break
-    const next = [...entries]
-    next[i] = {
-      kind: 'tool',
+function settleAllLoadingTools(entries: InFlightTurnEntry[]): InFlightTurnEntry[] {
+  let changed = false
+  const next = entries.map((entry) => {
+    if (entry.kind !== 'tool' || !entry.tool.isLoading) {
+      return entry
+    }
+    changed = true
+    return {
+      kind: 'tool' as const,
       tool: {
         ...entry.tool,
         isLoading: false,
       },
     }
-    return next
-  }
-  return entries
+  })
+  return changed ? next : entries
 }
 
 function splitToolHints(hints: string): string[] {
@@ -199,13 +199,14 @@ export function appendInFlightAssistantChunk(turn: InFlightTurn, chunk: string):
     ...turn,
     phase: 'streaming',
     processing: true,
-    entries: settleLastLoadingTool(turn.entries),
+    entries: settleAllLoadingTools(turn.entries),
     draftAssistant: turn.draftAssistant + chunk,
   }
 }
 
 export function appendInFlightToolHint(turn: InFlightTurn, hint: string): InFlightTurn {
   const committed = commitAssistantDraft(turn)
+  const settledEntries = settleAllLoadingTools(committed.entries)
   const nextIteration = committed.entries.filter((entry) => entry.kind === 'tool').length
   const hintParts = splitToolHints(hint)
   return {
@@ -213,7 +214,7 @@ export function appendInFlightToolHint(turn: InFlightTurn, hint: string): InFlig
     phase: 'awaiting_tool',
     processing: true,
     entries: [
-      ...committed.entries,
+      ...settledEntries,
       ...(hintParts.length > 0 ? hintParts : [hint]).map((part) => ({
         kind: 'tool' as const,
         tool: buildSyntheticToolCall(part, nextIteration),
@@ -226,8 +227,9 @@ export function applyInFlightStreamEnd(turn: InFlightTurn, resuming: boolean): I
   const committed = commitAssistantDraft(turn)
   return {
     ...committed,
+    entries: settleAllLoadingTools(committed.entries),
     phase: resuming ? 'awaiting_tool' : 'pending',
-    processing: true,
+    processing: resuming,
   }
 }
 
@@ -242,7 +244,7 @@ export function finalizeInFlightTurn(turn: InFlightTurn): InFlightTurn {
   const committed = commitAssistantDraft(turn)
   return {
     ...committed,
-    entries: settleLastLoadingTool(committed.entries),
+    entries: settleAllLoadingTools(committed.entries),
     phase: 'pending',
     processing: false,
   }

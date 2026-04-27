@@ -9,7 +9,7 @@ import weakref
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
+from nanobot.agent.loop import AgentLoop, _LoopHook
 from nanobot.agent.memory import Consolidator
 from nanobot.session.manager import Session
 
@@ -18,6 +18,9 @@ from nanobot.session.manager import Session
 def _restore_agent_loop():
     """Save and restore AgentLoop methods to avoid polluting other tests."""
     orig_init = AgentLoop.__init__
+    orig_loop_hook_init = _LoopHook.__init__
+    orig_loop_hook_on_stream = _LoopHook.on_stream
+    orig_loop_hook_on_stream_end = _LoopHook.on_stream_end
     orig_set_tool_context = AgentLoop._set_tool_context
     orig_run_agent_loop = AgentLoop._run_agent_loop
     orig_save_turn = AgentLoop._save_turn
@@ -26,6 +29,9 @@ def _restore_agent_loop():
     orig_maybe_consolidate = Consolidator.maybe_consolidate_by_tokens
     yield
     AgentLoop.__init__ = orig_init
+    _LoopHook.__init__ = orig_loop_hook_init
+    _LoopHook.on_stream = orig_loop_hook_on_stream
+    _LoopHook.on_stream_end = orig_loop_hook_on_stream_end
     AgentLoop._set_tool_context = orig_set_tool_context
     AgentLoop._run_agent_loop = orig_run_agent_loop
     AgentLoop._save_turn = orig_save_turn
@@ -35,6 +41,86 @@ def _restore_agent_loop():
 
 
 class TestLoopPatch:
+    @pytest.mark.asyncio
+    async def test_stream_hook_preserves_whitespace_and_hides_partial_think_prefix(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        emitted: list[str] = []
+
+        async def on_stream(chunk: str):
+            emitted.append(chunk)
+
+        hook = _LoopHook(SimpleNamespace(), on_stream=on_stream)
+        for delta in ["Hello", " ", "<", "think>x</think>", " world"]:
+            await hook.on_stream(SimpleNamespace(), delta)
+
+        assert "".join(emitted) == "Hello  world"
+
+    @pytest.mark.asyncio
+    async def test_stream_hook_emits_trailing_whitespace_delta(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        emitted: list[str] = []
+
+        async def on_stream(chunk: str):
+            emitted.append(chunk)
+
+        hook = _LoopHook(SimpleNamespace(), on_stream=on_stream)
+        await hook.on_stream(SimpleNamespace(), "Hello")
+        await hook.on_stream(SimpleNamespace(), " ")
+
+        assert "".join(emitted) == "Hello "
+
+    @pytest.mark.asyncio
+    async def test_stream_hook_handles_one_shot_think_block(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        emitted: list[str] = []
+
+        async def on_stream(chunk: str):
+            emitted.append(chunk)
+
+        hook = _LoopHook(SimpleNamespace(), on_stream=on_stream)
+        await hook.on_stream(SimpleNamespace(), "Hello <think>x</think> world")
+
+        assert "".join(emitted) == "Hello  world"
+
+    @pytest.mark.asyncio
+    async def test_stream_hook_resets_state_on_stream_end(self):
+        from ava.patches.a_schema_patch import apply_schema_patch
+        from ava.patches.loop_patch import apply_loop_patch
+
+        apply_schema_patch()
+        apply_loop_patch()
+
+        emitted: list[str] = []
+
+        async def on_stream(chunk: str):
+            emitted.append(chunk)
+
+        async def on_stream_end(*, resuming: bool):
+            assert resuming is False
+
+        hook = _LoopHook(SimpleNamespace(), on_stream=on_stream, on_stream_end=on_stream_end)
+        for delta in ["Hello", " ", "<", "think>x</think>", " world"]:
+            await hook.on_stream(SimpleNamespace(), delta)
+        await hook.on_stream_end(SimpleNamespace(), resuming=False)
+        await hook.on_stream(SimpleNamespace(), "Bye")
+
+        assert "".join(emitted) == "Hello  worldBye"
+
     @pytest.mark.asyncio
     async def test_mutating_tool_guard_blocks_mismatched_summary(self):
         from ava.patches.loop_patch import _wrap_mutating_tool_execute

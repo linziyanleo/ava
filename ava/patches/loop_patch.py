@@ -47,6 +47,13 @@ _MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
 _TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
 _IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image(?:: .+)?\]$")
 _IMAGE_PLACEHOLDER_INLINE_RE = re.compile(r"\[image(?:: ([^\]]+))?\]")
+_HIDDEN_STREAM_TAGS = (
+    ("<think>", "</think>", "<think"),
+    ("<thought>", "</thought>", "<thought"),
+)
+_STREAM_TAG_CONTINUATION_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-:>/"
+)
 
 
 def set_shared_db(db) -> None:
@@ -281,6 +288,67 @@ def _install_provider_token_recording_wrappers(provider) -> None:
     _wrap("chat_stream_with_retry")
 
 
+def _extract_stable_stream_text(raw_text: str) -> str:
+    """Return the visible stream prefix that is safe to emit incrementally.
+
+    This mirrors the upstream `<think>` / `<thought>` stripping semantics
+    without trimming whitespace, and with one extra constraint: any trailing
+    partial thinking tag stays buffered until it is disambiguated so the UI
+    never needs to retract an already-emitted `<`.
+    """
+    if not raw_text:
+        return ""
+
+    visible_parts: list[str] = []
+    idx = 0
+    text_len = len(raw_text)
+
+    while idx < text_len:
+        if raw_text[idx] != "<":
+            visible_parts.append(raw_text[idx])
+            idx += 1
+            continue
+
+        matched = False
+        for open_tag, close_tag, _ in _HIDDEN_STREAM_TAGS:
+            if not raw_text.startswith(open_tag, idx):
+                continue
+            close_idx = raw_text.find(close_tag, idx + len(open_tag))
+            if close_idx == -1:
+                return "".join(visible_parts)
+            idx = close_idx + len(close_tag)
+            matched = True
+            break
+        if matched:
+            continue
+
+        for _, _, malformed_prefix in _HIDDEN_STREAM_TAGS:
+            if not raw_text.startswith(malformed_prefix, idx):
+                continue
+            next_idx = idx + len(malformed_prefix)
+            if next_idx >= text_len:
+                return "".join(visible_parts)
+            next_char = raw_text[next_idx]
+            if next_char not in _STREAM_TAG_CONTINUATION_CHARS:
+                idx = next_idx
+                matched = True
+                break
+        if matched:
+            continue
+
+        suffix = raw_text[idx:]
+        if any(
+            open_tag.startswith(suffix) or malformed_prefix.startswith(suffix)
+            for open_tag, _, malformed_prefix in _HIDDEN_STREAM_TAGS
+        ):
+            return "".join(visible_parts)
+
+        visible_parts.append(raw_text[idx])
+        idx += 1
+
+    return "".join(visible_parts)
+
+
 def _sync_categorized_memory(consolidator, session_key: str | None, history_entry: str) -> None:
     if not session_key or not history_entry:
         return
@@ -407,7 +475,7 @@ def _register_bg_task_commands(router, bg_store) -> None:
 
 
 def apply_loop_patch() -> str:
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.loop import AgentLoop, _LoopHook
     from nanobot.agent.memory import Consolidator
 
     required_methods = [
@@ -424,6 +492,47 @@ def apply_loop_patch() -> str:
 
     if getattr(AgentLoop._process_message, "_ava_loop_patched", False):
         return "loop_patch already applied (skipped)"
+
+    loop_hook_methods = ["__init__", "on_stream", "on_stream_end"]
+    missing_loop_hook = [name for name in loop_hook_methods if not hasattr(_LoopHook, name)]
+    if missing_loop_hook:
+        logger.warning("loop_patch skipped: _LoopHook missing methods {}", missing_loop_hook)
+        return f"loop_patch skipped (_LoopHook missing methods: {', '.join(missing_loop_hook)})"
+
+    # ------------------------------------------------------------------
+    # 0. Patch _LoopHook streaming so partial <think>/<thought> prefixes
+    #    never leak into the UI and trailing whitespace is preserved.
+    # ------------------------------------------------------------------
+    original_loop_hook_init = _LoopHook.__init__
+    original_loop_hook_on_stream_end = _LoopHook.on_stream_end
+
+    def patched_loop_hook_init(self: _LoopHook, *args, **kwargs) -> None:
+        original_loop_hook_init(self, *args, **kwargs)
+        self._ava_stream_emitted_text = ""
+
+    async def patched_loop_hook_on_stream(self: _LoopHook, context, delta: str) -> None:
+        self._stream_buf += delta
+        stable_text = _extract_stable_stream_text(self._stream_buf)
+        emitted_text = getattr(self, "_ava_stream_emitted_text", "")
+        if not stable_text.startswith(emitted_text):
+            return
+        incremental = stable_text[len(emitted_text):]
+        self._ava_stream_emitted_text = stable_text
+        if incremental and self._on_stream:
+            await self._on_stream(incremental)
+
+    async def patched_loop_hook_on_stream_end(self: _LoopHook, context, *, resuming: bool) -> None:
+        try:
+            await original_loop_hook_on_stream_end(self, context, resuming=resuming)
+        finally:
+            self._ava_stream_emitted_text = ""
+
+    patched_loop_hook_init._ava_loop_patched = True
+    patched_loop_hook_on_stream._ava_loop_patched = True
+    patched_loop_hook_on_stream_end._ava_loop_patched = True
+    _LoopHook.__init__ = patched_loop_hook_init
+    _LoopHook.on_stream = patched_loop_hook_on_stream
+    _LoopHook.on_stream_end = patched_loop_hook_on_stream_end
 
     # ------------------------------------------------------------------
     # 1. Patch __init__ to inject extra attributes
