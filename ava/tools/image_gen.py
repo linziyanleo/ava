@@ -1,5 +1,6 @@
-"""Image generation and editing tool using Google GenAI SDK."""
+"""Image generation and editing tool with provider-aware routing."""
 
+import base64
 import json
 import uuid
 from datetime import datetime, timezone
@@ -19,8 +20,11 @@ def _get_generated_dir() -> Path:
 def _get_records_file() -> Path:
     return _get_generated_dir() / "records.jsonl"
 
-def _load_image_gen_config() -> tuple[str, str, str]:
-    """Load image generation model, api_key, api_base from config.json."""
+_ZENMUX_VERTEX_BASE_URL = "https://zenmux.ai/api/vertex-ai"
+
+
+def _load_image_gen_config() -> tuple[str, str, str, str]:
+    """Load image generation model, provider, api_key, api_base from config.json."""
     from nanobot.config.loader import load_config
 
     config = load_config()
@@ -30,21 +34,81 @@ def _load_image_gen_config() -> tuple[str, str, str]:
     p = config.get_provider(model)
     if not p or not p.api_key:
         raise ValueError(f"No provider/api_key found for imageGenModel '{model}'")
+    provider_name = ""
+    if hasattr(config, "get_provider_name"):
+        provider_name = config.get_provider_name(model) or ""
     api_base = config.get_api_base(model) or p.api_base or ""
-    return model, p.api_key, api_base
+    return model, provider_name, p.api_key, api_base
+
+
+def _model_prefix(model: str) -> str:
+    return model.lower().split("/", 1)[0] if "/" in model else ""
+
+
+def _effective_provider_name(model: str, provider_name: str, api_base: str) -> str:
+    if "zenmux.ai" in api_base.lower():
+        return "zenmux"
+    return provider_name or _model_prefix(model)
+
+
+def _normalize_genai_base(api_base: str, provider_name: str) -> str:
+    base_url = api_base.rstrip("/")
+    if provider_name == "zenmux":
+        if not base_url or "zenmux.ai" in base_url.lower() and "/vertex-ai" not in base_url:
+            return _ZENMUX_VERTEX_BASE_URL
+    if base_url.endswith("/v1"):
+        return base_url[:-3]
+    return base_url
+
+
+def _request_model_for_genai(model: str, provider_name: str) -> str:
+    if provider_name == "zenmux" and model.startswith("zenmux/"):
+        return model.split("/", 1)[1]
+    return model
+
+
+def _request_model_for_openai(model: str) -> str:
+    if model.startswith("openai/"):
+        return model.split("/", 1)[1]
+    return model
+
+
+def _is_google_image_model(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.startswith("google/") or normalized.startswith("gemini-")
+
+
+def _mime_type_for_path(path: Path) -> str:
+    suffix = path.suffix.lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".avif": "image/avif",
+        ".gif": "image/gif",
+    }
+    return mime_map.get(suffix, "image/png")
+
+
+def _prompt_requests_transparent_background(prompt: str) -> bool:
+    normalized = prompt.lower()
+    return "transparent" in normalized or "透明" in prompt
+
 
 class ImageGenTool(Tool):
-    """Generate or edit images using Gemini's native image generation capabilities."""
+    """Generate or edit images using the configured image provider."""
 
     def __init__(
         self,
         token_stats: Any | None = None,
         media_service: Any | None = None,
     ) -> None:
-        model, api_key, api_base = _load_image_gen_config()
+        model, provider_name, api_key, api_base = _load_image_gen_config()
         self._api_key = api_key
         self._api_base = api_base
         self._model = model
+        self._provider_name = _effective_provider_name(model, provider_name, api_base)
         self._token_stats = token_stats
         self._media_service = media_service
         self._client = None
@@ -96,12 +160,8 @@ class ImageGenTool(Tool):
         from google import genai
         from google.genai import types
 
-        base_url = self._api_base.rstrip("/")
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
-            api_version = "v1"
-        else:
-            api_version = "v1"
+        base_url = _normalize_genai_base(self._api_base, self._provider_name)
+        api_version = "v1"
 
         self._client = genai.Client(
             api_key=self._api_key,
@@ -113,11 +173,36 @@ class ImageGenTool(Tool):
         )
         return self._client
 
+    def _get_openai_client(self):
+        """Lazily create the OpenAI-compatible client."""
+        if self._client is not None:
+            return self._client
+
+        from openai import OpenAI
+
+        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        if self._api_base:
+            kwargs["base_url"] = self._api_base.rstrip("/")
+        self._client = OpenAI(**kwargs)
+        return self._client
+
     def _save_image(self, image, record_id: str, index: int) -> Path:
-        """Save a PIL Image to the generated directory."""
+        """Save a PIL/google.genai Image to the generated directory."""
         filename = f"{record_id}_{index}.png"
         path = self._generated_dir / filename
-        image.save(str(path))
+        if hasattr(image, "save"):
+            image.save(str(path))
+            return path
+        image_bytes = getattr(image, "image_bytes", None) or getattr(image, "imageBytes", None)
+        if image_bytes:
+            path.write_bytes(image_bytes)
+            return path
+        raise ValueError("Unsupported image object returned by image generation model")
+
+    def _save_image_bytes(self, image_bytes: bytes, record_id: str, index: int) -> Path:
+        filename = f"{record_id}_{index}.png"
+        path = self._generated_dir / filename
+        path.write_bytes(image_bytes)
         return path
 
     def _write_record(self, record: dict) -> None:
@@ -140,8 +225,6 @@ class ImageGenTool(Tool):
         reference_image: str | None = None,
         **kwargs: Any,
     ) -> str:
-        import asyncio
-
         record_id = uuid.uuid4().hex[:12]
         record = {
             "id": record_id,
@@ -156,11 +239,7 @@ class ImageGenTool(Tool):
         }
 
         try:
-            from google.genai import types
-
-            client = self._get_client()
-
-            contents: list[Any] = []
+            ref_path: Path | None = None
             if reference_image:
                 ref_path = Path(reference_image)
                 if not ref_path.is_file():
@@ -168,51 +247,21 @@ class ImageGenTool(Tool):
                     record["error"] = f"Reference image not found: {reference_image}"
                     self._write_record(record)
                     return f"Error: Reference image not found: {reference_image}"
-
-                # Determine MIME type from extension
-                suffix = ref_path.suffix.lower()
-                mime_map = {
-                    ".png": "image/png",
-                    ".jpg": "image/jpeg",
-                    ".jpeg": "image/jpeg",
-                    ".webp": "image/webp",
-                    ".avif": "image/avif",
-                    ".gif": "image/gif",
-                }
-                mime_type = mime_map.get(suffix, "image/png")
-                image_bytes = ref_path.read_bytes()
-                image_part = types.Part.from_bytes(
-                    data=image_bytes, mime_type=mime_type
-                )
-                contents.append(image_part)
-
-            contents.append(prompt)
-
-            config = types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-            )
-
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=self._model,
-                contents=contents,
-                config=config,
-            )
-
-            text_parts: list[str] = []
             image_paths: list[str] = []
+            text_parts: list[str] = []
+            usage_metadata = None
 
-            if response.parts:
-                image_saved = False
-                for i, part in enumerate(response.parts):
-                    if part.text is not None:
-                        text_parts.append(part.text)
-                    elif part.inline_data is not None and not image_saved:
-                        image = part.as_image()
-                        saved_path = self._save_image(image, record_id, i)
-                        image_paths.append(str(saved_path))
-                        image_saved = True
-                        logger.info("Image saved: {}", saved_path)
+            request_model = _request_model_for_genai(self._model, self._provider_name)
+            if self._provider_name == "openai":
+                image_paths = await self._execute_openai_images(prompt, ref_path, record_id)
+            elif _is_google_image_model(request_model):
+                text_parts, image_paths, usage_metadata = await self._execute_generate_content(
+                    prompt,
+                    ref_path,
+                    record_id,
+                )
+            else:
+                image_paths = await self._execute_generate_images(prompt, ref_path, record_id)
 
             record["output_images"] = image_paths
             record["output_text"] = "\n".join(text_parts)
@@ -223,8 +272,8 @@ class ImageGenTool(Tool):
                 self._write_record(record)
                 return "Error: No output received from the image generation model."
 
-            if self._token_stats and hasattr(response, "usage_metadata") and response.usage_metadata:
-                um = response.usage_metadata
+            if self._token_stats and usage_metadata:
+                um = usage_metadata
                 # Google GenAI 使用不同的缓存字段名
                 cached_tokens = getattr(um, "cached_content_token_count", 0) or 0
                 usage = {
@@ -240,7 +289,7 @@ class ImageGenTool(Tool):
                 try:
                     self._token_stats.record(
                         model=self._model,
-                        provider="google",
+                        provider=self._provider_name,
                         usage=usage,
                         session_key="image_gen",
                         turn_seq=0,
@@ -277,3 +326,141 @@ class ImageGenTool(Tool):
             self._write_record(record)
             logger.error("Image generation failed: {}", error_msg)
             return f"Error generating image: {error_msg}"
+
+    async def _execute_generate_content(
+        self,
+        prompt: str,
+        ref_path: Path | None,
+        record_id: str,
+    ) -> tuple[list[str], list[str], Any | None]:
+        import asyncio
+
+        from google.genai import types
+
+        client = self._get_client()
+
+        contents: list[Any] = []
+        if ref_path:
+            image_part = types.Part.from_bytes(
+                data=ref_path.read_bytes(),
+                mime_type=_mime_type_for_path(ref_path),
+            )
+            contents.append(image_part)
+        contents.append(prompt)
+
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=_request_model_for_genai(self._model, self._provider_name),
+            contents=contents,
+            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+        )
+
+        text_parts: list[str] = []
+        image_paths: list[str] = []
+        for i, part in enumerate(getattr(response, "parts", None) or []):
+            if getattr(part, "text", None) is not None:
+                text_parts.append(part.text)
+            elif getattr(part, "inline_data", None) is not None:
+                image = part.as_image()
+                saved_path = self._save_image(image, record_id, i)
+                image_paths.append(str(saved_path))
+                logger.info("Image saved: {}", saved_path)
+
+        return text_parts, image_paths, getattr(response, "usage_metadata", None)
+
+    async def _execute_generate_images(
+        self,
+        prompt: str,
+        ref_path: Path | None,
+        record_id: str,
+    ) -> list[str]:
+        import asyncio
+
+        from google.genai import types
+
+        client = self._get_client()
+        config = types.GenerateImagesConfig(
+            number_of_images=1,
+            output_mime_type="image/png",
+        )
+
+        if ref_path:
+            reference_image = types.Image(
+                image_bytes=ref_path.read_bytes(),
+                mime_type=_mime_type_for_path(ref_path),
+            )
+            response = await asyncio.to_thread(
+                client.models.edit_image,
+                model=_request_model_for_genai(self._model, self._provider_name),
+                prompt=prompt,
+                reference_images=[
+                    types.RawReferenceImage(
+                        reference_id=1,
+                        reference_image=reference_image,
+                    )
+                ],
+                config=types.EditImageConfig(
+                    number_of_images=1,
+                    output_mime_type="image/png",
+                ),
+            )
+        else:
+            response = await asyncio.to_thread(
+                client.models.generate_images,
+                model=_request_model_for_genai(self._model, self._provider_name),
+                prompt=prompt,
+                config=config,
+            )
+
+        image_paths: list[str] = []
+        for i, generated in enumerate(getattr(response, "generated_images", None) or []):
+            image = getattr(generated, "image", None)
+            if image is None:
+                continue
+            saved_path = self._save_image(image, record_id, i)
+            image_paths.append(str(saved_path))
+            logger.info("Image saved: {}", saved_path)
+        return image_paths
+
+    async def _execute_openai_images(
+        self,
+        prompt: str,
+        ref_path: Path | None,
+        record_id: str,
+    ) -> list[str]:
+        import asyncio
+
+        client = self._get_openai_client()
+        model = _request_model_for_openai(self._model)
+        base_kwargs: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "response_format": "b64_json",
+            "output_format": "png",
+        }
+        if _prompt_requests_transparent_background(prompt):
+            base_kwargs["background"] = "transparent"
+
+        if ref_path:
+            with ref_path.open("rb") as image_file:
+                response = await asyncio.to_thread(
+                    client.images.edit,
+                    image=image_file,
+                    **base_kwargs,
+                )
+        else:
+            response = await asyncio.to_thread(
+                client.images.generate,
+                **base_kwargs,
+            )
+
+        image_paths: list[str] = []
+        for i, item in enumerate(getattr(response, "data", None) or []):
+            b64_json = getattr(item, "b64_json", None)
+            if not b64_json:
+                continue
+            saved_path = self._save_image_bytes(base64.b64decode(b64_json), record_id, i)
+            image_paths.append(str(saved_path))
+            logger.info("Image saved: {}", saved_path)
+        return image_paths
