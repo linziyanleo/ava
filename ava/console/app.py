@@ -31,6 +31,7 @@ from ava.console.services.gateway_service import GatewayService
 from ava.console.services.media_service import MediaService
 from ava.console.services.skills_service import SkillsService
 from ava.console.services.token_stats_service import TokenStatsCollector
+from ava.console.services.trace_spans_service import TraceSpanStore
 from ava.console.services.user_service import UserService
 
 
@@ -45,6 +46,7 @@ class Services:
     skills: SkillsService
     chat: ChatService | None = None
     token_stats: TokenStatsCollector | None = None
+    trace_spans: TraceSpanStore | None = None
     mock: "Services | None" = None
 
 
@@ -152,6 +154,10 @@ def create_console_app(
     mock_runtime = prepare_mock_runtime(console_dir, console_cfg.port)
     from ava.storage import Database
     mock_db = Database(mock_runtime.db_path)
+    trace_spans = TraceSpanStore(db) if db is not None else None
+    if token_stats_collector is not None:
+        token_stats_collector._trace_spans = trace_spans
+    mock_trace_spans = TraceSpanStore(mock_db) if mock_db is not None else None
 
     real_services = Services(
         users=users,
@@ -173,7 +179,10 @@ def create_console_app(
         ),
         chat=ChatService(agent_loop, workspace, db=db),
         token_stats=token_stats_collector,
+        trace_spans=trace_spans,
     )
+    if trace_spans is not None:
+        trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
     mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
     mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
 
@@ -196,7 +205,12 @@ def create_console_app(
             db=mock_db,
         ),
         chat=mock_chat,
-        token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db) if mock_db is not None else None,
+        token_stats=TokenStatsCollector(
+            data_dir=mock_runtime.root,
+            db=mock_db,
+            trace_spans=mock_trace_spans,
+        ) if mock_db is not None else None,
+        trace_spans=mock_trace_spans,
     )
     _services = real_services
 
@@ -220,6 +234,7 @@ def create_console_app(
         user_routes,
         audit_routes,
         token_routes,
+        trace_routes,
         skills_routes,
         page_agent_routes,
     )
@@ -234,6 +249,7 @@ def create_console_app(
     app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(token_routes.router)
+    app.include_router(trace_routes.router)
     app.include_router(skills_routes.router)
     app.include_router(page_agent_routes.router)
     app.include_router(bg_task_routes.router)
@@ -284,10 +300,12 @@ def create_console_app_standalone(
     db = Database(db_path)
     mock_runtime = prepare_mock_runtime(console_dir, console_port)
     mock_db = Database(mock_runtime.db_path)
+    trace_spans = TraceSpanStore(db)
+    mock_trace_spans = TraceSpanStore(mock_db)
 
     token_stats = None
     if token_stats_dir:
-        token_stats = TokenStatsCollector(data_dir=Path(token_stats_dir), db=db)
+        token_stats = TokenStatsCollector(data_dir=Path(token_stats_dir), db=db, trace_spans=trace_spans)
 
     real_services = Services(
         users=users,
@@ -308,7 +326,9 @@ def create_console_app_standalone(
         ),
         chat=None,  # type: ignore[arg-type]
         token_stats=token_stats,
+        trace_spans=trace_spans,
     )
+    trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
     mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
     mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
 
@@ -331,7 +351,8 @@ def create_console_app_standalone(
             db=mock_db,
         ),
         chat=mock_chat,
-        token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db),
+        token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db, trace_spans=mock_trace_spans),
+        trace_spans=mock_trace_spans,
     )
     _services = real_services
 
@@ -354,6 +375,7 @@ def create_console_app_standalone(
         user_routes,
         audit_routes,
         token_routes,
+        trace_routes,
         skills_routes,
     )
     from ava.console.routes import bg_task_routes
@@ -366,6 +388,7 @@ def create_console_app_standalone(
     app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(token_routes.router)
+    app.include_router(trace_routes.router)
     app.include_router(skills_routes.router)
     app.include_router(bg_task_routes.router)
 

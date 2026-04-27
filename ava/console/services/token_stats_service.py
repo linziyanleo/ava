@@ -38,6 +38,9 @@ class TokenUsageRecord:
     cost_usd: float = 0.0
     current_turn_tokens: int = 0
     tool_names: str = ""
+    trace_id: str = ""
+    span_id: str = ""
+    parent_span_id: str = ""
 
 class TokenStatsCollector:
     """Collects per-call LLM token usage.
@@ -51,10 +54,12 @@ class TokenStatsCollector:
         data_dir: Path,
         max_records: int = 10000,
         db: Any | None = None,
+        trace_spans: Any | None = None,
     ):
         self._data_dir = data_dir
         self._max_records = max_records
         self._db = db
+        self._trace_spans = trace_spans
 
         # Legacy JSON fallback fields
         self._records: list[TokenUsageRecord] = []
@@ -96,6 +101,9 @@ class TokenStatsCollector:
         cache_creation_tokens: int | None = None,
         current_turn_tokens: int = 0,
         tool_names: str = "",
+        trace_id: str = "",
+        span_id: str = "",
+        parent_span_id: str = "",
     ) -> int | None:
         """Append a single LLM call record. Returns the inserted row id (DB mode) or None."""
         ts = datetime.now().isoformat()
@@ -112,56 +120,134 @@ class TokenStatsCollector:
         if cache_creation_tokens is None:
             cache_creation_tokens = int(usage.get("cache_creation_input_tokens", 0) or 0)
 
-        if self._use_db:
-            self._db.execute(
-                """INSERT INTO token_usage
-                   (timestamp, model, provider, prompt_tokens, completion_tokens, total_tokens,
-                    session_key, conversation_id, turn_seq, iteration, user_message, output_content,
-                    system_prompt_preview, conversation_history, full_request_payload, finish_reason,
-                    model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
-                    tool_names)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    ts, model, provider, prompt_tokens, completion_tokens, total_tokens,
-                    session_key, conversation_id, turn_seq, iteration, user_message, output_content,
-                    system_prompt, conversation_history, full_request_payload, finish_reason,
-                    model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
-                    tool_names,
-                ),
+        auto_span_ctx = None
+        auto_span_token = None
+        try:
+            from ava.console.services.trace_context import (
+                current_trace_context,
+                start_span_sync,
             )
-            self._db.commit()
-            row = self._db.fetchone("SELECT last_insert_rowid() as id")
-            return row["id"] if row else None
 
-        rec = TokenUsageRecord(
-            timestamp=ts,
-            model=model,
-            provider=provider,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            session_key=session_key,
-            conversation_id=conversation_id,
-            turn_seq=turn_seq,
-            iteration=iteration,
-            user_message=user_message,
-            output_content=output_content,
-            system_prompt_preview=system_prompt,
-            conversation_history=conversation_history,
-            full_request_payload=full_request_payload,
-            finish_reason=finish_reason,
-            model_role=model_role,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            cost_usd=cost_usd,
-            tool_names=tool_names,
-        )
-        with self._lock:
-            self._records.append(rec)
-            self._dirty = True
-            if len(self._records) > self._max_records:
-                self._records = self._records[-self._max_records:]
-        self.flush()
+            parent_ctx = current_trace_context.get()
+            if parent_ctx is not None:
+                if not trace_id:
+                    trace_id = parent_ctx.trace_id
+                if not span_id and self._trace_spans is not None:
+                    auto_span_ctx, auto_span_token = start_span_sync(
+                        name=f"chat {model}",
+                        operation_name="chat",
+                        kind="client",
+                        attributes={
+                            "gen_ai.operation.name": "chat",
+                            "gen_ai.request.model": model,
+                            "gen_ai.provider.name": provider,
+                            "gen_ai.usage.input_tokens": prompt_tokens,
+                            "gen_ai.usage.output_tokens": completion_tokens,
+                            "gen_ai.response.finish_reasons": [finish_reason] if finish_reason else [],
+                            "ava.model_role": model_role,
+                        },
+                        store=self._trace_spans,
+                        parent=parent_ctx,
+                        session_key=session_key,
+                        conversation_id=conversation_id,
+                        turn_seq=turn_seq,
+                    )
+                    trace_id = auto_span_ctx.trace_id
+                    span_id = auto_span_ctx.span_id
+                    parent_span_id = auto_span_ctx.parent_span_id
+                elif not parent_span_id:
+                    parent_span_id = parent_ctx.span_id
+        except Exception as exc:
+            logger.warning("Failed to prepare token trace span: {}", exc)
+            auto_span_ctx = None
+            auto_span_token = None
+
+        record_id: int | None = None
+        record_error: BaseException | None = None
+        if self._use_db:
+            try:
+                self._db.execute(
+                    """INSERT INTO token_usage
+                       (timestamp, model, provider, prompt_tokens, completion_tokens, total_tokens,
+                        session_key, conversation_id, turn_seq, iteration, user_message, output_content,
+                        system_prompt_preview, conversation_history, full_request_payload, finish_reason,
+                        model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
+                        tool_names, trace_id, span_id, parent_span_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        ts, model, provider, prompt_tokens, completion_tokens, total_tokens,
+                        session_key, conversation_id, turn_seq, iteration, user_message, output_content,
+                        system_prompt, conversation_history, full_request_payload, finish_reason,
+                        model_role, cached_tokens, cache_creation_tokens, cost_usd, current_turn_tokens,
+                        tool_names, trace_id, span_id, parent_span_id,
+                    ),
+                )
+                self._db.commit()
+                row = self._db.fetchone("SELECT last_insert_rowid() as id")
+                record_id = row["id"] if row else None
+            except BaseException as exc:
+                record_error = exc
+
+        else:
+            rec = TokenUsageRecord(
+                timestamp=ts,
+                model=model,
+                provider=provider,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                session_key=session_key,
+                conversation_id=conversation_id,
+                turn_seq=turn_seq,
+                iteration=iteration,
+                user_message=user_message,
+                output_content=output_content,
+                system_prompt_preview=system_prompt,
+                conversation_history=conversation_history,
+                full_request_payload=full_request_payload,
+                finish_reason=finish_reason,
+                model_role=model_role,
+                cached_tokens=cached_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cost_usd=cost_usd,
+                current_turn_tokens=current_turn_tokens,
+                tool_names=tool_names,
+                trace_id=trace_id,
+                span_id=span_id,
+                parent_span_id=parent_span_id,
+            )
+            try:
+                with self._lock:
+                    self._records.append(rec)
+                    self._dirty = True
+                    if len(self._records) > self._max_records:
+                        self._records = self._records[-self._max_records:]
+                self.flush()
+            except BaseException as exc:
+                record_error = exc
+
+        if auto_span_ctx is not None:
+            try:
+                from ava.console.services.trace_context import end_span_sync
+
+                end_span_sync(
+                    auto_span_ctx,
+                    store=self._trace_spans,
+                    status="error" if record_error else "ok",
+                    status_message=str(record_error)[:500] if record_error else "",
+                    attributes_merge={
+                        "gen_ai.usage.input_tokens": prompt_tokens,
+                        "gen_ai.usage.output_tokens": completion_tokens,
+                        "gen_ai.response.finish_reasons": [finish_reason] if finish_reason else [],
+                    },
+                    ctx_token=auto_span_token,
+                )
+            except Exception as exc:
+                logger.warning("Failed to end token trace span: {}", exc)
+
+        if record_error is not None:
+            raise record_error
+        return record_id
 
     def update_record(self, record_id: int, **fields) -> None:
         """Update specific fields of an existing token_usage record by id (DB mode only)."""
@@ -173,6 +259,7 @@ class TokenStatsCollector:
             "conversation_history", "finish_reason", "model_role",
             "cached_tokens", "cache_creation_tokens", "cost_usd",
             "current_turn_tokens", "tool_names",
+            "trace_id", "span_id", "parent_span_id",
         }
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
@@ -244,6 +331,8 @@ class TokenStatsCollector:
         end_time: str | None = None,
         turn_seq: int | None = None,
         model_role: str | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
     ) -> tuple[str, list]:
         """Build SQL WHERE clause and params from optional filters."""
         clauses: list[str] = []
@@ -269,6 +358,12 @@ class TokenStatsCollector:
         if turn_seq is not None:
             clauses.append("turn_seq = ?")
             params.append(turn_seq)
+        if trace_id:
+            clauses.append("trace_id = ?")
+            params.append(trace_id)
+        if span_id:
+            clauses.append("span_id = ?")
+            params.append(span_id)
         if model_role:
             if model_role == "coder":
                 # coder: any background coding tool (claude_code + codex)
@@ -305,11 +400,24 @@ class TokenStatsCollector:
         end_time: str | None = None,
         turn_seq: int | None = None,
         model_role: str | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if self._use_db:
             self._ensure_turn_seq(session_key)
             self._ensure_iteration(session_key, conversation_id)
-            where, params = self._build_filter(session_key, conversation_id, model, provider, start_time, end_time, turn_seq, model_role)
+            where, params = self._build_filter(
+                session_key,
+                conversation_id,
+                model,
+                provider,
+                start_time,
+                end_time,
+                turn_seq,
+                model_role,
+                trace_id,
+                span_id,
+            )
             rows = self._db.fetchall(
                 f"SELECT * FROM token_usage{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
@@ -333,6 +441,10 @@ class TokenStatsCollector:
                 filtered = [r for r in filtered if getattr(r, "timestamp", "") <= end_time]
             if turn_seq is not None:
                 filtered = [r for r in filtered if getattr(r, "turn_seq", None) == turn_seq]
+            if trace_id:
+                filtered = [r for r in filtered if getattr(r, "trace_id", "") == trace_id]
+            if span_id:
+                filtered = [r for r in filtered if getattr(r, "span_id", "") == span_id]
             if model_role:
                 if model_role == "coder":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") in ("claude_code", "codex") or getattr(r, "provider", "") in ("claude-code-cli", "codex-cli")]
@@ -356,11 +468,24 @@ class TokenStatsCollector:
         end_time: str | None = None,
         turn_seq: int | None = None,
         model_role: str | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
     ) -> int:
         if self._use_db:
             self._ensure_turn_seq(session_key)
             self._ensure_iteration(session_key, conversation_id)
-            where, params = self._build_filter(session_key, conversation_id, model, provider, start_time, end_time, turn_seq, model_role)
+            where, params = self._build_filter(
+                session_key,
+                conversation_id,
+                model,
+                provider,
+                start_time,
+                end_time,
+                turn_seq,
+                model_role,
+                trace_id,
+                span_id,
+            )
             row = self._db.fetchone(f"SELECT COUNT(*) as cnt FROM token_usage{where}", tuple(params))
             return row["cnt"] if row else 0
 
@@ -381,6 +506,10 @@ class TokenStatsCollector:
                 filtered = [r for r in filtered if getattr(r, "timestamp", "") <= end_time]
             if turn_seq is not None:
                 filtered = [r for r in filtered if getattr(r, "turn_seq", None) == turn_seq]
+            if trace_id:
+                filtered = [r for r in filtered if getattr(r, "trace_id", "") == trace_id]
+            if span_id:
+                filtered = [r for r in filtered if getattr(r, "span_id", "") == span_id]
             if model_role:
                 if model_role == "coder":
                     filtered = [r for r in filtered if getattr(r, "model_role", "") in ("claude_code", "codex") or getattr(r, "provider", "") in ("claude-code-cli", "codex-cli")]
@@ -689,6 +818,11 @@ class TokenStatsCollector:
                     cached_tokens=item.get("cached_tokens", 0),
                     cache_creation_tokens=item.get("cache_creation_tokens", 0),
                     cost_usd=item.get("cost_usd", 0.0),
+                    current_turn_tokens=item.get("current_turn_tokens", 0),
+                    tool_names=item.get("tool_names", ""),
+                    trace_id=item.get("trace_id", ""),
+                    span_id=item.get("span_id", ""),
+                    parent_span_id=item.get("parent_span_id", ""),
                 ))
             if len(self._records) > self._max_records:
                 self._records = self._records[-self._max_records:]

@@ -453,11 +453,16 @@ _SAFE_TOKEN_USAGE_COLUMNS: list[tuple[str, str, str]] = [
     ("current_turn_tokens", "INTEGER", "0"),
     ("tool_names", "TEXT", "''"),
     ("conversation_id", "TEXT", "''"),
+    ("trace_id", "TEXT", "''"),
+    ("span_id", "TEXT", "''"),
+    ("parent_span_id", "TEXT", "''"),
 ]
 
 _SAFE_POST_MIGRATION_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_tu_conv_turn ON token_usage(session_key, conversation_id, turn_seq)",
     "CREATE INDEX IF NOT EXISTS idx_msg_session_conv_seq ON session_messages(session_id, conversation_id, seq)",
+    "CREATE INDEX IF NOT EXISTS idx_tu_trace ON token_usage(trace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tu_span ON token_usage(trace_id, span_id)",
 ]
 
 _SCHEMA_DDL = """
@@ -517,12 +522,40 @@ CREATE TABLE IF NOT EXISTS token_usage (
     cache_creation_tokens INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
     current_turn_tokens INTEGER DEFAULT 0,
-    tool_names TEXT DEFAULT ''
+    tool_names TEXT DEFAULT '',
+    trace_id TEXT DEFAULT '',
+    span_id TEXT DEFAULT '',
+    parent_span_id TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_tu_timestamp ON token_usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_tu_model ON token_usage(model);
 CREATE INDEX IF NOT EXISTS idx_tu_session ON token_usage(session_key);
 CREATE INDEX IF NOT EXISTS idx_tu_turn ON token_usage(session_key, turn_seq);
+
+CREATE TABLE IF NOT EXISTS trace_spans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT NOT NULL,
+    span_id TEXT NOT NULL,
+    parent_span_id TEXT DEFAULT '',
+    name TEXT NOT NULL,
+    operation_name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'internal',
+    status TEXT NOT NULL DEFAULT 'running',
+    status_message TEXT DEFAULT '',
+    start_ns INTEGER NOT NULL,
+    end_ns INTEGER,
+    duration_ms REAL,
+    attributes_json TEXT DEFAULT '{}',
+    events_json TEXT DEFAULT '[]',
+    session_key TEXT DEFAULT '',
+    conversation_id TEXT DEFAULT '',
+    turn_seq INTEGER,
+    UNIQUE(trace_id, span_id)
+);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace ON trace_spans(trace_id, start_ns);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_parent ON trace_spans(trace_id, parent_span_id);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_session ON trace_spans(session_key, conversation_id, turn_seq);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_open ON trace_spans(end_ns, start_ns);
 
 CREATE TABLE IF NOT EXISTS audit_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
