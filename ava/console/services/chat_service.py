@@ -207,7 +207,7 @@ class ChatService:
         return self._db.fetchall(
             """
             SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                   reasoning_content, timestamp, conversation_id
+                   reasoning_content, timestamp, conversation_id, trace_id
               FROM session_messages
              WHERE session_id = ? AND conversation_id = ?
              ORDER BY seq, id
@@ -597,7 +597,7 @@ class ChatService:
             msg_rows = self._db.fetchall(
                 """
                 SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                       reasoning_content, timestamp, conversation_id
+                       reasoning_content, timestamp, conversation_id, trace_id
                   FROM session_messages
                  WHERE session_id = ? AND conversation_id = ?
                  ORDER BY seq, id
@@ -626,7 +626,12 @@ class ChatService:
                     msg["reasoning_content"] = mr["reasoning_content"]
                 if mr["timestamp"]:
                     msg["timestamp"] = mr["timestamp"]
-                msg["metadata"] = {"conversation_id": mr["conversation_id"] or ""}
+                trace_id = mr["trace_id"] or ""
+                msg["trace_id"] = trace_id
+                msg["metadata"] = {
+                    "conversation_id": mr["conversation_id"] or "",
+                    "trace_id": trace_id,
+                }
                 messages.append(msg)
             return messages
 
@@ -760,13 +765,18 @@ class ChatService:
                     meta = {}
             active_conversation_id = self._resolve_active_conversation_id(row["id"], meta)
             msg_rows = self._db.fetchall(
-                """SELECT role, content, timestamp FROM session_messages
+                """SELECT role, content, timestamp, trace_id FROM session_messages
                    WHERE session_id = ? AND conversation_id = ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != ''
                    ORDER BY seq""",
                 (row["id"], active_conversation_id),
             )
             return [
-                {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"] or ""}
+                {
+                    "role": r["role"],
+                    "content": r["content"],
+                    "timestamp": r["timestamp"] or "",
+                    "trace_id": r["trace_id"] or "",
+                }
                 for r in msg_rows
             ]
 

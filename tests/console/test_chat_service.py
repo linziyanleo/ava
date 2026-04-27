@@ -63,14 +63,24 @@ def _insert_session(db: Database, *, key: str, metadata: dict):
     return row["id"]
 
 
-def _insert_message(db: Database, *, session_id: int, conversation_id: str, seq: int, role: str, content: str, timestamp: str):
+def _insert_message(
+    db: Database,
+    *,
+    session_id: int,
+    conversation_id: str,
+    seq: int,
+    role: str,
+    content: str,
+    timestamp: str,
+    trace_id: str = "",
+):
     db.execute(
         """
         INSERT INTO session_messages
-            (session_id, seq, conversation_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, seq, conversation_id, role, content, None, None, None, None, timestamp),
+        (session_id, seq, conversation_id, trace_id, role, content, None, None, None, None, timestamp),
     )
     db.commit()
 
@@ -171,13 +181,46 @@ def test_get_messages_defaults_to_active_conversation(tmp_path):
         role="user",
         content="current question",
         timestamp="2026-04-07T01:00:00+00:00",
+        trace_id="trace-current",
     )
 
     active_messages = service.get_messages("telegram:1")
     old_messages = service.get_messages("telegram:1", conversation_id="conv_old")
 
     assert [msg["content"] for msg in active_messages] == ["current question"]
+    assert active_messages[0]["trace_id"] == "trace-current"
+    assert active_messages[0]["metadata"]["trace_id"] == "trace-current"
     assert [msg["content"] for msg in old_messages] == ["old question"]
+
+
+def test_get_history_includes_trace_id(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="console:abc123",
+        metadata={"conversation_id": "conv_history"},
+    )
+    _insert_message(
+        db,
+        session_id=session_id,
+        conversation_id="conv_history",
+        seq=0,
+        role="user",
+        content="question",
+        timestamp="2026-04-07T01:00:00+00:00",
+        trace_id="trace-history",
+    )
+
+    messages = service.get_history("abc123")
+
+    assert messages == [
+        {
+            "role": "user",
+            "content": "question",
+            "timestamp": "2026-04-07T01:00:00+00:00",
+            "trace_id": "trace-history",
+        }
+    ]
 
 
 @pytest.mark.asyncio

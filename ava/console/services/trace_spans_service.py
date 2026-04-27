@@ -192,6 +192,7 @@ class TraceSpanStore:
         self,
         *,
         session_key: str | None = None,
+        conversation_id: str | None = None,
         turn_seq: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -200,6 +201,9 @@ class TraceSpanStore:
         if session_key:
             clauses.append("session_key = ?")
             params.append(session_key)
+        if conversation_id is not None:
+            clauses.append("conversation_id = ?")
+            params.append(conversation_id)
         if turn_seq is not None:
             clauses.append("turn_seq = ?")
             params.append(turn_seq)

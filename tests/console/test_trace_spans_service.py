@@ -59,3 +59,17 @@ def test_mark_interrupted_closes_stale_open_spans(tmp_path):
     row = db.fetchone("SELECT status, end_ns FROM trace_spans WHERE trace_id = ? AND span_id = ?", ("t2", "open"))
     assert row["status"] == "interrupted"
     assert row["end_ns"] is not None
+
+
+def test_list_traces_filters_by_conversation_id(tmp_path):
+    db = Database(tmp_path / "trace.sqlite3")
+    store = TraceSpanStore(db)
+
+    store.start_span("trace-a", "root", "", "invoke_agent", "invoke_agent", conversation_id="conv-a")
+    store.end_span("trace-a", "root")
+    store.start_span("trace-b", "root", "", "invoke_agent", "invoke_agent", conversation_id="conv-b")
+    store.end_span("trace-b", "root")
+
+    traces = store.list_traces(conversation_id="conv-a")
+
+    assert [item["trace_id"] for item in traces] == ["trace-a"]

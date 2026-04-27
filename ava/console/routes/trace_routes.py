@@ -22,6 +22,7 @@ def _get_trace_store(user: UserInfo):
 @router.get("/traces")
 async def list_traces(
     session_key: str | None = Query(None, description="Filter by session key"),
+    conversation_id: str | None = Query(None, description="Filter by conversation id"),
     turn_seq: int | None = Query(None, description="Filter by turn sequence"),
     limit: int = Query(50, ge=1, le=200),
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
@@ -29,6 +30,7 @@ async def list_traces(
     return {
         "traces": _get_trace_store(user).list_traces(
             session_key=session_key,
+            conversation_id=conversation_id,
             turn_seq=turn_seq,
             limit=limit,
         )

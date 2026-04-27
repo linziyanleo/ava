@@ -647,6 +647,8 @@ class TokenStatsCollector:
                 params.append(conversation_id)
             rows = self._db.fetchall(
                 f"""SELECT conversation_id, turn_seq,
+                          COALESCE(MIN(NULLIF(trace_id, '')), '') as trace_id,
+                          COALESCE(MIN(NULLIF(span_id, '')), '') as span_id,
                           SUM(prompt_tokens) as prompt_tokens,
                           SUM(completion_tokens) as completion_tokens,
                           SUM(total_tokens) as total_tokens,
@@ -663,7 +665,15 @@ class TokenStatsCollector:
         self._reload_if_changed()
         with self._lock:
             buckets: dict[tuple[str, int | None], dict[str, Any]] = defaultdict(
-                lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0, "models": set()}
+                lambda: {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "llm_calls": 0,
+                    "models": set(),
+                    "trace_ids": set(),
+                    "span_ids": set(),
+                }
             )
             for r in self._records:
                 if r.session_key != session_key:
@@ -677,11 +687,21 @@ class TokenStatsCollector:
                 d["total_tokens"] += r.total_tokens
                 d["llm_calls"] += 1
                 d["models"].add(r.model)
+                if r.trace_id:
+                    d["trace_ids"].add(r.trace_id)
+                if r.span_id:
+                    d["span_ids"].add(r.span_id)
             return [
                 {
                     "conversation_id": conv_id,
                     "turn_seq": turn_seq,
-                    **{kk: (", ".join(sorted(vv)) if kk == "models" else vv) for kk, vv in v.items()},
+                    "trace_id": sorted(v["trace_ids"])[0] if v["trace_ids"] else "",
+                    "span_id": sorted(v["span_ids"])[0] if v["span_ids"] else "",
+                    **{
+                        kk: (", ".join(sorted(vv)) if kk == "models" else vv)
+                        for kk, vv in v.items()
+                        if kk not in {"trace_ids", "span_ids"}
+                    },
                 }
                 for (conv_id, turn_seq), v in sorted(buckets.items(), key=lambda x: (x[0][0], x[0][1] is None, x[0][1]))
             ]
@@ -698,6 +718,7 @@ class TokenStatsCollector:
                 params.append(conversation_id)
             rows = self._db.fetchall(
                 f"""SELECT conversation_id, turn_seq, iteration,
+                          trace_id, span_id, parent_span_id,
                           prompt_tokens, completion_tokens, total_tokens,
                           cached_tokens, cache_creation_tokens,
                           model, model_role, tool_names, finish_reason
@@ -720,6 +741,9 @@ class TokenStatsCollector:
                     "conversation_id": getattr(r, "conversation_id", ""),
                     "turn_seq": r.turn_seq,
                     "iteration": r.iteration,
+                    "trace_id": r.trace_id,
+                    "span_id": r.span_id,
+                    "parent_span_id": r.parent_span_id,
                     "prompt_tokens": r.prompt_tokens,
                     "completion_tokens": r.completion_tokens,
                     "total_tokens": r.total_tokens,

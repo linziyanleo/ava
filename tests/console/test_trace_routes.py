@@ -42,8 +42,25 @@ def test_mock_tester_can_read_mock_trace_routes(tmp_path, monkeypatch):
     services = get_services()
     assert services.mock is not None
     assert services.mock.trace_spans is not None
-    services.mock.trace_spans.start_span("trace-route", "root", "", "invoke_agent", "invoke_agent")
+    services.mock.trace_spans.start_span(
+        "trace-route",
+        "root",
+        "",
+        "invoke_agent",
+        "invoke_agent",
+        session_key="console:mock-session-1",
+        conversation_id="conv-route",
+    )
     services.mock.trace_spans.end_span("trace-route", "root")
+    services.mock.trace_spans.start_span(
+        "trace-other",
+        "root",
+        "",
+        "invoke_agent",
+        "invoke_agent",
+        conversation_id="conv-other",
+    )
+    services.mock.trace_spans.end_span("trace-other", "root")
 
     client = TestClient(app)
     password = (nanobot_dir / "console" / "local-secrets" / MOCK_TESTER_PASSWORD_FILE).read_text("utf-8").strip()
@@ -57,3 +74,7 @@ def test_mock_tester_can_read_mock_trace_routes(tmp_path, monkeypatch):
     traces = client.get("/api/stats/traces")
     assert traces.status_code == 200
     assert any(item["trace_id"] == "trace-route" for item in traces.json()["traces"])
+
+    filtered = client.get("/api/stats/traces?conversation_id=conv-route")
+    assert filtered.status_code == 200
+    assert [item["trace_id"] for item in filtered.json()["traces"]] == ["trace-route"]
