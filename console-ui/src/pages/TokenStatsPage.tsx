@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useResponsiveMode } from '../hooks/useResponsiveMode';
 import ConversationHistoryView from '../components/ConversationHistoryView';
+import TraceTimelineDrawer from '../components/TraceTimelineDrawer';
 import type { ConversationMeta, TurnGroup as ChatTurnGroup } from './ChatPage/types';
 import { getContentText, groupTurns } from './ChatPage/utils';
 import {
@@ -55,6 +56,9 @@ interface TokenRecord {
   cache_creation_tokens: number;
   cost_usd: number;
   tool_names: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string;
 }
 
 interface ModelStats {
@@ -411,6 +415,8 @@ function buildFilterStr(
   cStart: string,
   cEnd: string,
   modelRole: ModelRoleFilter,
+  traceId: string,
+  spanId: string,
 ): string {
   const params = new URLSearchParams();
   if (sk) params.set('session_key', sk);
@@ -418,6 +424,8 @@ function buildFilterStr(
   if (model) params.set('model', model);
   if (provider) params.set('provider', provider);
   if (turnSeq) params.set('turn_seq', turnSeq);
+  if (traceId) params.set('trace_id', traceId);
+  if (spanId) params.set('span_id', spanId);
   if (modelRole && modelRole !== 'all') params.set('model_role', modelRole);
   if (preset === 'custom') {
     if (cStart) params.set('start_time', new Date(cStart).toISOString());
@@ -459,6 +467,7 @@ export default function TokenStatsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(searchParams.get('trace_id'));
   const [loading, setLoading] = useState(false);
   useAuth();
   const pageSize = 50;
@@ -468,6 +477,8 @@ export default function TokenStatsPage() {
   const [filterModel, setFilterModel] = useState(searchParams.get('model') || '');
   const [filterProvider, setFilterProvider] = useState(searchParams.get('provider') || '');
   const [filterTurnSeq, setFilterTurnSeq] = useState(searchParams.get('turn_seq') || '');
+  const [filterTraceId, setFilterTraceId] = useState(searchParams.get('trace_id') || '');
+  const [filterSpanId, setFilterSpanId] = useState(searchParams.get('span_id') || '');
   const [filterModelRole, setFilterModelRole] = useState<ModelRoleFilter>('all');
   const [timePreset, setTimePreset] = useState<TimePreset>('all');
   const [customStart, setCustomStart] = useState('');
@@ -480,6 +491,8 @@ export default function TokenStatsPage() {
     filterModel,
     filterProvider,
     filterTurnSeq,
+    filterTraceId,
+    filterSpanId,
     filterModelRole,
     timePreset,
     customStart,
@@ -495,6 +508,8 @@ export default function TokenStatsPage() {
       filterModel,
       filterProvider,
       filterTurnSeq,
+      filterTraceId,
+      filterSpanId,
       filterModelRole,
       timePreset,
       customStart,
@@ -506,6 +521,8 @@ export default function TokenStatsPage() {
     filterModel,
     filterProvider,
     filterTurnSeq,
+    filterTraceId,
+    filterSpanId,
     filterModelRole,
     timePreset,
     customStart,
@@ -535,6 +552,8 @@ export default function TokenStatsPage() {
         f.customStart,
         f.customEnd,
         f.filterModelRole,
+        f.filterTraceId,
+        f.filterSpanId,
       );
       const sep = filterStr ? '&' : '';
       const r = await api<RecordsResponse>(
@@ -694,12 +713,16 @@ export default function TokenStatsPage() {
     const m = searchParams.get('model') || '';
     const p = searchParams.get('provider') || '';
     const ts = searchParams.get('turn_seq') || '';
+    const tr = searchParams.get('trace_id') || '';
+    const sp = searchParams.get('span_id') || '';
     queueMicrotask(() => {
       setFilterSessionKey(sk);
       setFilterConversationId(cv);
       setFilterModel(m);
       setFilterProvider(p);
       setFilterTurnSeq(ts);
+      setFilterTraceId(tr);
+      setFilterSpanId(sp);
       setView(sk ? 'turns' : 'records');
       filtersRef.current = {
         ...filtersRef.current,
@@ -708,6 +731,8 @@ export default function TokenStatsPage() {
         filterModel: m,
         filterProvider: p,
         filterTurnSeq: ts,
+        filterTraceId: tr,
+        filterSpanId: sp,
       };
       void loadRecords(0);
     });
@@ -753,6 +778,8 @@ export default function TokenStatsPage() {
     if (filterModel) newParams.model = filterModel;
     if (filterProvider) newParams.provider = filterProvider;
     if (filterTurnSeq) newParams.turn_seq = filterTurnSeq;
+    if (filterTraceId) newParams.trace_id = filterTraceId;
+    if (filterSpanId) newParams.span_id = filterSpanId;
     setView(filterSessionKey ? 'turns' : 'records');
     setSearchParams(newParams, { replace: true });
     loadRecords(0);
@@ -764,6 +791,8 @@ export default function TokenStatsPage() {
     setFilterModel('');
     setFilterProvider('');
     setFilterTurnSeq('');
+    setFilterTraceId('');
+    setFilterSpanId('');
     setFilterModelRole('all');
     setTimePreset('all');
     setCustomStart('');
@@ -775,6 +804,8 @@ export default function TokenStatsPage() {
       filterModel: '',
       filterProvider: '',
       filterTurnSeq: '',
+      filterTraceId: '',
+      filterSpanId: '',
       filterModelRole: 'all',
       timePreset: 'all',
       customStart: '',
@@ -799,6 +830,8 @@ export default function TokenStatsPage() {
     filterModel ||
     filterProvider ||
     filterTurnSeq ||
+    filterTraceId ||
+    filterSpanId ||
     filterModelRole !== 'all' ||
     timePreset !== 'all';
 
@@ -1239,6 +1272,26 @@ export default function TokenStatsPage() {
                   className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
                 />
               </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-[10px] text-[var(--text-secondary)] mb-1 block">Trace ID</label>
+                <input
+                  type="text"
+                  value={filterTraceId}
+                  onChange={e => setFilterTraceId(e.target.value)}
+                  placeholder="32 hex chars"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
+                />
+              </div>
+              <div className="flex-1 min-w-[140px]">
+                <label className="text-[10px] text-[var(--text-secondary)] mb-1 block">Span ID</label>
+                <input
+                  type="text"
+                  value={filterSpanId}
+                  onChange={e => setFilterSpanId(e.target.value)}
+                  placeholder="16 hex chars"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
+                />
+              </div>
               {timePreset === 'custom' && (
                 <>
                   <div>
@@ -1319,6 +1372,7 @@ export default function TokenStatsPage() {
                       record={r}
                       expanded={expandedRow === i}
                       onToggle={() => setExpandedRow(expandedRow === i ? null : i)}
+                      onViewTrace={traceId => setSelectedTraceId(traceId)}
                     />
                   ))
                 )}
@@ -1514,6 +1568,9 @@ export default function TokenStatsPage() {
           )}
         </div>
       )}
+      {selectedTraceId && (
+        <TraceTimelineDrawer traceId={selectedTraceId} onClose={() => setSelectedTraceId(null)} />
+      )}
     </div>
   );
 }
@@ -1680,10 +1737,12 @@ function RecordRow({
   record: r,
   expanded,
   onToggle,
+  onViewTrace,
 }: {
   record: TokenRecord;
   expanded: boolean;
   onToggle: () => void;
+  onViewTrace: (traceId: string) => void;
 }) {
   const callLabel = getCallLabel(r.tool_names, r.finish_reason);
   const callToneClass = getCallLabelTone(r.tool_names, r.finish_reason);
@@ -1749,7 +1808,29 @@ function RecordRow({
         <tr className="bg-[var(--bg-tertiary)]/20 border-b border-[var(--border)]/50">
           <td colSpan={11} className="px-4 py-3 overflow-hidden">
             <div className="space-y-2 text-xs min-w-0">
-              {r.conversation_id && <TraceIdField traceId={r.conversation_id} />}
+              {r.conversation_id && <TraceIdField traceId={r.conversation_id} label="Conversation ID" />}
+              {r.trace_id && (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-1">
+                      <TraceIdField traceId={r.trace_id} label="Trace ID" />
+                      <TraceIdField traceId={r.span_id} label="Span ID" />
+                      <TraceIdField traceId={r.parent_span_id} label="Parent Span ID" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onViewTrace(r.trace_id);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      View Trace
+                    </button>
+                  </div>
+                </div>
+              )}
               <div>
                 <span className="text-[var(--text-secondary)]">Session:</span>{' '}
                 <span className="font-mono">{r.session_key || '—'}</span>
