@@ -134,6 +134,23 @@ round_status:
 3. **立即进入 Regression Round**——不要重复提交 coding，不要重新规划
 4. 如果结果是 ERROR，按失败升级规则处理
 
+### Root Cause Diagnosis Round
+
+当同一 `check_id + failure_taxonomy` 连续两轮失败时，不立刻 `escalate`。若该 failure key 尚未执行过根因分析，先提交只读诊断任务：
+
+- 使用 `claude_code(mode="readonly")`
+- 输入最近两轮 `regression_report`、失败 check、page_agent JSON/screenshot 证据、changed_files、目标页面 reference、当前 coding_summary
+- 禁止修改文件
+- 输出 `root_cause_report`
+
+收到诊断结果后：
+1. 将 `root_cause_report` 并入下一轮 coder prompt
+2. 对该 failure key 重置 `consecutive_failures=0`
+3. 记录 `diagnostic_attempted=true`
+4. 继续 Coding Round
+
+如果诊断后同一 failure key 再连续两轮失败，返回 `verdict=escalate`。
+
 ### 1. Round 0：生成测试任务
 
 按 `references/testing-task.md` 规则：
@@ -203,7 +220,7 @@ round_status:
 
 遇到以下情况直接 `escalate`：
 
-- 同一 `check_id + failure_taxonomy` 连续两轮失败
+- 诊断后同一 `check_id + failure_taxonomy` 再连续两轮失败
 - 登录态 / 权限要求无法自动满足
 - 问题属于 tooling/runtime，而不是当前页面实现
 

@@ -8,7 +8,7 @@ import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
@@ -103,6 +103,13 @@ class ClaudeCodeTool(Tool):
                     "type": "string",
                     "description": "Resume a previous Claude Code session by its session ID",
                 },
+                "auto_continue": {
+                    "type": "boolean",
+                    "description": (
+                        "Override whether task completion triggers continuation. "
+                        "Omit to use mode default: standard=true, readonly=false."
+                    ),
+                },
             },
             "required": ["prompt"],
         }
@@ -113,6 +120,7 @@ class ClaudeCodeTool(Tool):
         project_path: str | None = None,
         mode: str = "standard",
         session_id: str | None = None,
+        auto_continue: Optional[bool] = None,
         **kwargs: Any,
     ) -> str:
         project = self._resolve_project(project_path)
@@ -134,6 +142,8 @@ class ClaudeCodeTool(Tool):
             ws_id = f"{self._session_key}:{target.workspace_key}"
             workspace = make_inplace_workspace(target, workspace_id=ws_id)
 
+        should_auto_continue = mode == "standard" if auto_continue is None else auto_continue
+
         result = self._task_store.submit_task(
             executor=self._execute_background,
             origin_session_key=self._session_key,
@@ -141,7 +151,7 @@ class ClaudeCodeTool(Tool):
             project_path=project,
             timeout=self._timeout,
             task_type="claude_code",
-            auto_continue=mode == "standard",
+            auto_continue=should_auto_continue,
             target=target,
             workspace=workspace,
             mode=mode,
