@@ -66,6 +66,7 @@ export interface MCPServerConfig {
   url: string
   headers: Record<string, string>
   toolTimeout: number
+  enabledTools?: string[]
 }
 
 export interface WebSearchConfig {

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   Eye, EyeOff, Copy, Check, Plus, Trash2, Info,
   ChevronDown, ChevronRight,
@@ -138,6 +138,79 @@ export function ArrayField({
             onChange={(e) => updateRow(idx, e.target.value)}
             readOnly={readOnly}
             className="flex-1 px-3 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-sm font-mono focus:outline-none focus:border-[var(--accent)] transition-colors"
+          />
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => removeRow(idx)}
+              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+              title="删除"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={addRow}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors"
+        >
+          <Plus className="w-3 h-3" /> 添加
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── KeyValueField ──────────────────────────────────────────────────────────
+
+export function KeyValueField({
+  value,
+  onChange,
+  readOnly,
+}: {
+  value: Record<string, string>
+  onChange: (v: Record<string, string>) => void
+  readOnly: boolean
+}) {
+  const [rows, setRows] = useState<Array<[string, string]>>(() => Object.entries(value || {}))
+  const valueSignature = JSON.stringify(value || {})
+
+  useEffect(() => {
+    setRows(Object.entries(value || {}))
+  }, [valueSignature])
+
+  const commitRows = (nextRows: Array<[string, string]>) => {
+    setRows(nextRows)
+    onChange(Object.fromEntries(nextRows.filter(([key]) => key.trim())))
+  }
+  const addRow = () => commitRows([...rows, ['', '']])
+  const removeRow = (idx: number) => commitRows(rows.filter((_, i) => i !== idx))
+  const updateRow = (idx: number, key: string, val: string) => {
+    commitRows(rows.map((item, i) => (i === idx ? [key, val] : item)))
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map(([key, val], idx) => (
+        <div key={`${key}:${idx}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-1.5">
+          <input
+            type="text"
+            value={key}
+            placeholder="key"
+            onChange={(e) => updateRow(idx, e.target.value, val)}
+            readOnly={readOnly}
+            className="px-3 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-sm font-mono focus:outline-none focus:border-[var(--accent)] transition-colors"
+          />
+          <input
+            type="text"
+            value={val}
+            placeholder="value"
+            onChange={(e) => updateRow(idx, key, e.target.value)}
+            readOnly={readOnly}
+            className="px-3 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-sm font-mono focus:outline-none focus:border-[var(--accent)] transition-colors"
           />
           {!readOnly && (
             <button

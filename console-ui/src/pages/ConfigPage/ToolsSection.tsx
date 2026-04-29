@@ -1,5 +1,5 @@
 import type { ToolsConfig } from './types'
-import { Section, FieldLabel, ArrayField, renderField } from './FormWidgets'
+import { Section, FieldLabel, ArrayField, KeyValueField, renderField } from './FormWidgets'
 
 export function ToolsSection({
   config,
@@ -128,6 +128,45 @@ export function ToolsSection({
                         mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, toolTimeout: v as number } },
                       }),
                     )}
+                    <div>
+                      <FieldLabel label="enabledTools" />
+                      <ArrayField
+                        value={serverConfig.enabledTools ?? []}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, enabledTools: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label="env" />
+                      <KeyValueField
+                        value={serverConfig.env ?? {}}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, env: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label="headers" />
+                      <KeyValueField
+                        value={serverConfig.headers ?? {}}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, headers: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
                   </div>
                 </Section>
               ))}
