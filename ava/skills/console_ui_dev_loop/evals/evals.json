@@ -7,7 +7,9 @@
       "prompt": "修复 console-ui 的配置页标题缺失问题，完成后自己回归，失败则继续修复。",
       "must": [
         "先生成 testing_task 和 master_checklist",
-        "使用 claude_code(sync) 作为默认 coding 主路径",
+        "使用 claude_code(mode=\"standard\") 作为默认 coding 主路径",
+        "连续两轮失败时先触发根因分析，不直接 escalate",
+        "coder prompt 包含 debugging_guidance 字段",
         "回归时优先用 page_agent 的结构化结果",
         "最终 pass 前执行 full_checklist"
       ]

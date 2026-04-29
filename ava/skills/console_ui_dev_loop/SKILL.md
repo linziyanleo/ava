@@ -32,6 +32,7 @@ metadata: {"nanobot":{"emoji":"🔁"}}
 
 6. `references/loop-contract.md` — round lifecycle、stop policy、coder feedback
 7. `references/testing-task.md` — Round 0 意图理解、checklist 生命周期
+8. `references/coder-debugging-guide.md` — coder debugging order
 
 > 关键原则：只加载当前测试涉及的页面 reference，不要一次全部读入。
 
@@ -146,7 +147,14 @@ round_status:
 
 使用 `claude_code(mode="standard")` 或 `codex(mode="standard")` 异步提交实现或修复。
 
-给 coder 的输入至少包含：`goal`、`changed_files`、`failed_checks`、`failure_taxonomy`、只允许修改的目录范围。
+给 coder 的输入至少包含：
+
+- `goal`
+- `changed_files`
+- `failed_checks`
+- `failure_taxonomy`
+- `debugging_guidance`: 按 references/coder-debugging-guide.md 执行 route → component → props/state → style → verification
+- 只允许修改的目录范围
 
 提交后按上述 Turn A 行为输出阶段小结，等待 continuation。
 
