@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import {
   Wrench, Puzzle, Plus, RefreshCw, Save, GitBranch, FolderOpen, Trash2, X,
-  Package, Pencil, Upload, Bot, ExternalLink,
+  Package, Pencil, Upload, Bot, ExternalLink, Server, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../stores/auth'
@@ -32,6 +32,46 @@ interface FileData {
   path: string
   content: string
   mtime: number
+}
+
+interface MCPConfigSummary {
+  type?: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  headers?: Record<string, string>
+  toolTimeout?: number
+  enabledTools?: string[]
+}
+
+interface MCPServerStatus {
+  name: string
+  status: 'connected' | 'connecting' | 'configured' | 'failed' | 'unloaded' | string
+  config_redacted: MCPConfigSummary
+  redacted: string[]
+  registered_tools: string[]
+  last_error: string | null
+  last_connected_at: string | null
+}
+
+interface MCPStatusResponse {
+  servers: MCPServerStatus[]
+  runtime: {
+    loaded: boolean
+    mcp_connected: boolean
+    mcp_connecting: boolean
+    connected_servers: string[]
+  }
+}
+
+interface MCPProbeResult {
+  ok: boolean
+  name: string
+  status: string
+  raw_tools: string[]
+  wrapped_tools: string[]
+  error: string | null
 }
 
 // ── Toggle Switch ─────────────────────────────────────────────────────────
@@ -182,6 +222,217 @@ function ToolsSection() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── MCP Section ────────────────────────────────────────────────────────────
+
+function statusClass(status: string): string {
+  if (status === 'connected') return 'bg-[var(--success)]/10 text-[var(--success)]'
+  if (status === 'connecting' || status === 'configured') return 'bg-[var(--warning)]/10 text-[var(--warning)]'
+  return 'bg-[var(--danger)]/10 text-[var(--danger)]'
+}
+
+function recordKeys(record?: Record<string, string>): string[] {
+  return Object.keys(record || {})
+}
+
+function MCPSection() {
+  const [status, setStatus] = useState<MCPStatusResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
+  const [probeResults, setProbeResults] = useState<Record<string, MCPProbeResult>>({})
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const { canEdit, isAdmin, isMockTester } = useAuth()
+  const canProbe = canEdit() && !isMockTester()
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true)
+    setMessage(null)
+    try {
+      const res = await api<MCPStatusResponse>('/skills/mcp/status')
+      setStatus(res)
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '加载失败' })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadStatus() }, [loadStatus])
+
+  const testConnection = async (name: string) => {
+    setTesting(name)
+    setMessage(null)
+    try {
+      const result = await api<MCPProbeResult>('/skills/mcp/test', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      })
+      setProbeResults(prev => ({ ...prev, [name]: result }))
+      setMessage({
+        type: result.ok ? 'success' : 'error',
+        text: result.ok ? `${name} probe connected` : result.error || `${name} probe failed`,
+      })
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '测试失败' })
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const reconnectAll = async () => {
+    setReconnecting(true)
+    setMessage(null)
+    try {
+      await api('/skills/mcp/reconnect', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setMessage({ type: 'success', text: 'MCP 已触发全量重连' })
+      loadStatus()
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '重连不可用，请重启 gateway' })
+    } finally {
+      setReconnecting(false)
+    }
+  }
+
+  const servers = status?.servers ?? []
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Server className="w-5 h-5 text-cyan-400" />
+          MCP servers
+          <span className="text-sm text-[var(--text-secondary)] font-normal">({servers.length} 个)</span>
+        </h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadStatus}
+            disabled={loading}
+            title="刷新状态"
+            className="p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40"
+          >
+            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+          </button>
+          {isAdmin() && (
+            <button
+              onClick={reconnectAll}
+              disabled={reconnecting}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--bg-tertiary)]/80 text-sm font-medium disabled:opacity-40"
+            >
+              <RefreshCw className={cn('w-4 h-4', reconnecting && 'animate-spin')} /> 全量重连
+            </button>
+          )}
+        </div>
+      </div>
+
+      {message && (
+        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+          {message.text}
+        </div>
+      )}
+
+      {servers.length === 0 ? (
+        <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 text-sm text-[var(--text-secondary)]">
+          未配置 MCP server
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {servers.map(server => {
+            const cfg = server.config_redacted || {}
+            const envKeys = recordKeys(cfg.env)
+            const headerKeys = recordKeys(cfg.headers)
+            const probe = probeResults[server.name]
+
+            return (
+              <div key={server.name} className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-medium truncate">{server.name}</span>
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded', statusClass(server.status))}>
+                        {server.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      {server.registered_tools.length} registered / {cfg.enabledTools?.length ?? 0} enabled
+                    </p>
+                  </div>
+                  {canProbe && (
+                    <button
+                      onClick={() => testConnection(server.name)}
+                      disabled={testing === server.name}
+                      className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15 text-xs font-medium disabled:opacity-40"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" /> {testing === server.name ? '测试中...' : 'Test'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-2 text-xs">
+                  {cfg.command && (
+                    <div>
+                      <span className="text-[var(--text-secondary)]">command</span>
+                      <p className="font-mono break-all mt-0.5">{[cfg.command, ...(cfg.args || [])].join(' ')}</p>
+                    </div>
+                  )}
+                  {cfg.url && (
+                    <div>
+                      <span className="text-[var(--text-secondary)]">url</span>
+                      <p className="font-mono break-all mt-0.5">{cfg.url}</p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2 text-[var(--text-secondary)]">
+                    <span>timeout={cfg.toolTimeout ?? 30}s</span>
+                    {server.redacted.length > 0 && <span>redacted={server.redacted.join(',')}</span>}
+                    {status?.runtime.loaded ? null : <span>runtime=unloaded</span>}
+                  </div>
+                  {(cfg.enabledTools || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {cfg.enabledTools!.map(tool => (
+                        <span key={tool} className="px-1.5 py-0.5 rounded bg-[var(--bg-primary)] border border-[var(--border)] font-mono">
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(envKeys.length > 0 || headerKeys.length > 0) && (
+                    <div className="flex flex-wrap gap-1.5 text-[var(--text-secondary)]">
+                      {envKeys.map(key => <span key={`env:${key}`} className="px-1.5 py-0.5 rounded bg-[var(--bg-primary)] border border-[var(--border)]">env.{key}=****</span>)}
+                      {headerKeys.map(key => <span key={`header:${key}`} className="px-1.5 py-0.5 rounded bg-[var(--bg-primary)] border border-[var(--border)]">headers.{key}=****</span>)}
+                    </div>
+                  )}
+                  {server.registered_tools.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {server.registered_tools.map(tool => (
+                        <span key={tool} className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 font-mono">
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {server.last_error && (
+                    <div className="flex items-start gap-1.5 text-[var(--danger)]">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span>{server.last_error}</span>
+                    </div>
+                  )}
+                  {probe && (
+                    <div className={cn('rounded-lg px-2.5 py-2', probe.ok ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]')}>
+                      {probe.ok ? `probe tools: ${probe.wrapped_tools.join(', ') || '(none)'}` : probe.error}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -708,6 +959,7 @@ export default function SkillsPage() {
 
       <div className="space-y-8">
         <ToolsSection />
+        <MCPSection />
         <SkillsSection />
       </div>
     </div>
