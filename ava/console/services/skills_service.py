@@ -10,6 +10,9 @@ Enabled/disabled state is persisted in SQLite ``skill_config`` table.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import re
 import shutil
 from datetime import datetime, timezone
@@ -19,6 +22,211 @@ from typing import Any
 from loguru import logger
 
 from ava.storage.database import Database
+
+
+class MCPStatusInspector:
+    """Read-only MCP status and short-lived probe helper."""
+
+    def __init__(self, nanobot_dir: Path, agent_loop: Any | None = None):
+        self.nanobot_dir = nanobot_dir
+        self.agent_loop = agent_loop
+
+    def list_mcp_servers(self) -> dict[str, Any]:
+        servers = self._read_configured_servers()
+        runtime = self._runtime_summary()
+        return {
+            "servers": [
+                self._server_status(name, cfg)
+                for name, cfg in sorted(servers.items())
+            ],
+            "runtime": runtime,
+        }
+
+    async def probe_mcp_server(self, name: str, timeout: float = 3.0) -> dict[str, Any]:
+        servers = self._read_configured_servers()
+        if name not in servers:
+            raise ValueError(f"MCP server '{name}' is not configured")
+
+        cfg = self._normalize_server_config(servers[name])
+        try:
+            raw_tools = await asyncio.wait_for(
+                self._probe_server(name, cfg),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "name": name,
+                "status": "timeout",
+                "raw_tools": [],
+                "wrapped_tools": [],
+                "error": f"Probe timed out after {timeout:g}s",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "name": name,
+                "status": "failed",
+                "raw_tools": [],
+                "wrapped_tools": [],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        return {
+            "ok": True,
+            "name": name,
+            "status": "connected",
+            "raw_tools": raw_tools,
+            "wrapped_tools": [f"mcp_{name}_{tool}" for tool in raw_tools],
+            "error": None,
+        }
+
+    def reconnect_all(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": "unsupported",
+            "scope": "all",
+            "detail": (
+                "Runtime MCP hot reconnect is not supported safely yet; "
+                "restart the gateway after MCP config edits."
+            ),
+        }
+
+    def _config_path(self) -> Path:
+        return self.nanobot_dir / "config.json"
+
+    def _read_configured_servers(self) -> dict[str, Any]:
+        path = self._config_path()
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read MCP config from {}: {}", path, exc)
+            return {}
+        tools = payload.get("tools")
+        if not isinstance(tools, dict):
+            return {}
+        servers = tools.get("mcpServers")
+        if servers is None:
+            servers = tools.get("mcp_servers")
+        return servers if isinstance(servers, dict) else {}
+
+    @staticmethod
+    def _normalize_server_config(cfg: Any) -> dict[str, Any]:
+        cfg = cfg if isinstance(cfg, dict) else {}
+        return {
+            "type": cfg.get("type") or "",
+            "command": cfg.get("command") or "",
+            "args": list(cfg.get("args") or []),
+            "env": dict(cfg.get("env") or {}),
+            "url": cfg.get("url") or "",
+            "headers": dict(cfg.get("headers") or {}),
+            "toolTimeout": cfg.get("toolTimeout", cfg.get("tool_timeout", 30)),
+            "enabledTools": list(cfg.get("enabledTools", cfg.get("enabled_tools", [])) or []),
+        }
+
+    @staticmethod
+    def _redact_mcp_config(cfg: dict[str, Any]) -> dict[str, Any]:
+        redacted = dict(cfg)
+        redacted["env"] = {key: "****" for key in sorted((cfg.get("env") or {}).keys())}
+        redacted["headers"] = {key: "****" for key in sorted((cfg.get("headers") or {}).keys())}
+        return redacted
+
+    def _server_status(self, name: str, raw_cfg: Any) -> dict[str, Any]:
+        cfg = self._normalize_server_config(raw_cfg)
+        registered_tools = self._registered_tools_for(name)
+        connected_servers = set(self._connected_server_names())
+        agent_loaded = self.agent_loop is not None
+        mcp_connected = bool(getattr(self.agent_loop, "_mcp_connected", False)) if agent_loaded else False
+        mcp_connecting = bool(getattr(self.agent_loop, "_mcp_connecting", False)) if agent_loaded else False
+
+        if not agent_loaded:
+            status = "unloaded"
+        elif mcp_connecting:
+            status = "connecting"
+        elif name in connected_servers or registered_tools:
+            status = "connected"
+        elif mcp_connected:
+            status = "failed"
+        else:
+            status = "configured"
+
+        return {
+            "name": name,
+            "status": status,
+            "config_redacted": self._redact_mcp_config(cfg),
+            "redacted": ["env", "headers"],
+            "registered_tools": registered_tools,
+            "last_error": None,
+            "last_connected_at": None,
+        }
+
+    def _runtime_summary(self) -> dict[str, Any]:
+        if self.agent_loop is None:
+            return {
+                "loaded": False,
+                "mcp_connected": False,
+                "mcp_connecting": False,
+                "connected_servers": [],
+            }
+        return {
+            "loaded": True,
+            "mcp_connected": bool(getattr(self.agent_loop, "_mcp_connected", False)),
+            "mcp_connecting": bool(getattr(self.agent_loop, "_mcp_connecting", False)),
+            "connected_servers": self._connected_server_names(),
+        }
+
+    def _connected_server_names(self) -> list[str]:
+        stacks = getattr(self.agent_loop, "_mcp_stacks", None)
+        if isinstance(stacks, dict):
+            return sorted(str(name) for name in stacks.keys())
+        return []
+
+    def _registered_tools_for(self, server_name: str) -> list[str]:
+        prefix = f"mcp_{server_name}_"
+        tools = getattr(self.agent_loop, "tools", None)
+        names: list[str] = []
+        if tools and hasattr(tools, "get_definitions"):
+            for schema in tools.get_definitions():
+                name = self._schema_name(schema)
+                if name.startswith(prefix):
+                    names.append(name)
+        if not names and tools and hasattr(tools, "tool_names"):
+            names = [name for name in tools.tool_names if str(name).startswith(prefix)]
+        return sorted(set(names))
+
+    @staticmethod
+    def _schema_name(schema: dict[str, Any]) -> str:
+        fn = schema.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            return fn["name"]
+        name = schema.get("name")
+        return name if isinstance(name, str) else ""
+
+    async def _probe_server(self, name: str, cfg: dict[str, Any]) -> list[str]:
+        transport_type = cfg.get("type") or ("stdio" if cfg.get("command") else "")
+        if transport_type != "stdio":
+            raise RuntimeError(f"MCP probe only supports stdio servers today, got {transport_type or 'unknown'}")
+        return await self._probe_stdio_server(name, cfg)
+
+    async def _probe_stdio_server(self, name: str, cfg: dict[str, Any]) -> list[str]:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        command = str(cfg.get("command") or "")
+        if not command:
+            raise RuntimeError("stdio MCP server has no command")
+        params = StdioServerParameters(
+            command=command,
+            args=[str(arg) for arg in cfg.get("args") or []],
+            env={**os.environ, **(cfg.get("env") or {})},
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+        return [str(tool.name) for tool in tools.tools]
 
 
 class SkillsService:
@@ -57,6 +265,15 @@ class SkillsService:
                 tools.extend(tool_info)
 
         return tools
+
+    def mcp_status(self, agent_loop: Any | None = None) -> dict[str, Any]:
+        return MCPStatusInspector(self.nanobot_dir, agent_loop=agent_loop).list_mcp_servers()
+
+    async def test_mcp_server(self, name: str) -> dict[str, Any]:
+        return await MCPStatusInspector(self.nanobot_dir).probe_mcp_server(name)
+
+    def reconnect_mcp(self, agent_loop: Any | None = None) -> dict[str, Any]:
+        return MCPStatusInspector(self.nanobot_dir, agent_loop=agent_loop).reconnect_all()
 
     def _extract_tool_info(self, tool_file: Path) -> list[dict[str, Any]]:
         """Extract tool information from a tool file."""
