@@ -23,6 +23,15 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 - `cron`（仅当 cron service 可用时注册）
 - MCP tools（按 `tools.mcp_servers` 配置懒加载）
 
+### MCP tools（按当前 `tools.mcpServers` 配置注册）
+
+当前 Ava 实例已配置 `playwright_cdp`，用于接入本机日常 Chrome 登录态：
+
+- `mcp_playwright_cdp_browser_navigate`：导航到目标 URL。该工具可能在 60s 超时后页面其实已经跳转完成，所以不要只凭 timeout 判断失败。
+- `mcp_playwright_cdp_browser_snapshot`：读取当前页面的可访问性快照，适合抓取登录态、内网、JS 渲染后的正文与可见状态。
+
+使用登录态或内网页面时，优先采用两段式：先 `mcp_playwright_cdp_browser_navigate(url)`，再立即 `mcp_playwright_cdp_browser_snapshot()` 验证最终 URL、标题和页面正文。只需要静态公网正文时仍优先 `web_fetch`。
+
 ### ava 通过 patch 注入的工具
 
 - `claude_code`
@@ -54,7 +63,7 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 | 用户发了一个链接想看内容/摘要 | `web_fetch`（首选） |
 | 搜网页或抓静态页面正文 | `web_search` / `web_fetch` |
 | 操控网页、点按钮、填表、截图 | `page_agent` |
-| 需要登录态或 JS 动态渲染才能拿到的内容 | `page_agent` |
+| 需要登录态或 JS 动态渲染才能拿到的内容 | 优先 `mcp_playwright_cdp_browser_snapshot`（接日常 Chrome 登录态）；纯自动化 / 无需登录态时退回 `page_agent` |
 | 分析图片、OCR、看截图 | `vision` |
 | 生成或编辑图片 | `image_gen` |
 | 做代码库级修改、重构、只读分析 | `claude_code` 或 `codex` |
