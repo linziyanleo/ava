@@ -43,6 +43,7 @@ bash .claude/skills/playwright-cdp-launcher/scripts/check-mcp-state.sh
 这是当前默认路径，依赖用户日常 Chrome profile 与 Playwright MCP Bridge 扩展。
 
 - 如果 `playwright_cdp_mcp=connected`，直接调用目标 `mcp__playwright-cdp__*` 工具。
+- 如果工具返回 `Target page, context or browser has been closed`，当前 nanobot wrapper 会在配置了 `recoveryStrategy: "replay_last_navigate"` 时启动 fresh MCP stdio session，重放最近一次成功 `browser_navigate` 后重试原工具。
 - 如果 Bridge / extension 失败，只输出切换到 CDP endpoint 的建议命令，不调用 `start-cdp-chrome.sh`。
 - 不要尝试通过启动 9222 Chrome 修复 extension mode；extension mode 不会因此自动切到 `--cdp-endpoint`。
 
@@ -85,11 +86,18 @@ Ava/nanobot 当前默认直接使用 Playwright MCP extension mode：
   "command": "/Users/fanghu/.local/share/mcp-runners/node_modules/.bin/playwright-mcp",
   "args": ["--extension", "--browser", "chrome", "--user-data-dir", "/Users/fanghu/Library/Application Support/Google/Chrome"],
   "toolTimeout": 60,
+  "recoveryStrategy": "replay_last_navigate",
   "enabledTools": ["browser_navigate", "browser_snapshot"]
 }
 ```
 
 不要把 nanobot 配置回 CDP wrapper，除非 extension Bridge 已确认不可用，且用户明确同意切到 CDP endpoint fallback。
+
+closed-page recovery 边界：
+
+- `browser_navigate` 成功后，wrapper 会按 MCP server 记录最近一次 navigate 参数。
+- 用户手动关闭目标 tab 后，旧 MCP session 里的 browser 工具会继续报 closed-page；wrapper 会启动 fresh stdio MCP session，在新 session 内 replay navigate 并 retry 原工具。
+- 没有最近一次成功 navigate、fresh session 启动失败、或非 closed-page 的 `isError=True`，都会返回以 `Error:` 开头的 runner-visible 失败文本，让 agent 明确重新 `browser_navigate` 或排查 Bridge/token。
 
 历史 wrapper 路径保留如下：
 

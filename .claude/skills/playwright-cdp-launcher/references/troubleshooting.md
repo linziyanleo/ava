@@ -79,6 +79,21 @@ bash .claude/skills/playwright-cdp-launcher/scripts/check-mcp-state.sh
 - 只输出 CDP endpoint 切换建议命令，由用户确认后执行。
 - 切换后重启 Claude Code / MCP 客户端，再在 CDP profile 登录目标站点。
 
+## 5.5. `Target page, context or browser has been closed`
+
+症状：
+- extension mode 下 `browser_snapshot` 或后续浏览器工具返回 `browserBackend.callTool: Target page, context or browser has been closed`
+- 常见触发是用户从 Chrome UI 手动关闭了 MCP 打开的 tab
+
+诊断：
+- 这是 Playwright MCP 的 tool-level failure，返回 `CallToolResult(isError=True)`，不是连接级异常。
+- closed 后同一 MCP session 里的 `browser_navigate`、`browser_tabs list/new` 也会继续失败；不能靠旧 session 内 replay 修复。
+
+修复：
+- nanobot wrapper 已支持 `recoveryStrategy: "replay_last_navigate"`。
+- 配置启用后，wrapper 会在 fresh stdio MCP session 里 replay 最近一次成功 `browser_navigate`，再 retry 原工具。
+- 如果没有最近一次成功 navigate、fresh session 启动失败、或 Bridge/token 本身不可用，会返回以 `Error:` 开头的 runner-visible 失败文本；此时显式重新 `browser_navigate`，或按 extension/token 路径排查。
+
 ## 6. macOS Chrome 短暂启动后 9222 消失
 
 症状：
