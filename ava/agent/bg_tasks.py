@@ -68,6 +68,9 @@ class TaskSnapshot:
     isolation_mode: str = "inplace"
     branch_name: str = ""
     worktree_path: str = ""
+    # deep-link binding fields
+    origin_conversation_id: str = ""
+    origin_turn_seq: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -180,6 +183,8 @@ class BackgroundTaskStore:
         workspace: ExecutionWorkspace | None = None,
         replace_task_id: str | None = None,
         workspace_exclusive: bool = True,
+        origin_conversation_id: str = "",
+        origin_turn_seq: int | None = None,
         **executor_kwargs: Any,
     ) -> SubmitResult:
         ws_id = workspace.workspace_id if workspace else ""
@@ -257,6 +262,8 @@ class BackgroundTaskStore:
             isolation_mode=workspace.isolation_mode if workspace else "inplace",
             branch_name=workspace.branch_name or "" if workspace else "",
             worktree_path=workspace.worktree_path or "" if workspace else "",
+            origin_conversation_id=origin_conversation_id,
+            origin_turn_seq=origin_turn_seq,
         )
         self._active[task_id] = snapshot
         self._captured_contexts[task_id] = captured_context
@@ -816,6 +823,8 @@ class BackgroundTaskStore:
                 "isolation_mode": snapshot.isolation_mode,
                 "branch_name": snapshot.branch_name,
                 "worktree_path": snapshot.worktree_path,
+                "origin_conversation_id": snapshot.origin_conversation_id,
+                "origin_turn_seq": snapshot.origin_turn_seq,
             }
             extra.update(self._trace_metadata.get(snapshot.task_id, {}))
             if full_prompt:
@@ -868,6 +877,8 @@ class BackgroundTaskStore:
                 extra["isolation_mode"] = snapshot.isolation_mode
                 extra["branch_name"] = snapshot.branch_name
                 extra["worktree_path"] = snapshot.worktree_path
+                extra["origin_conversation_id"] = snapshot.origin_conversation_id
+                extra["origin_turn_seq"] = snapshot.origin_turn_seq
                 if full_result:
                     extra["full_result"] = full_result
                 self._db.execute(
@@ -951,6 +962,7 @@ class BackgroundTaskStore:
         finished = self._row_val(row, "finished_at", None)
         elapsed = int((finished - started) * 1000) if started and finished else 0
         extra = self._load_extra_json(self._row_val(row, "extra", "{}"))
+        raw_turn_seq = extra.get("origin_turn_seq", None)
         return TaskSnapshot(
             task_id=row["task_id"],
             task_type=row["task_type"],
@@ -973,6 +985,8 @@ class BackgroundTaskStore:
             isolation_mode=extra.get("isolation_mode", "inplace"),
             branch_name=extra.get("branch_name", ""),
             worktree_path=extra.get("worktree_path", ""),
+            origin_conversation_id=extra.get("origin_conversation_id", ""),
+            origin_turn_seq=int(raw_turn_seq) if raw_turn_seq is not None else None,
         )
 
     @staticmethod

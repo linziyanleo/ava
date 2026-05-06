@@ -876,13 +876,23 @@ def apply_loop_patch() -> str:
             session_key=session_key,
         )
         session_key = session_key or getattr(self, "_current_session_key", None) or f"{channel}:{chat_id}"
+        conversation_id = getattr(self, "_current_conversation_id", "") or ""
+        turn_seq = getattr(self, "_current_turn_seq", None)
         for tool_name in self.tools.tool_names:
             tool = self.tools.get(tool_name)
             if tool and hasattr(tool, "set_context"):
                 try:
-                    tool.set_context(channel, chat_id, session_key=session_key)
+                    tool.set_context(
+                        channel, chat_id,
+                        session_key=session_key,
+                        conversation_id=conversation_id,
+                        turn_seq=turn_seq,
+                    )
                 except TypeError:
-                    tool.set_context(channel, chat_id)
+                    try:
+                        tool.set_context(channel, chat_id, session_key=session_key)
+                    except TypeError:
+                        tool.set_context(channel, chat_id)
 
     patched_set_tool_context._ava_loop_patched = True
     AgentLoop._set_tool_context = patched_set_tool_context

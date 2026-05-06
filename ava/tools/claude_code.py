@@ -53,14 +53,24 @@ class ClaudeCodeTool(Tool):
         self._channel = "cli"
         self._chat_id = "direct"
         self._session_key = "cli:direct"
+        self._conversation_id = ""
+        self._turn_seq: int | None = None
 
     def set_context(
-        self, channel: str, chat_id: str, *, session_key: str | None = None,
+        self,
+        channel: str,
+        chat_id: str,
+        *,
+        session_key: str | None = None,
+        conversation_id: str = "",
+        turn_seq: int | None = None,
     ) -> None:
         """Set the origin context for async task result routing."""
         self._channel = channel
         self._chat_id = chat_id
         self._session_key = session_key or f"{channel}:{chat_id}"
+        self._conversation_id = conversation_id or ""
+        self._turn_seq = turn_seq
 
     @property
     def name(self) -> str:
@@ -154,6 +164,8 @@ class ClaudeCodeTool(Tool):
             auto_continue=should_auto_continue,
             target=target,
             workspace=workspace,
+            origin_conversation_id=self._conversation_id,
+            origin_turn_seq=self._turn_seq,
             mode=mode,
             session_id=session_id,
             project=project,
