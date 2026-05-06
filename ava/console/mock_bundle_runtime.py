@@ -105,6 +105,8 @@ class MockBackgroundTaskStore:
         task.setdefault("isolation_mode", "inplace")
         task.setdefault("branch_name", "")
         task.setdefault("worktree_path", "")
+        task.setdefault("origin_conversation_id", "")
+        task.setdefault("origin_turn_seq", None)
         return task
 
     @staticmethod

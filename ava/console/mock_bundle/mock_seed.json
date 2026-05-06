@@ -121,6 +121,14 @@
       "timestamp": "2026-04-07T08:50:06+08:00"
     },
     {
+      "session_key": "console:mock-session-1",
+      "seq": 2,
+      "conversation_id": "mock-conv-1",
+      "role": "assistant",
+      "content": "[Background Task mock-task-ok-1 SUCCESS]\nType: coding | Duration: 120000ms\n\nInserted summary and detailed token rows for mock conversations.\nSeeded token stats for mock_tester dashboard with 3 conversations.",
+      "timestamp": "2026-04-07T09:02:00+08:00"
+    },
+    {
       "session_key": "console:mock-session-2",
       "seq": 0,
       "conversation_id": "mock-conv-2",
@@ -585,7 +593,9 @@
         }
       ],
       "full_prompt": "Patch mock_tester coverage for chat and background tasks.\n- Seed full block types in chat mock data\n- Add running/queued/history background task samples",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-run-2",
@@ -629,7 +639,9 @@
         }
       ],
       "full_prompt": "Add workspace metadata display to background task cards.",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-img-run-1",
@@ -669,7 +681,9 @@
         }
       ],
       "full_prompt": "Generate a transparent PNG of Rowlet writing code.",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-queue-1",
@@ -708,7 +722,9 @@
         }
       ],
       "full_prompt": "Review whether mock Pages.md still misses any read-only regression route.",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-3",
+      "origin_turn_seq": 0
     }
   ],
   "bg_tasks_history": [
@@ -755,7 +771,9 @@
         }
       ],
       "full_prompt": "Generate Rowlet writing code on a transparent background as PNG.",
-      "full_result": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png\nTransparent PNG mock output is ready."
+      "full_result": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png\nTransparent PNG mock output is ready.",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-ok-1",
@@ -800,7 +818,9 @@
         }
       ],
       "full_prompt": "Seed token stats examples for mock_tester dashboard.",
-      "full_result": "Inserted summary and detailed token rows for mock conversations."
+      "full_result": "Inserted summary and detailed token rows for mock conversations.",
+      "origin_conversation_id": "mock-conv-1",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-fail-1",
@@ -845,7 +865,9 @@
         }
       ],
       "full_prompt": "Backfill mock browser preview frames for mock_tester.",
-      "full_result": "Blocked: browser preview remains excluded from the mock-safe role by design."
+      "full_result": "Blocked: browser preview remains excluded from the mock-safe role by design.",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-cancel-1",
@@ -890,7 +912,9 @@
         }
       ],
       "full_prompt": "Refactor every console route to share one role matrix helper.",
-      "full_result": "Cancelled before execution completed."
+      "full_result": "Cancelled before execution completed.",
+      "origin_conversation_id": "mock-conv-3",
+      "origin_turn_seq": 0
     }
   ],
   "skill_config": [
