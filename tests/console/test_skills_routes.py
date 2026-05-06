@@ -37,7 +37,7 @@ def _create_client(tmp_path, monkeypatch) -> tuple[TestClient, Path]:
         json.dumps({
             "tools": {
                 "mcpServers": {
-                    "playwright_cdp": {
+                    "playwright_daily": {
                         "command": "/bin/echo",
                         "env": {"PLAYWRIGHT_MCP_EXTENSION_TOKEN": "secret-token"},
                         "headers": {"Authorization": "Bearer secret"},
@@ -53,11 +53,11 @@ def _create_client(tmp_path, monkeypatch) -> tuple[TestClient, Path]:
         lifecycle_manager=None,
         _mcp_connected=True,
         _mcp_connecting=False,
-        _mcp_stacks={"playwright_cdp": object()},
+        _mcp_stacks={"playwright_daily": object()},
         tools=SimpleNamespace(
             get_definitions=lambda: [
-                {"function": {"name": "mcp_playwright_cdp_browser_navigate"}},
-                {"name": "mcp_playwright_cdp_browser_snapshot"},
+                {"function": {"name": "mcp_playwright_daily_browser_navigate"}},
+                {"name": "mcp_playwright_daily_browser_snapshot"},
             ]
         ),
     )
@@ -89,7 +89,7 @@ def test_mcp_status_route_redacts_config_for_viewer(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     server = payload["servers"][0]
-    assert server["name"] == "playwright_cdp"
+    assert server["name"] == "playwright_daily"
     assert server["status"] == "connected"
     assert server["redacted"] == ["env", "headers"]
     assert server["config_redacted"]["env"] == {"PLAYWRIGHT_MCP_EXTENSION_TOKEN": "****"}
@@ -114,18 +114,18 @@ def test_mcp_test_route_is_editor_plus(tmp_path, monkeypatch):
 
     viewer_response = client.post(
         "/api/skills/mcp/test",
-        json={"name": "playwright_cdp"},
+        json={"name": "playwright_daily"},
         headers=_headers("viewer"),
     )
     assert viewer_response.status_code == 403
 
     editor_response = client.post(
         "/api/skills/mcp/test",
-        json={"name": "playwright_cdp"},
+        json={"name": "playwright_daily"},
         headers=_headers("editor"),
     )
     assert editor_response.status_code == 200
-    assert editor_response.json()["wrapped_tools"] == ["mcp_playwright_cdp_browser_snapshot"]
+    assert editor_response.json()["wrapped_tools"] == ["mcp_playwright_daily_browser_snapshot"]
 
 
 def test_mcp_reconnect_route_is_admin_and_returns_501_when_unsupported(tmp_path, monkeypatch):

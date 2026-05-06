@@ -30,7 +30,7 @@ def _write_mcp_config(nanobot_dir: Path) -> None:
     payload = {
         "tools": {
             "mcpServers": {
-                "playwright_cdp": {
+                "playwright_daily": {
                     "command": "/bin/echo",
                     "args": ["--extension"],
                     "env": {
@@ -54,11 +54,11 @@ def test_mcp_status_redacts_env_and_headers(tmp_path: Path):
     agent = SimpleNamespace(
         _mcp_connected=True,
         _mcp_connecting=False,
-        _mcp_stacks={"playwright_cdp": object()},
+        _mcp_stacks={"playwright_daily": object()},
         tools=SimpleNamespace(
             get_definitions=lambda: [
-                {"function": {"name": "mcp_playwright_cdp_browser_navigate"}},
-                {"name": "mcp_playwright_cdp_browser_snapshot"},
+                {"function": {"name": "mcp_playwright_daily_browser_navigate"}},
+                {"name": "mcp_playwright_daily_browser_snapshot"},
             ]
         ),
     )
@@ -66,7 +66,7 @@ def test_mcp_status_redacts_env_and_headers(tmp_path: Path):
     result = MCPStatusInspector(tmp_path, agent_loop=agent).list_mcp_servers()
 
     server = result["servers"][0]
-    assert server["name"] == "playwright_cdp"
+    assert server["name"] == "playwright_daily"
     assert server["status"] == "connected"
     assert server["redacted"] == ["env", "headers"]
     assert server["config_redacted"]["env"] == {
@@ -76,8 +76,8 @@ def test_mcp_status_redacts_env_and_headers(tmp_path: Path):
     assert server["config_redacted"]["headers"] == {"Authorization": "****"}
     assert "secret-token" not in json.dumps(server)
     assert server["registered_tools"] == [
-        "mcp_playwright_cdp_browser_navigate",
-        "mcp_playwright_cdp_browser_snapshot",
+        "mcp_playwright_daily_browser_navigate",
+        "mcp_playwright_daily_browser_snapshot",
     ]
 
 
@@ -106,7 +106,7 @@ def test_mcp_probe_timeout_returns_structured_failure(tmp_path: Path):
             await asyncio.sleep(0.05)
             return []
 
-    result = asyncio.run(SlowInspector(tmp_path).probe_mcp_server("playwright_cdp", timeout=0.001))
+    result = asyncio.run(SlowInspector(tmp_path).probe_mcp_server("playwright_daily", timeout=0.001))
 
     assert result["ok"] is False
     assert result["status"] == "timeout"

@@ -25,12 +25,24 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 
 ### MCP tools（按当前 `tools.mcpServers` 配置注册）
 
-当前 Ava 实例已配置 `playwright_cdp`，用于接入本机日常 Chrome 登录态：
+当前 Ava 实例已配置 `playwright_daily`，它通过 Playwright MCP extension mode 接入本机日常 Chrome profile，用于复用已有登录态、SSO、2FA、浏览器扩展和当前可见 tab。
 
-- `mcp_playwright_cdp_browser_navigate`：导航到目标 URL。该工具可能在 60s 超时后页面其实已经跳转完成，所以不要只凭 timeout 判断失败。
-- `mcp_playwright_cdp_browser_snapshot`：读取当前页面的可访问性快照，适合抓取登录态、内网、JS 渲染后的正文与可见状态。
+可用工具名由 MCP server name 生成，当前前缀是 `mcp_playwright_daily_`：
 
-使用登录态或内网页面时，优先采用两段式：先 `mcp_playwright_cdp_browser_navigate(url)`，再立即 `mcp_playwright_cdp_browser_snapshot()` 验证最终 URL、标题和页面正文。只需要静态公网正文时仍优先 `web_fetch`。
+- `mcp_playwright_daily_browser_navigate`：导航到目标 URL。
+- `mcp_playwright_daily_browser_snapshot`：读取可访问性快照，返回带 `ref` 的页面结构；交互前优先用它获取最新 refs。
+- `mcp_playwright_daily_browser_click`：点击 snapshot 中的目标 ref。
+- `mcp_playwright_daily_browser_fill_form`：批量填写表单字段。
+- `mcp_playwright_daily_browser_type`：向单个输入框输入文本。
+- `mcp_playwright_daily_browser_press_key`：发送键盘按键，例如 `Enter`、`Escape`。
+- `mcp_playwright_daily_browser_select_option`：选择下拉选项。
+- `mcp_playwright_daily_browser_tabs`：列出、切换或管理当前浏览器 tabs。
+- `mcp_playwright_daily_browser_wait_for`：等待页面状态、文本或短暂延迟。
+- `mcp_playwright_daily_browser_take_screenshot`：需要视觉证据、布局、Canvas、图表或 bug 记录时截图。
+
+登录态、内网、SSO、2FA、需要用户日常 Chrome 扩展或已有 tab 的页面，优先使用 `mcp_playwright_daily_*`。只需要静态公网正文时仍优先 `web_fetch`。
+
+如果返回 `Target page, context or browser has been closed`，这通常是 Playwright MCP 持有的页面 target 失效，不等于 extension 已断连。runtime 会尝试用 fresh MCP session 重试；若仍返回 `Error:`，先重新 `mcp_playwright_daily_browser_navigate(url)` 或用 `mcp_playwright_daily_browser_tabs(action="list")` 选择可用 tab，再重新 snapshot。
 
 ### ava 通过 patch 注入的工具
 
@@ -62,8 +74,9 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 | 跑 shell 命令 | `exec` |
 | 用户发了一个链接想看内容/摘要 | `web_fetch`（首选） |
 | 搜网页或抓静态页面正文 | `web_search` / `web_fetch` |
-| 操控网页、点按钮、填表、截图 | `page_agent` |
-| 需要登录态或 JS 动态渲染才能拿到的内容 | 优先 `mcp_playwright_cdp_browser_snapshot`（接日常 Chrome 登录态）；纯自动化 / 无需登录态时退回 `page_agent` |
+| 操控登录态/内网/SSO 页面、点按钮、填表、截图 | `mcp_playwright_daily_*` |
+| 操控不需要日常 Chrome 登录态的普通网页 | `page_agent` |
+| 需要登录态或 JS 动态渲染才能拿到的内容 | 优先 `mcp_playwright_daily_browser_snapshot`（接日常 Chrome 登录态）；纯自动化 / 无需登录态时退回 `page_agent` |
 | 分析图片、OCR、看截图 | `vision` |
 | 生成或编辑图片 | `image_gen` |
 | 做代码库级修改、重构、只读分析 | `claude_code` 或 `codex` |

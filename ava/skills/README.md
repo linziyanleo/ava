@@ -22,4 +22,5 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 | `diary` | 每日日记生成 |
 | `memory` | Dream 全局记忆 + person memory 边界说明 |
 | `page_agent_test` | 基于 page_agent 的狭义页面测试协议 |
+| `playwright_daily_browser` | 使用 Playwright MCP extension mode 操作日常 Chrome |
 | `tmux` | Remote-control tmux sessions |
