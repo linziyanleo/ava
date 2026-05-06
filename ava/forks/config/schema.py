@@ -468,15 +468,18 @@ class GatewayConfig(Base):
 class WebSearchConfig(_UPSTREAM.WebSearchConfig):
     """沿用上游 Web 搜索配置。"""
 
-
     provider: str = "brave"
+
+
+class WebFetchConfig(_UPSTREAM.WebFetchConfig):
+    """沿用上游 Web 抓取配置。"""
 
 
 class WebToolsConfig(_UPSTREAM.WebToolsConfig):
     """沿用上游 Web 工具配置。"""
 
-
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(_UPSTREAM.ExecToolConfig):
