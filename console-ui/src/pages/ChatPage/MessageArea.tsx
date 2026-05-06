@@ -30,9 +30,11 @@ interface MessageAreaProps {
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
+  targetTaskId?: string | null
+  targetTurnSeq?: number | null
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onRefresh, isMobile, onToggleSessionPanel }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -122,6 +124,37 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
   useEffect(() => {
     setShowInspector(false)
   }, [session?.key, conversationId])
+
+  const taskLocatedRef = useRef<string | null>(null)
+
+  // Deep-link: scroll to targetTaskId or targetTurnSeq after messages render.
+  // Retries on each turns update so task result cards appearing later also get located.
+  useEffect(() => {
+    if (loading) return
+    if (!targetTaskId && targetTurnSeq == null) return
+
+    const scrollContainer = scrollContainerRef.current
+    if (!scrollContainer) return
+
+    if (targetTaskId) {
+      const el = scrollContainer.querySelector(`[data-bg-task-id="${CSS.escape(targetTaskId)}"]`)
+      if (el) {
+        if (taskLocatedRef.current !== targetTaskId) {
+          taskLocatedRef.current = targetTaskId
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+        return
+      }
+    }
+
+    if (targetTurnSeq != null && taskLocatedRef.current !== `task:${targetTaskId}`) {
+      const el = scrollContainer.querySelector(`[data-turn-seq="${targetTurnSeq}"]`)
+      if (el && taskLocatedRef.current !== `turn:${targetTurnSeq}`) {
+        taskLocatedRef.current = `turn:${targetTurnSeq}`
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }, [loading, turns, targetTaskId, targetTurnSeq])
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -264,6 +297,8 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
                 iterationStats={iterationStats}
                 sessionKey={session?.key}
                 suppressLoadingIndicator={isConsole && i === visibleTurns.length - 1 && hasVisibleStreamingOutput}
+                targetTaskId={targetTaskId}
+                targetTurnSeq={targetTurnSeq}
               />
             ))}
             {inFlightTurn && (

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
@@ -41,6 +42,17 @@ function disposeSocket(socket: WebSocket | null, onDispose?: () => void) {
 }
 
 export default function ChatPage() {
+  const [searchParams] = useSearchParams()
+  const deepLinkSessionKey = searchParams.get('session_key') || null
+  const deepLinkConversationId = searchParams.get('conversation_id') || null
+  const deepLinkTaskId = searchParams.get('task_id') || null
+  const deepLinkTurnSeq = useMemo(() => {
+    const raw = searchParams.get('turn_seq')
+    if (raw == null) return null
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) ? n : null
+  }, [searchParams])
+
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [conversationLists, setConversationLists] = useState<Record<string, ConversationMeta[]>>({})
   const [activeScene, setActiveScene] = useState<SceneType>('console')
@@ -55,6 +67,7 @@ export default function ChatPage() {
   const [activeTransport, setActiveTransport] = useState<ActiveChatTransport>('none')
   const [mobileSessionOpen, setMobileSessionOpen] = useState(false)
   const [error, setError] = useState('')
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wsReconnectAttempts = useRef(0)
@@ -444,18 +457,37 @@ export default function ChatPage() {
 
       if (!initializedRef.current && metas.length > 0) {
         initializedRef.current = true
-        const firstScene = SCENE_ORDER.find((s) => metas.some((m) => m.scene === s)) || metas[0].scene
-        setActiveScene(firstScene)
-        const firstSessionInScene = metas.find((m) => m.scene === firstScene)
-        if (firstSessionInScene) {
-          setActiveSession(firstSessionInScene.key)
+
+        const deepLinkSessionKeyVal = deepLinkSessionKeyRef.current
+        const deepLinkConversationIdVal = deepLinkConversationIdRef.current
+
+        let targetSession = deepLinkSessionKeyVal
+          ? metas.find((m) => m.key === deepLinkSessionKeyVal) || null
+          : null
+
+        if (!targetSession) {
+          const firstScene = SCENE_ORDER.find((s) => metas.some((m) => m.scene === s)) || metas[0].scene
+          setActiveScene(firstScene)
+          targetSession = metas.find((m) => m.scene === firstScene) || null
+        } else {
+          setActiveScene(targetSession.scene)
+          if (deepLinkConversationIdVal == null) {
+            setDeepLinkNotice('该任务缺少 conversation 绑定，已打开对应 session')
+          }
+        }
+
+        if (targetSession) {
+          setActiveSession(targetSession.key)
+          const sessionKey = targetSession.key
           void (async () => {
-            const conversations = await loadConversationsRef.current(firstSessionInScene.key)
-            const conversationId = pickConversationId(firstSessionInScene, conversations, firstSessionInScene.conversation_id)
-            await loadSessionMessagesWithMetaRef.current(firstSessionInScene.key, firstSessionInScene, conversationId)
+            const conversations = await loadConversationsRef.current(sessionKey)
+            const preferredConvId = deepLinkConversationIdVal
+              ?? targetSession!.conversation_id
+            const conversationId = pickConversationId(targetSession, conversations, preferredConvId)
+            await loadSessionMessagesWithMetaRef.current(sessionKey, targetSession, conversationId)
           })()
-          if (firstScene === 'console' && !mockMode) {
-            const sid = firstSessionInScene.key.replace(/^console:/, '')
+          if (targetSession.scene === 'console' && !mockMode) {
+            const sid = targetSession.key.replace(/^console:/, '')
             connectWs(sid)
           }
         }
@@ -662,6 +694,11 @@ export default function ChatPage() {
   const activeSessionRef = useRef(activeSession)
   activeSessionRef.current = activeSession
 
+  const deepLinkSessionKeyRef = useRef(deepLinkSessionKey)
+  deepLinkSessionKeyRef.current = deepLinkSessionKey
+  const deepLinkConversationIdRef = useRef(deepLinkConversationId)
+  deepLinkConversationIdRef.current = deepLinkConversationId
+
   const loadSessionListRef = useRef(loadSessionList)
   loadSessionListRef.current = loadSessionList
 
@@ -756,6 +793,13 @@ export default function ChatPage() {
           <button onClick={() => setError('')} className="ml-2 hover:underline">Dismiss</button>
         </div>
       )}
+      {/* Deep link notice */}
+      {deepLinkNotice && (
+        <div className="px-4 py-2 bg-[var(--accent)]/10 text-[var(--accent)] text-xs flex items-center justify-between">
+          <span>{deepLinkNotice}</span>
+          <button onClick={() => setDeepLinkNotice(null)} className="ml-2 hover:underline">Dismiss</button>
+        </div>
+      )}
 
       {/* Main content: sidebar + message area */}
       <div className="flex-1 flex min-h-0 min-w-0">
@@ -815,6 +859,8 @@ export default function ChatPage() {
           onRefresh={handleRefresh}
           isMobile={isMobile}
           onToggleSessionPanel={() => setMobileSessionOpen(v => !v)}
+          targetTaskId={deepLinkTaskId}
+          targetTurnSeq={deepLinkTurnSeq}
         />
       </div>
     </div>
