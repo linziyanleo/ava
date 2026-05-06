@@ -525,6 +525,12 @@ class PageAgentConfig(Base):
     """通用 PageAgent 页面操作工具配置。"""
 
     enabled: bool = True
+    backend: str = "playwright"
+    mcp_server: str = Field(
+        default="page_agent_ext",
+        validation_alias=AliasChoices("mcp_server", "mcpServer"),
+        serialization_alias="mcpServer",
+    )
     api_base: str = Field(
         default="",
         validation_alias=AliasChoices("api_base", "apiBase"),

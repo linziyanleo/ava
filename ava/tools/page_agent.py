@@ -1,7 +1,10 @@
 """通用 PageAgent 页面操作工具。
 
-通过常驻 Node runner 进程（page-agent-runner.mjs）管理 Playwright 浏览器，
-在页面内注入 page-agent 实现自然语言操控网页。
+支持两个显式后端：
+- ``playwright``：通过常驻 Node runner（page-agent-runner.mjs）管理 Playwright
+  浏览器，并在页面内注入 page-agent，实现会话、截图、Page State 和 Console 预览。
+- ``official_mcp``：转发到官方 ``@page-agent/mcp`` wrapped tools，经 Page Agent
+  Chrome Extension 操作用户日常 Chrome，适合任务级自然语言浏览器代理。
 
 通信协议：stdin/stdout JSON-RPC（每行一个 JSON）。
 推送事件（frame/activity/status/session_closed）无 id 字段，RPC 响应有 id 字段。
@@ -13,6 +16,7 @@ import asyncio
 import atexit
 import json
 import os
+import re
 import shutil
 import time
 import uuid
@@ -29,6 +33,7 @@ from ava.runtime import paths as runtime_paths
 _RUNNER_SCRIPT = Path(__file__).resolve().parents[2] / "console-ui" / "e2e" / "page-agent-runner.mjs"
 
 _IDLE_TIMEOUT = 300  # 空闲 5 分钟自动回收 runner
+_MCP_NAME_SANITIZE_RE = re.compile(r"_+")
 _LIVE_PAGE_AGENT_TOOLS: weakref.WeakSet[PageAgentTool] | None = None
 _PROCESS_CLEANUP_REGISTERED = False
 
@@ -76,10 +81,12 @@ class PageAgentTool(Tool):
         config: Any | None = None,
         media_service: Any | None = None,
         token_stats: Any | None = None,
+        tool_registry: Any | None = None,
     ) -> None:
         self._config = config
         self._media_service = media_service
         self._token_stats = token_stats
+        self._tool_registry = tool_registry
         # Runner 进程
         self._process: asyncio.subprocess.Process | None = None
         self._process_finalizer: weakref.finalize | None = None
@@ -187,9 +194,12 @@ class PageAgentTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Interact with web pages: click buttons, fill forms, scroll, navigate multi-step flows, "
-            "and take screenshots. Use ONLY when the page requires interaction or JS-rendered dynamic content. "
-            "For simply reading/summarizing a URL, use web_fetch instead (lighter and more reliable)."
+            "Task-level PageAgent browser automation. Use when the user explicitly asks for Page Agent, "
+            "or when a web task needs natural-language planning across navigation, clicking, filling forms, "
+            "or logged-in/JS-rendered pages. With backend=official_mcp, execute/get_status/stop_task route "
+            "through @page-agent/mcp and the user's Page Agent Chrome Extension. For static URL reading use "
+            "web_fetch; for exact ref-based clicks, screenshots, tab control, or verification evidence use "
+            "mcp_playwright_daily_*."
         )
 
     @property
@@ -199,17 +209,26 @@ class PageAgentTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["execute", "screenshot", "get_page_info", "close_session", "restart_runner"],
+                    "enum": [
+                        "execute",
+                        "screenshot",
+                        "get_page_info",
+                        "close_session",
+                        "restart_runner",
+                        "get_status",
+                        "stop_task",
+                    ],
                     "description": (
                         "Action to perform. "
-                        "'execute': interact with page via natural language instruction (click, fill, scroll, navigate). "
+                        "'execute': run a natural-language PageAgent task (click, fill, scroll, navigate, extract page result). "
                         "'screenshot': capture a PNG screenshot of the current page (requires session_id of an open session; "
-                        "supports optional url to navigate before capture). "
+                        "supports optional url to navigate before capture; not supported by backend=official_mcp). "
                         "IMPORTANT: when the user asks to take a screenshot / 截图 / capture the page, "
-                        "always use 'screenshot' — do NOT use 'execute' with a screenshot instruction. "
-                        "'get_page_info': get page URL, title, and element summary. "
-                        "'close_session': close a browser session. "
-                        "'restart_runner': restart the browser runner process."
+                        "use 'screenshot' only when the active backend supports it; otherwise use mcp_playwright_daily_browser_take_screenshot. "
+                        "'get_page_info': get page URL, title, and element summary (playwright backend only). "
+                        "'close_session': close a local playwright backend browser session. "
+                        "'restart_runner': restart the local playwright backend runner process. "
+                        "'get_status'/'stop_task': check or stop the current official_mcp PageAgent Extension task."
                     ),
                 },
                 "url": {
@@ -249,6 +268,9 @@ class PageAgentTool(Tool):
         if not fmt:
             return "Error: response_format must be 'text' or 'json'"
 
+        if self._uses_official_mcp_backend():
+            return await self._execute_official_mcp_action(action, kwargs, fmt)
+
         if action == "execute":
             return await self._do_execute(kwargs, fmt)
         elif action == "screenshot":
@@ -259,6 +281,14 @@ class PageAgentTool(Tool):
             return await self._do_close_session(kwargs)
         elif action == "restart_runner":
             return await self._do_restart_runner()
+        elif action == "get_status":
+            return await self._do_get_status_local(fmt)
+        elif action == "stop_task":
+            return self._format_unsupported_backend_action(
+                "stop_task",
+                response_format=fmt,
+                detail="The Playwright backend has no current-task stop primitive; use restart_runner to stop the local runner.",
+            )
         else:
             if fmt == "json":
                 return self._json_dumps({
@@ -275,6 +305,135 @@ class PageAgentTool(Tool):
     # ------------------------------------------------------------------
     # Action 实现
     # ------------------------------------------------------------------
+
+    async def _execute_official_mcp_action(self, action: str, kwargs: dict, response_format: str) -> str:
+        if action == "execute":
+            return await self._do_execute_official_mcp(kwargs, response_format)
+        if action == "get_status":
+            return await self._do_get_status_official_mcp(response_format)
+        if action == "stop_task":
+            return await self._do_stop_task_official_mcp(response_format)
+        if action in {"screenshot", "get_page_info", "close_session", "restart_runner"}:
+            return self._format_unsupported_backend_action(
+                action,
+                response_format=response_format,
+                detail=(
+                    "The official_mcp backend exposes execute_task, get_status, and stop_task only. "
+                    "Switch tools.pageAgent.backend to 'playwright' for screenshot/session/console-preview actions."
+                ),
+            )
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "ERROR",
+                "backend": self._backend(),
+                "session_id": kwargs.get("session_id"),
+                "result": {"success": False},
+                "error": {
+                    "code": "UNKNOWN_ACTION",
+                    "message": f"unknown action '{action}'",
+                },
+            })
+        return f"Error: unknown action '{action}'"
+
+    async def _do_execute_official_mcp(self, kwargs: dict, response_format: str) -> str:
+        instruction = kwargs.get("instruction")
+        if not instruction:
+            return self._format_action_error(
+                "instruction is required for execute action",
+                response_format=response_format,
+                action="execute",
+            )
+
+        session_id = kwargs.get("session_id") or f"mcp_{uuid.uuid4().hex[:8]}"
+        url = kwargs.get("url")
+        task = self._build_official_mcp_task(str(instruction), url=url)
+        started = time.monotonic()
+        text = await self._call_official_mcp_tool("execute_task", {"task": task})
+        duration_ms = int((time.monotonic() - started) * 1000)
+        success = not self._is_mcp_failure_text(text)
+        data = self._strip_official_mcp_task_prefix(text)
+
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "SUCCESS" if success else "ERROR",
+                "backend": "official_mcp",
+                "session_id": session_id,
+                "steps": 0,
+                "duration_ms": duration_ms,
+                "page": self._build_page_payload(str(url or "unknown"), "unknown"),
+                "result": {
+                    "success": success,
+                    "data": data,
+                },
+                "page_state": {},
+                "error": None if success else {
+                    "code": "MCP_EXECUTION_FAILED",
+                    "message": data,
+                },
+            })
+
+        status = "SUCCESS" if success else "ERROR"
+        parts = [
+            f"[PageAgent {status}] backend=official_mcp session={session_id} | Duration: {duration_ms}ms",
+            f"URL: {url or 'unknown'}",
+            "",
+            data,
+        ]
+        return "\n".join(parts)
+
+    async def _do_get_status_official_mcp(self, response_format: str) -> str:
+        text = await self._call_official_mcp_tool("get_status", {})
+        success = not self._is_mcp_failure_text(text)
+        data = self._try_parse_json(text)
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "SUCCESS" if success else "ERROR",
+                "backend": "official_mcp",
+                "result": {
+                    "success": success,
+                    "data": data,
+                },
+                "error": None if success else {
+                    "code": "MCP_STATUS_FAILED",
+                    "message": text,
+                },
+            })
+        return text
+
+    async def _do_stop_task_official_mcp(self, response_format: str) -> str:
+        text = await self._call_official_mcp_tool("stop_task", {})
+        success = not self._is_mcp_failure_text(text)
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "SUCCESS" if success else "ERROR",
+                "backend": "official_mcp",
+                "result": {
+                    "success": success,
+                    "data": text,
+                },
+                "error": None if success else {
+                    "code": "MCP_STOP_TASK_FAILED",
+                    "message": text,
+                },
+            })
+        return text
+
+    async def _do_get_status_local(self, response_format: str) -> str:
+        running = self._process is not None and self._process.returncode is None
+        sessions = await self.list_sessions() if running else []
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "SUCCESS",
+                "backend": "playwright",
+                "result": {
+                    "success": True,
+                    "running": running,
+                    "sessions": sessions,
+                },
+                "error": None,
+            })
+        state = "running" if running else "stopped"
+        return f"PageAgent backend=playwright runner={state} sessions={', '.join(sessions) or '(none)'}"
 
     async def _do_execute(self, kwargs: dict, response_format: str) -> str:
         instruction = kwargs.get("instruction")
@@ -430,6 +589,101 @@ class PageAgentTool(Tool):
                 },
             })
         return f"Error: {message}"
+
+    def _format_unsupported_backend_action(
+        self,
+        action: str,
+        *,
+        response_format: str,
+        detail: str,
+    ) -> str:
+        message = f"page_agent backend '{self._backend()}' does not support action '{action}'. {detail}"
+        if response_format == "json":
+            return self._json_dumps({
+                "status": "ERROR",
+                "backend": self._backend(),
+                "session_id": None,
+                "result": {"success": False},
+                "error": {
+                    "code": "UNSUPPORTED_BACKEND_ACTION",
+                    "message": message,
+                    "action": action,
+                },
+            })
+        return f"Error: {message}"
+
+    def _backend(self) -> str:
+        if self._config is None:
+            return "playwright"
+        raw = getattr(self._config, "backend", "playwright") or "playwright"
+        normalized = str(raw).strip().lower().replace("-", "_")
+        if normalized in {"mcp", "official_mcp", "extension_mcp", "page_agent_mcp"}:
+            return "official_mcp"
+        return "playwright"
+
+    def _uses_official_mcp_backend(self) -> bool:
+        return self._backend() == "official_mcp"
+
+    def _mcp_server_name(self) -> str:
+        raw = getattr(self._config, "mcp_server", "page_agent_ext") if self._config else "page_agent_ext"
+        name = str(raw or "page_agent_ext")
+        return _MCP_NAME_SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
+
+    def _mcp_tool_name(self, raw_tool_name: str) -> str:
+        return f"mcp_{self._mcp_server_name()}_{raw_tool_name}"
+
+    async def _call_official_mcp_tool(self, raw_tool_name: str, params: dict[str, Any]) -> str:
+        tool_name = self._mcp_tool_name(raw_tool_name)
+        registry = self._tool_registry
+        if registry is None or not hasattr(registry, "execute"):
+            return (
+                "Error: page_agent official_mcp backend requires the nanobot ToolRegistry. "
+                "Use the normal Ava runtime tool registration path."
+            )
+
+        has_tool = getattr(registry, "has", None)
+        if callable(has_tool) and not has_tool(tool_name):
+            return (
+                f"Error: official_mcp backend expected MCP tool '{tool_name}' but it is not registered. "
+                f"Configure tools.mcpServers.{self._mcp_server_name()} and restart the gateway."
+            )
+
+        result = await registry.execute(tool_name, params)
+        if isinstance(result, str):
+            return result
+        return self._json_dumps({"data": result})
+
+    @staticmethod
+    def _build_official_mcp_task(instruction: str, *, url: str | None = None) -> str:
+        if url:
+            return f"Open {url} and then follow this instruction: {instruction}"
+        return instruction
+
+    @staticmethod
+    def _is_mcp_failure_text(text: str) -> bool:
+        stripped = text.lstrip()
+        return (
+            stripped.startswith("Error")
+            or stripped.startswith("### Error")
+            or stripped.startswith("(MCP tool call failed")
+            or stripped.startswith("(MCP tool call timed out")
+            or stripped.startswith("(MCP tool call was cancelled")
+            or stripped.startswith("Task failed.")
+        )
+
+    @staticmethod
+    def _strip_official_mcp_task_prefix(text: str) -> str:
+        for prefix in ("Task completed.\n\n", "Task failed.\n\n"):
+            if text.startswith(prefix):
+                return text[len(prefix):]
+        return text
+
+    @staticmethod
+    def _try_parse_json(text: str) -> Any:
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
 
     def _build_execute_success_payload(self, result: dict[str, Any], fallback_session_id: str) -> dict[str, Any]:
         inner_success = result.get("success", True)
@@ -659,6 +913,11 @@ class PageAgentTool(Tool):
 
     async def _do_restart_runner(self) -> str:
         """停止当前 runner 进程，下次调用时自动重启。"""
+        if self._uses_official_mcp_backend():
+            return (
+                "page_agent backend official_mcp does not own a local runner. "
+                "Restart the gateway/MCP server if the PageAgent MCP connection must be reset."
+            )
         was_running = self._process is not None and self._process.returncode is None
         await self._shutdown_runner()
         if was_running:
@@ -671,18 +930,38 @@ class PageAgentTool(Tool):
 
     async def start_screencast(self, session_id: str, **params: Any) -> dict:
         """启动指定会话的 CDP 帧流。"""
+        if self._uses_official_mcp_backend():
+            return {
+                "success": False,
+                "error": {
+                    "code": "UNSUPPORTED_BACKEND_ACTION",
+                    "message": "official_mcp backend does not expose screencast frames",
+                },
+            }
         return await self._rpc("start_screencast", {"session_id": session_id, **params})
 
     async def stop_screencast(self, session_id: str) -> dict:
         """停止指定会话的 CDP 帧流。"""
+        if self._uses_official_mcp_backend():
+            return {"success": True, "result": {}}
         return await self._rpc("stop_screencast", {"session_id": session_id})
 
     async def get_page_info(self, session_id: str) -> dict[str, Any]:
         """返回结构化页面信息，供 console WS 初始化状态。"""
+        if self._uses_official_mcp_backend():
+            return {
+                "success": False,
+                "error": {
+                    "code": "UNSUPPORTED_BACKEND_ACTION",
+                    "message": "official_mcp backend does not expose page info",
+                },
+            }
         return await self._rpc("get_page_info", {"session_id": session_id})
 
     async def list_sessions(self) -> list[str]:
         """返回 runner 当前持有的会话列表。"""
+        if self._uses_official_mcp_backend():
+            return []
         if not self._process or self._process.returncode is not None:
             return []
 

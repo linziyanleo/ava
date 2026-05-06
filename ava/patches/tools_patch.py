@@ -118,6 +118,7 @@ def apply_tools_patch() -> str:
                 config=pa_cfg,
                 media_service=getattr(self, 'media_service', None),
                 token_stats=getattr(self, 'token_stats', None),
+                tool_registry=self.tools,
             )
             self.tools.register(pa_tool)
 
