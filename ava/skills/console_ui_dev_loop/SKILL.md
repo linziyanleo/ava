@@ -212,7 +212,8 @@ round_status:
 ## 默认约束
 
 - v1 默认 `coding_tool=claude_code`，调用方式 `claude_code(mode="standard")`（异步）
-- `page_agent` 统一使用 `response_format="json"`
+- 回归断言需要结构化 Page State 时，`page_agent` 必须处于 `playwright` backend，并统一使用 `response_format="json"`
+- 如果当前 `page_agent` 配置为 `official_mcp`，它只提供任务级 `execute/get_status/stop_task`，不提供 Page State / screenshot / session preview；此时用 `playwright_daily_browser` 做 snapshot/screenshot 验收，或先切回 `playwright` backend 再跑本 skill
 - `vision` 只用于 `assertion_mode=visual|hybrid`
 - 默认 `rerun_policy=full_before_pass`
 
