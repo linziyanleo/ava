@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   RefreshCw,
   XCircle,
@@ -22,11 +23,13 @@ import {
   Copy,
   Check,
   ExternalLink,
+  MessageSquare,
   X,
 } from 'lucide-react'
 import { api, wsUrl } from '../api/client'
 import { useAuth } from '../stores/auth'
 import { displayImagePath, extractImagePaths, imageUrl } from './ChatPage/utils'
+import { cn } from '../lib/utils'
 
 interface TimelineEvent {
   timestamp: number
@@ -60,6 +63,8 @@ interface TaskItem {
   isolation_mode: 'inplace' | 'worktree'
   branch_name: string
   worktree_path: string
+  origin_conversation_id?: string
+  origin_turn_seq?: number | null
 }
 
 interface TasksResponse {
@@ -367,15 +372,32 @@ interface TaskDetail {
 function TaskCard({
   task,
   onCancel,
+  highlighted = false,
+  defaultExpanded = false,
+  onNavigateToChat,
 }: {
   task: TaskItem
   onCancel: (id: string) => void
+  highlighted?: boolean
+  defaultExpanded?: boolean
+  onNavigateToChat?: (task: TaskItem) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [isHighlighted, setIsHighlighted] = useState(false)
   const isActive = task.status === 'queued' || task.status === 'running'
+
+  const prevHighlightedRef = useRef(highlighted)
+  useEffect(() => {
+    if (highlighted && !prevHighlightedRef.current) {
+      setIsHighlighted(true)
+      const timer = setTimeout(() => setIsHighlighted(false), 2000)
+      return () => clearTimeout(timer)
+    }
+    prevHighlightedRef.current = highlighted
+  }, [highlighted])
 
   const typeStyle = TASK_TYPE_STYLE[task.task_type] || DEFAULT_TYPE_STYLE
   const TypeIcon = typeStyle.icon
@@ -410,11 +432,25 @@ function TaskCard({
     }
   }
 
+  const hasChatBinding = !!task.origin_session_key
+  const chatBtnTitle = !hasChatBinding
+    ? '缺少 session 绑定'
+    : !task.origin_conversation_id
+    ? '缺少 conversation 绑定，将打开对应 session'
+    : '查看对话'
+
   return (
     <div
-      className={`rounded-xl border transition-all ${
-        isActive ? 'border-blue-500/30 bg-blue-500/5 shadow-sm' : 'border-[var(--border)] bg-[var(--bg-secondary)]'
-      }`}
+      data-task-id={task.task_id}
+      id={`bg-task-${task.task_id}`}
+      className={cn(
+        'rounded-xl border transition-all duration-500',
+        isHighlighted
+          ? 'border-[var(--accent)] bg-[var(--accent)]/5 ring-1 ring-[var(--accent)]/30 shadow-sm'
+          : isActive
+          ? 'border-blue-500/30 bg-blue-500/5 shadow-sm'
+          : 'border-[var(--border)] bg-[var(--bg-secondary)]',
+      )}
     >
       <div className="flex items-start gap-3 p-4 cursor-pointer select-none" onClick={handleToggle}>
         <div className="pt-0.5 text-[var(--text-secondary)]">
@@ -476,19 +512,40 @@ function TaskCard({
           )}
         </div>
 
-        {isActive && (
-          <button
-            onClick={e => {
-              e.stopPropagation();
-              onCancel(task.task_id);
-            }}
-            className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
-            title="取消任务"
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            取消
-          </button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {onNavigateToChat && (
+            <button
+              onClick={e => {
+                e.stopPropagation()
+                onNavigateToChat(task)
+              }}
+              disabled={!hasChatBinding}
+              title={chatBtnTitle}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-colors',
+                hasChatBinding
+                  ? 'text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10'
+                  : 'text-[var(--text-secondary)]/40 cursor-not-allowed',
+              )}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">对话</span>
+            </button>
+          )}
+          {isActive && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onCancel(task.task_id);
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+              title="取消任务"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">取消</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {expanded && (
@@ -705,11 +762,20 @@ function Pagination({
 }
 
 export default function BgTasksPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const deepLinkTaskId = searchParams.get('task_id') || null
+
   const [data, setData] = useState<TasksResponse | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | null>(null)
+  const [focusedTask, setFocusedTask] = useState<TaskItem | null>(null)
+  const [focusedTaskLoading, setFocusedTaskLoading] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const deepLinkScrolledRef = useRef<string | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<HistoryResponse | null>(null)
@@ -808,6 +874,42 @@ export default function BgTasksPage() {
     if (showHistory && !history) fetchHistory(1)
   }, [showHistory, history, fetchHistory])
 
+  // Deep link: when data is ready, locate the task by task_id
+  useEffect(() => {
+    if (!deepLinkTaskId || !data) return
+
+    const found = data.tasks.find(t => t.task_id === deepLinkTaskId)
+    if (found) {
+      setFocusedTask(null)
+      return
+    }
+
+    if (focusedTask?.task_id === deepLinkTaskId || focusedTaskLoading) return
+
+    setFocusedTaskLoading(true)
+    api<TaskItem>(`/bg-tasks/${deepLinkTaskId}`)
+      .then(task => {
+        setFocusedTask(task)
+      })
+      .catch(() => {
+        setDeepLinkNotice(`找不到任务 ${deepLinkTaskId}`)
+      })
+      .finally(() => setFocusedTaskLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkTaskId, data])
+
+  // Deep link: scroll to the card once it's rendered
+  useEffect(() => {
+    if (!deepLinkTaskId || deepLinkScrolledRef.current === deepLinkTaskId) return
+    const container = scrollContainerRef.current
+    if (!container) return
+    const el = container.querySelector(`[data-task-id="${CSS.escape(deepLinkTaskId)}"]`)
+    if (el) {
+      deepLinkScrolledRef.current = deepLinkTaskId
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+
   useEffect(() => {
     if (data && data.running > 0) {
       const timer = setInterval(() => setData(d => d ? { ...d } : d), 1000)
@@ -823,6 +925,19 @@ export default function BgTasksPage() {
       setError(err instanceof Error ? err.message : '取消失败')
     }
   }
+
+  const handleNavigateToChat = useCallback((task: TaskItem) => {
+    if (!task.origin_session_key) return
+    const params = new URLSearchParams({ session_key: task.origin_session_key })
+    if (task.origin_conversation_id) {
+      params.set('conversation_id', task.origin_conversation_id)
+    }
+    params.set('task_id', task.task_id)
+    if (task.origin_turn_seq != null) {
+      params.set('turn_seq', String(task.origin_turn_seq))
+    }
+    navigate(`/chat?${params.toString()}`)
+  }, [navigate])
 
   const clearFilters = useCallback(() => {
     setTypeFilter('all')
@@ -859,6 +974,12 @@ export default function BgTasksPage() {
 
   return (
     <div className="h-[calc(100vh-3rem)] flex flex-col">
+      {deepLinkNotice && (
+        <div className="mb-3 px-4 py-2 rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] text-xs flex items-center justify-between">
+          <span>{deepLinkNotice}</span>
+          <button onClick={() => setDeepLinkNotice(null)} className="ml-2 hover:underline">Dismiss</button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold">后台任务</h1>
@@ -900,7 +1021,28 @@ export default function BgTasksPage() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto space-y-6 pb-8">
+      <div className="flex-1 overflow-y-auto space-y-6 pb-8" ref={scrollContainerRef}>
+        {focusedTask && (
+          <section>
+            <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-2">
+              <ExternalLink className="w-3.5 h-3.5 text-[var(--accent)]" />
+              深链任务
+            </h2>
+            <TaskCard
+              task={focusedTask}
+              onCancel={handleCancel}
+              highlighted={deepLinkTaskId === focusedTask.task_id}
+              defaultExpanded
+              onNavigateToChat={handleNavigateToChat}
+            />
+          </section>
+        )}
+        {focusedTaskLoading && (
+          <div className="text-center py-8 text-[var(--text-secondary)]">
+            <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1" />
+            查找任务中...
+          </div>
+        )}
         {!data ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
@@ -940,7 +1082,13 @@ export default function BgTasksPage() {
                         {!isCollapsed && (
                           <div className="px-2 pb-2 space-y-2">
                             {group.tasks.map(t => (
-                              <TaskCard key={t.task_id} task={t} onCancel={handleCancel} />
+                              <TaskCard
+                                key={t.task_id}
+                                task={t}
+                                onCancel={handleCancel}
+                                highlighted={deepLinkTaskId === t.task_id}
+                                onNavigateToChat={handleNavigateToChat}
+                              />
                             ))}
                           </div>
                         )}
@@ -958,7 +1106,13 @@ export default function BgTasksPage() {
                 </h2>
                 <div className="space-y-2">
                   {recentFinished.map(t => (
-                    <TaskCard key={t.task_id} task={t} onCancel={handleCancel} />
+                    <TaskCard
+                      key={t.task_id}
+                      task={t}
+                      onCancel={handleCancel}
+                      highlighted={deepLinkTaskId === t.task_id}
+                      onNavigateToChat={handleNavigateToChat}
+                    />
                   ))}
                 </div>
               </section>
@@ -998,7 +1152,13 @@ export default function BgTasksPage() {
                 <>
                   <div className="space-y-2">
                     {history.tasks.map(t => (
-                      <TaskCard key={t.task_id} task={t} onCancel={handleCancel} />
+                      <TaskCard
+                        key={t.task_id}
+                        task={t}
+                        onCancel={handleCancel}
+                        highlighted={deepLinkTaskId === t.task_id}
+                        onNavigateToChat={handleNavigateToChat}
+                      />
                     ))}
                   </div>
                   <Pagination
