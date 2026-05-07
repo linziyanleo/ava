@@ -371,7 +371,13 @@ class ImageGenTool(Tool):
             record["output_images"] = image_paths
             record["output_text"] = "\n".join(text_parts)
 
-            if not image_paths and not text_parts:
+            if not image_paths:
+                if text_parts:
+                    error_msg = "Image generation model returned text but no image"
+                    record["status"] = "error"
+                    record["error"] = error_msg
+                    self._write_record(record)
+                    return f"Error: {error_msg}.\n\n{record['output_text']}"
                 record["status"] = "error"
                 record["error"] = "No output received from model"
                 self._write_record(record)

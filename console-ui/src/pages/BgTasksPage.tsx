@@ -29,6 +29,7 @@ import {
 import { api, wsUrl } from '../api/client'
 import { useAuth } from '../stores/auth'
 import { displayImagePath, extractImagePaths, imageUrl } from './ChatPage/utils'
+import { buildTokenStatsNavUrl } from '../lib/tokenStatsNav'
 import { cn } from '../lib/utils'
 
 interface TimelineEvent {
@@ -65,6 +66,9 @@ interface TaskItem {
   worktree_path: string
   origin_conversation_id?: string
   origin_turn_seq?: number | null
+  trace_id?: string
+  parent_span_id?: string
+  dispatch_span_id?: string
 }
 
 interface TasksResponse {
@@ -387,8 +391,10 @@ function TaskCard({
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [copiedTrace, setCopiedTrace] = useState(false)
   const [isHighlighted, setIsHighlighted] = useState(false)
   const isActive = task.status === 'queued' || task.status === 'running'
+  const navigate = useNavigate()
 
   const prevHighlightedRef = useRef(highlighted)
   useEffect(() => {
@@ -431,6 +437,29 @@ function TaskCard({
     } catch {
       setCopiedPrompt(false)
     }
+  }
+
+  const handleCopyTrace = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!task.trace_id) return
+    try {
+      await navigator.clipboard.writeText(task.trace_id)
+      setCopiedTrace(true)
+      setTimeout(() => setCopiedTrace(false), 1500)
+    } catch {
+      setCopiedTrace(false)
+    }
+  }
+
+  const handleOpenTrace = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!task.trace_id) return
+    navigate(buildTokenStatsNavUrl({
+      traceId: task.trace_id,
+      sessionKey: task.origin_session_key,
+      conversationId: task.origin_conversation_id,
+      turnSeq: task.origin_turn_seq,
+    }))
   }
 
   const hasChatBinding = !!task.origin_session_key
@@ -504,6 +533,17 @@ function TaskCard({
                 <GitBranch className="w-3 h-3 shrink-0" />
                 {task.branch_name}
               </span>
+            )}
+            {task.trace_id && (
+              <button
+                type="button"
+                onClick={handleOpenTrace}
+                className="inline-flex items-center gap-1 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                title={task.trace_id}
+              >
+                <ExternalLink className="w-3 h-3 shrink-0" />
+                Trace {task.trace_id.slice(0, 8)}
+              </button>
             )}
           </div>
 
@@ -688,6 +728,32 @@ function TaskCard({
                 <div>
                   <span className="text-[var(--text-secondary)]">Last Tool: </span>
                   {task.last_tool_name || '-'}
+                </div>
+                <div className="col-span-2 flex min-w-0 items-center gap-2">
+                  <span className="text-[var(--text-secondary)]">Trace: </span>
+                  {task.trace_id ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleOpenTrace}
+                        className="truncate font-mono text-[var(--accent)] hover:underline"
+                        title={task.trace_id}
+                      >
+                        {task.trace_id}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyTrace}
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                        title="复制 Trace ID"
+                      >
+                        {copiedTrace ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                        {copiedTrace ? '已复制' : '复制'}
+                      </button>
+                    </>
+                  ) : (
+                    <span>-</span>
+                  )}
                 </div>
               </div>
             </div>

@@ -30,6 +30,7 @@ interface DirectTaskSubmitResponse {
   task_id: string
   status: DirectTaskStatus
   task_type: DirectTaskType
+  trace_id?: string
 }
 
 interface BackgroundTaskListItem {
@@ -42,6 +43,7 @@ interface BackgroundTaskListItem {
   elapsed_ms: number
   result_preview?: string
   error_message?: string
+  trace_id?: string
 }
 
 interface BackgroundTaskListResponse {
@@ -791,6 +793,7 @@ export default function ChatPage() {
             elapsed_ms: next.elapsed_ms || (next.started_at ? Math.max(Date.now() - next.started_at * 1000, 0) : 0),
             result_preview: next.result_preview || task.result_preview,
             error_message: next.error_message || '',
+            trace_id: next.trace_id || task.trace_id,
           }
         }))
         if (shouldRefreshSession) {
@@ -905,6 +908,7 @@ export default function ChatPage() {
         elapsed_ms: 0,
         result_preview: '',
         error_message: '',
+        trace_id: response.trace_id,
       }
       setDirectTasks((prev) => [task, ...prev.filter((item) => item.task_id !== task.task_id)].slice(0, 20))
     } catch (err) {

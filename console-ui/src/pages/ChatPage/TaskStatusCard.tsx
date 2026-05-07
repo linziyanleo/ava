@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils'
 import type { DirectTaskMessage, DirectTaskStatus, DirectTaskType } from './types'
 import { displayImagePath, extractImagePaths, imageUrl } from './utils'
 import { ImageCarousel } from './ImageCarousel'
+import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 
 const TYPE_CONFIG: Record<DirectTaskType, {
   icon: typeof Terminal
@@ -87,10 +88,22 @@ export function TaskStatusCard({ task }: { task: DirectTaskMessage }) {
           <ExternalLink className="h-3 w-3" />
           Task
         </button>
+        {task.trace_id && (
+          <button
+            type="button"
+            onClick={() => navigate(buildTokenStatsNavUrl({ traceId: task.trace_id, sessionKey: task.session_key }))}
+            className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            title={task.trace_id}
+          >
+            <ExternalLink className="h-3 w-3" />
+            Trace
+          </button>
+        )}
       </div>
       <div className="space-y-2 px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-secondary)]">
           <span className="font-mono">{task.task_id}</span>
+          {task.trace_id && <span className="font-mono">trace:{task.trace_id.slice(0, 8)}</span>}
           <span>{formatDuration(task.elapsed_ms)}</span>
         </div>
         <div className="line-clamp-2 text-sm text-[var(--text-primary)]">{task.prompt_preview}</div>

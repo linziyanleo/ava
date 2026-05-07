@@ -71,6 +71,10 @@ class TaskSnapshot:
     # deep-link binding fields
     origin_conversation_id: str = ""
     origin_turn_seq: int | None = None
+    # trace binding fields
+    trace_id: str = ""
+    parent_span_id: str = ""
+    dispatch_span_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -202,6 +206,7 @@ class BackgroundTaskStore:
         task_id = uuid.uuid4().hex[:12]
         now = time.time()
         captured_context = contextvars.copy_context()
+        trace_metadata: dict[str, str] = {}
 
         effective_project_path = project_path
         if workspace:
@@ -236,11 +241,12 @@ class BackgroundTaskStore:
                     status="ok",
                     end_ns=time.time_ns(),
                 )
-                self._trace_metadata[task_id] = {
+                trace_metadata = {
                     "trace_id": parent_ctx.trace_id,
                     "parent_span_id": parent_ctx.span_id,
                     "dispatch_span_id": dispatch_span_id,
                 }
+                self._trace_metadata[task_id] = trace_metadata
         except Exception as exc:
             logger.warning("BackgroundTaskStore: failed to create dispatch trace span: {}", exc)
 
@@ -264,6 +270,9 @@ class BackgroundTaskStore:
             worktree_path=workspace.worktree_path or "" if workspace else "",
             origin_conversation_id=origin_conversation_id,
             origin_turn_seq=origin_turn_seq,
+            trace_id=trace_metadata.get("trace_id", ""),
+            parent_span_id=trace_metadata.get("parent_span_id", ""),
+            dispatch_span_id=trace_metadata.get("dispatch_span_id", ""),
         )
         self._active[task_id] = snapshot
         self._captured_contexts[task_id] = captured_context
@@ -879,6 +888,9 @@ class BackgroundTaskStore:
                 extra["worktree_path"] = snapshot.worktree_path
                 extra["origin_conversation_id"] = snapshot.origin_conversation_id
                 extra["origin_turn_seq"] = snapshot.origin_turn_seq
+                extra["trace_id"] = snapshot.trace_id
+                extra["parent_span_id"] = snapshot.parent_span_id
+                extra["dispatch_span_id"] = snapshot.dispatch_span_id
                 if full_result:
                     extra["full_result"] = full_result
                 self._db.execute(
@@ -987,6 +999,9 @@ class BackgroundTaskStore:
             worktree_path=extra.get("worktree_path", ""),
             origin_conversation_id=extra.get("origin_conversation_id", ""),
             origin_turn_seq=int(raw_turn_seq) if raw_turn_seq is not None else None,
+            trace_id=extra.get("trace_id", ""),
+            parent_span_id=extra.get("parent_span_id", ""),
+            dispatch_span_id=extra.get("dispatch_span_id", ""),
         )
 
     @staticmethod

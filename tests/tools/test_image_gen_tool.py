@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -126,6 +127,39 @@ def test_google_image_model_still_uses_generate_content(monkeypatch, tmp_path: P
     assert "Generated image(s):" in result
     assert calls[0]["model"] == "google/gemini-3.1-flash-image-preview"
     assert len(list(tmp_path.glob("*.png"))) == 1
+
+
+def test_google_image_model_text_only_response_is_error(monkeypatch, tmp_path: Path):
+    import ava.tools.image_gen as image_gen_module
+
+    records_file = tmp_path / "records.jsonl"
+    monkeypatch.setattr(
+        image_gen_module,
+        "_load_image_gen_config",
+        lambda: ("google/gemini-3.1-flash-image-preview", "google", "secret-key", "https://vertex.example/v1"),
+    )
+    monkeypatch.setattr(image_gen_module, "_get_generated_dir", lambda: tmp_path)
+    monkeypatch.setattr(image_gen_module, "_get_records_file", lambda: records_file)
+
+    async def fake_generate_content(self, prompt, ref_path, record_id):
+        return ["Designing Harness System"], [], None
+
+    monkeypatch.setattr(
+        image_gen_module.ImageGenTool,
+        "_execute_generate_content",
+        fake_generate_content,
+    )
+
+    tool = image_gen_module.ImageGenTool(background=False)
+    result = asyncio.run(tool.execute(prompt="explain harness system"))
+
+    assert result.startswith("Error: Image generation model returned text but no image")
+    assert "Designing Harness System" in result
+    record = json.loads(records_file.read_text().strip())
+    assert record["status"] == "error"
+    assert record["error"] == "Image generation model returned text but no image"
+    assert record["output_images"] == []
+    assert record["output_text"] == "Designing Harness System"
 
 
 def test_zenmux_base_normalizes_to_vertex_endpoint():

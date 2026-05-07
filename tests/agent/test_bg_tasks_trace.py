@@ -66,4 +66,12 @@ async def test_bg_task_restores_trace_context_and_record_auto_spans(tmp_path):
     assert extra["trace_id"] == root_ctx.trace_id
     assert extra["parent_span_id"] == root_ctx.span_id
     assert extra["dispatch_span_id"] in spans
-    assert "captured_context" not in store.get_status(task_id=submit.task_id)["tasks"][0]
+    task_status = store.get_status(task_id=submit.task_id)["tasks"][0]
+    assert task_status["trace_id"] == root_ctx.trace_id
+    assert task_status["parent_span_id"] == root_ctx.span_id
+    assert task_status["dispatch_span_id"] in spans
+    assert "captured_context" not in task_status
+
+    reloaded = BackgroundTaskStore(db=db, trace_spans=trace_store)
+    reloaded_status = reloaded.get_status(task_id=submit.task_id)["tasks"][0]
+    assert reloaded_status["trace_id"] == root_ctx.trace_id

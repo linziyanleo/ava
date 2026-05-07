@@ -40,6 +40,7 @@ export interface DirectTaskMessage {
   elapsed_ms: number
   result_preview?: string
   error_message?: string
+  trace_id?: string
 }
 
 export interface ChatFileUpload {
