@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
-import type { ChatComposePayload, ChatImageUpload, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
+import type { ChatComposePayload, ChatFileUpload, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
 import {
@@ -722,13 +722,13 @@ export default function ChatPage() {
     setError('')
     setSending(true)
     try {
-      let uploads: ChatImageUpload[] = []
+      let uploads: ChatFileUpload[] = []
       if (attachments.length > 0) {
         const formData = new FormData()
         for (const attachment of attachments) {
           formData.append('files', attachment, attachment.name)
         }
-        const response = await api<{ uploads: ChatImageUpload[] }>('/chat/uploads', {
+        const response = await api<{ uploads: ChatFileUpload[] }>('/chat/uploads', {
           method: 'POST',
           body: formData,
         })
@@ -737,7 +737,10 @@ export default function ChatPage() {
 
       const optimisticContent = uploads.length > 0
         ? [
-            ...uploads.map((upload) => ({ type: 'text', text: `[image: ${upload.media_path}]` })),
+            ...uploads.map((upload) => ({
+              type: 'text',
+              text: `[${upload.kind === 'image' ? 'image' : 'file'}: ${upload.media_path}]`,
+            })),
             ...(text ? [{ type: 'text', text }] : []),
           ]
         : text
@@ -769,6 +772,34 @@ export default function ChatPage() {
       throw err
     }
   }
+
+  const handleStopCurrentTurn = useCallback(async () => {
+    if (
+      mockMode ||
+      !activeSession ||
+      !currentMeta ||
+      activeConversationId !== currentMeta.conversation_id
+    ) {
+      return
+    }
+
+    setError('')
+    try {
+      await api<{ ok: boolean; stopped: number; message: string }>(
+        `/chat/sessions/${encodeURIComponent(activeSession)}/stop`,
+        { method: 'POST' },
+      )
+      clearConsoleInFlight()
+      void refreshSessionViewRef.current(`console:${activeSession}`, {
+        preferredConversationId: activeConversationIdRef.current,
+        silent: true,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to stop current turn'
+      setError(msg)
+      throw err
+    }
+  }, [activeConversationId, activeSession, clearConsoleInFlight, currentMeta, mockMode])
 
   const isConsole = activeScene === 'console' && !mockMode
   const filteredSessions = sessions.filter((s) => s.scene === activeScene)
@@ -856,6 +887,7 @@ export default function ChatPage() {
           activeTransport={activeTransport}
           sendDisabled={sending || !!inFlightTurn}
           onSend={handleSend}
+          onStopCurrentTurn={handleStopCurrentTurn}
           onRefresh={handleRefresh}
           isMobile={isMobile}
           onToggleSessionPanel={() => setMobileSessionOpen(v => !v)}

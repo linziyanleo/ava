@@ -1,9 +1,13 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { FileText, Plus, Send, X } from 'lucide-react'
+import { InputActionMenu } from './InputActionMenu'
+import type { ChatCommand } from './commands'
+import { findCommandsByPrefix } from './commands'
 import type { ChatComposePayload } from './types'
 
 interface ChatInputProps {
   onSend: (payload: ChatComposePayload) => Promise<void> | void
+  onStopCurrentTurn: () => Promise<void> | void
   sendDisabled: boolean
   isMobile?: boolean
 }
@@ -11,7 +15,8 @@ interface ChatInputProps {
 interface PendingAttachment {
   id: string
   file: File
-  previewUrl: string
+  previewUrl: string | null
+  isImage: boolean
 }
 
 const MAX_HEIGHT = 200
@@ -27,25 +32,57 @@ function extensionForMime(mime: string): string {
       return 'webp'
     case 'image/gif':
       return 'gif'
+    case 'application/pdf':
+      return 'pdf'
+    case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+      return 'docx'
+    case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+      return 'xlsx'
+    case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+      return 'pptx'
+    case 'text/plain':
+      return 'txt'
+    case 'text/markdown':
+      return 'md'
+    case 'text/csv':
+      return 'csv'
+    case 'application/json':
+      return 'json'
     default:
-      return 'png'
+      return 'bin'
   }
 }
 
-function normalizePastedFile(file: File, index: number): File {
+function normalizeAttachmentFile(file: File, index: number, fallbackNamePrefix: string): File {
   if (file.name) return file
   const extension = extensionForMime(file.type)
-  return new File([file], `pasted-image-${Date.now()}-${index}.${extension}`, { type: file.type })
+  return new File([file], `${fallbackNamePrefix}-${Date.now()}-${index}.${extension}`, { type: file.type })
 }
 
-export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
+function formatFileSize(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${size} B`
+}
+
+export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [pasteError, setPasteError] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0)
   const isComposingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
   const attachmentsRef = useRef<PendingAttachment[]>([])
   attachmentsRef.current = attachments
+
+  const slashCommands = useMemo(
+    () => (slashOpen ? findCommandsByPrefix(input) : []),
+    [input, slashOpen],
+  )
+  const slashSuggestOpen = slashOpen && slashCommands.length > 0
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
@@ -62,55 +99,83 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
   useEffect(() => {
     return () => {
       for (const attachment of attachmentsRef.current) {
-        URL.revokeObjectURL(attachment.previewUrl)
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
       }
     }
   }, [])
 
+  const focusTextarea = useCallback(() => {
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }, [])
+
+  const closeActionMenus = useCallback(() => {
+    setMenuOpen(false)
+    setSlashOpen(false)
+    focusTextarea()
+  }, [focusTextarea])
+
   const removeAttachment = (id: string) => {
     setAttachments((prev) => {
       const target = prev.find((item) => item.id === id)
-      if (target) {
+      if (target?.previewUrl) {
         URL.revokeObjectURL(target.previewUrl)
       }
       return prev.filter((item) => item.id !== id)
     })
   }
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = Array.from(e.clipboardData?.items || [])
-    const imageItems = items.filter((item) => item.type.startsWith('image/'))
-    if (imageItems.length === 0) return
+  const updateSlashSuggest = useCallback((value: string) => {
+    const matches = !isComposingRef.current && value.startsWith('/') ? findCommandsByPrefix(value) : []
+    setSlashOpen(matches.length > 0)
+    setActiveCommandIndex(0)
+  }, [])
 
-    e.preventDefault()
+  const addAttachmentsFromFiles = useCallback((files: File[], fallbackNamePrefix: string) => {
+    if (files.length === 0) return
+
     setPasteError('')
-
     setAttachments((prev) => {
       const remainingSlots = Math.max(MAX_ATTACHMENTS - prev.length, 0)
       if (remainingSlots === 0) {
-        setPasteError(`最多支持 ${MAX_ATTACHMENTS} 张图片`)
+        setPasteError(`最多支持 ${MAX_ATTACHMENTS} 个文件`)
         return prev
       }
 
-      const next = imageItems
-        .slice(0, remainingSlots)
-        .map((item) => item.getAsFile())
-        .filter((file): file is File => file instanceof File)
-        .map((file, index) => {
-          const normalized = normalizePastedFile(file, index)
-          return {
-            id: `${Date.now()}-${index}-${normalized.name}`,
-            file: normalized,
-            previewUrl: URL.createObjectURL(normalized),
-          }
-        })
+      const next = files.slice(0, remainingSlots).map((file, index) => {
+        const normalized = normalizeAttachmentFile(file, index, fallbackNamePrefix)
+        const isImage = normalized.type.startsWith('image/')
+        return {
+          id: `${Date.now()}-${index}-${normalized.name}`,
+          file: normalized,
+          previewUrl: isImage ? URL.createObjectURL(normalized) : null,
+          isImage,
+        }
+      })
 
-      if (imageItems.length > remainingSlots) {
-        setPasteError(`最多支持 ${MAX_ATTACHMENTS} 张图片`)
+      if (files.length > remainingSlots) {
+        setPasteError(`最多支持 ${MAX_ATTACHMENTS} 个文件`)
       }
 
       return [...prev, ...next]
     })
+  }, [])
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    let pastedFiles = Array.from(e.clipboardData?.files || [])
+    if (pastedFiles.length === 0) {
+      pastedFiles = Array.from(e.clipboardData?.items || [])
+        .filter((item) => item.kind === 'file')
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file instanceof File)
+    }
+    if (pastedFiles.length === 0) return
+
+    e.preventDefault()
+    addAttachmentsFromFiles(pastedFiles, 'pasted-file')
   }
 
   const handleSend = async () => {
@@ -122,11 +187,15 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
         attachments: attachments.map((item) => item.file),
       })
       for (const attachment of attachments) {
-        URL.revokeObjectURL(attachment.previewUrl)
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
       }
       setAttachments([])
       setInput('')
       setPasteError('')
+      setMenuOpen(false)
+      setSlashOpen(false)
     } catch (err) {
       console.error('Failed to send message:', err)
       return
@@ -140,6 +209,44 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
     })
   }
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextInput = e.target.value
+    setInput(nextInput)
+    updateSlashSuggest(nextInput)
+  }
+
+  const handleRunCommand = useCallback(async (command: ChatCommand) => {
+    if (sendDisabled && !command.runWhenBusy) {
+      focusTextarea()
+      return
+    }
+
+    try {
+      if (command.run) {
+        await command.run({
+          send: onSend,
+          stopCurrentTurn: onStopCurrentTurn,
+          setInput,
+          closeMenu: closeActionMenus,
+        })
+      } else if (command.populateOnly) {
+        setInput(`${command.id} `)
+      } else {
+        await onSend({ text: command.id, attachments: [] })
+        if (input.startsWith('/')) {
+          setInput('')
+        }
+      }
+      setPasteError('')
+      setMenuOpen(false)
+      setSlashOpen(false)
+    } catch (err) {
+      console.error('Failed to run chat command:', err)
+    } finally {
+      focusTextarea()
+    }
+  }, [closeActionMenus, focusTextarea, input, onSend, onStopCurrentTurn, sendDisabled])
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isComposingRef.current) return
 
@@ -147,6 +254,36 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
       e.preventDefault()
       void handleSend()
       return
+    }
+
+    if (slashSuggestOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveCommandIndex((index) => (index + 1) % slashCommands.length)
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveCommandIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length)
+        return
+      }
+
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        const command = slashCommands[activeCommandIndex]
+        if (command) {
+          void handleRunCommand(command)
+        }
+        return
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashOpen(false)
+        focusTextarea()
+        return
+      }
     }
 
     if (e.key === 'Enter' && e.shiftKey) {
@@ -164,15 +301,27 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
                 key={attachment.id}
                 className="relative shrink-0 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]"
               >
-                <img
-                  src={attachment.previewUrl}
-                  alt="Pasted attachment"
-                  className="block h-[120px] w-[120px] object-cover"
-                />
+                {attachment.isImage && attachment.previewUrl ? (
+                  <img
+                    src={attachment.previewUrl}
+                    alt={attachment.file.name || 'Attachment'}
+                    className="block h-[120px] w-[120px] object-cover"
+                  />
+                ) : (
+                  <div className="flex h-[120px] w-[220px] items-center gap-3 p-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent)]">
+                      <FileText className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-[var(--text-primary)]">{attachment.file.name}</span>
+                      <span className="block text-xs text-[var(--text-secondary)]">{formatFileSize(attachment.file.size)}</span>
+                    </span>
+                  </div>
+                )}
                 <button
                   onClick={() => removeAttachment(attachment.id)}
                   className="absolute right-2 top-2 rounded-full bg-black/65 p-1 text-white hover:bg-[var(--danger)]"
-                  title="移除图片"
+                  title="移除文件"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -187,23 +336,61 @@ export function ChatInput({ onSend, sendDisabled, isMobile }: ChatInputProps) {
       )}
 
       <div className="flex gap-2 items-end">
-        <textarea
-          ref={textareaRef}
-          value={input}
-          rows={1}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionStart={() => { isComposingRef.current = true }}
-          onCompositionEnd={() => { isComposingRef.current = false }}
-          placeholder="Type a message or paste images... (⌘+Enter to send)"
-          className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] resize-none leading-normal"
-          style={{ maxHeight: `${MAX_HEIGHT}px` }}
-        />
+        <div className="relative shrink-0">
+          <button
+            ref={menuButtonRef}
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            className="flex h-12 w-12 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+            title="添加文件或命令"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <InputActionMenu
+            open={menuOpen}
+            onClose={closeActionMenus}
+            onPickFiles={(files) => addAttachmentsFromFiles(files, 'picked-file')}
+            onRunCommand={(command) => { void handleRunCommand(command) }}
+            isMobile={isMobile}
+            anchorRef={menuButtonRef}
+            variant="menu"
+            sendDisabled={sendDisabled}
+          />
+        </div>
+        <div className="relative flex-1">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            rows={1}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onCompositionStart={() => { isComposingRef.current = true }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false
+              updateSlashSuggest(input)
+            }}
+            placeholder="Type a message or attach files... (⌘+Enter to send)"
+            className="block min-h-12 w-full px-4 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] resize-none leading-6"
+            style={{ maxHeight: `${MAX_HEIGHT}px` }}
+          />
+          <InputActionMenu
+            open={slashSuggestOpen}
+            onClose={closeActionMenus}
+            onPickFiles={(files) => addAttachmentsFromFiles(files, 'picked-file')}
+            onRunCommand={(command) => { void handleRunCommand(command) }}
+            isMobile={isMobile}
+            anchorRef={textareaRef}
+            filterPrefix={input}
+            variant="slash-suggest"
+            sendDisabled={sendDisabled}
+            activeIndex={activeCommandIndex}
+          />
+        </div>
         <button
           onClick={() => { void handleSend() }}
           disabled={(!input.trim() && attachments.length === 0) || sendDisabled}
-          className="px-4 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white disabled:opacity-40 transition-colors shrink-0"
+          className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-40"
           title="Send (⌘+Enter)"
         >
           <Send className="w-4 h-4" />

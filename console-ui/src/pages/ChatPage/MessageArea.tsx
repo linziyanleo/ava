@@ -27,6 +27,7 @@ interface MessageAreaProps {
   activeTransport: ActiveChatTransport
   sendDisabled: boolean
   onSend: (payload: ChatComposePayload) => Promise<void> | void
+  onStopCurrentTurn: () => Promise<void> | void
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
@@ -34,7 +35,7 @@ interface MessageAreaProps {
   targetTurnSeq?: number | null
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -326,6 +327,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
       {isConsole && !isReadOnly && (
         <ChatInput
           onSend={onSend}
+          onStopCurrentTurn={onStopCurrentTurn}
           sendDisabled={sendDisabled}
           isMobile={isMobile}
         />

@@ -13,13 +13,15 @@ export interface ChatComposePayload {
   attachments: File[]
 }
 
-export interface ChatImageUpload {
+export interface ChatFileUpload {
   filename: string
   media_path: string
   path: string
   mime_type: string
+  kind: 'image' | 'file'
   size_bytes: number
-  preview_url: string
+  preview_url: string | null
+  download_url: string
 }
 
 export interface SessionMeta {
