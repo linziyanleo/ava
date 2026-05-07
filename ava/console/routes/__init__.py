@@ -1,6 +1,7 @@
 """Console API routes."""
 
 from ava.console.routes import (
+    agent_routes,
     audit_routes,
     auth_routes,
     bg_task_routes,
@@ -16,6 +17,7 @@ from ava.console.routes import (
 )
 
 __all__ = [
+    "agent_routes",
     "audit_routes",
     "auth_routes",
     "bg_task_routes",

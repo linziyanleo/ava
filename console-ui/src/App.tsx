@@ -4,6 +4,7 @@ import { useAuth } from './stores/auth'
 import type { UserRole } from './stores/auth'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
+import AgentDashboardPage from './pages/AgentDashboardPage'
 import DashboardPage from './pages/DashboardPage'
 import ConfigPage from './pages/ConfigPage'
 import MemoryPage from './pages/MemoryPage'
@@ -52,6 +53,7 @@ export default function App() {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="agents" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><AgentDashboardPage /></ProtectedRoute>} />
           <Route path="config" element={<ConfigPage />} />
           <Route path="memory" element={<MemoryPage />} />
           <Route path="media" element={<MediaPage />} />

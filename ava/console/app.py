@@ -6,9 +6,10 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from loguru import logger
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -47,6 +48,7 @@ class Services:
     chat: ChatService | None = None
     token_stats: TokenStatsCollector | None = None
     trace_spans: TraceSpanStore | None = None
+    db: Any | None = None
     mock: "Services | None" = None
 
 
@@ -122,6 +124,15 @@ def _mount_console_spa(app: FastAPI) -> None:
         return resp
 
 
+def _mount_api_not_found(app: FastAPI) -> None:
+    @app.api_route(
+        "/api/{full_path:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    )
+    async def api_not_found(full_path: str):
+        raise HTTPException(status_code=404, detail=f"API route not found: /api/{full_path}")
+
+
 def create_console_app(
     nanobot_dir: Path,
     workspace: Path,
@@ -180,6 +191,7 @@ def create_console_app(
         chat=ChatService(agent_loop, workspace, db=db),
         token_stats=token_stats_collector,
         trace_spans=trace_spans,
+        db=db,
     )
     if trace_spans is not None:
         trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
@@ -211,6 +223,7 @@ def create_console_app(
             trace_spans=mock_trace_spans,
         ) if mock_db is not None else None,
         trace_spans=mock_trace_spans,
+        db=mock_db,
     )
     _services = real_services
 
@@ -225,6 +238,7 @@ def create_console_app(
     setup_cors(app)
 
     from ava.console.routes import (
+        agent_routes,
         auth_routes,
         config_routes,
         direct_task_routes,
@@ -241,6 +255,7 @@ def create_console_app(
     )
     from ava.console.routes import bg_task_routes
 
+    app.include_router(agent_routes.router)
     app.include_router(auth_routes.router)
     app.include_router(config_routes.router)
     app.include_router(direct_task_routes.router)
@@ -256,6 +271,7 @@ def create_console_app(
     app.include_router(page_agent_routes.router)
     app.include_router(bg_task_routes.router)
 
+    _mount_api_not_found(app)
     _mount_console_spa(app)
 
     return app
@@ -329,6 +345,7 @@ def create_console_app_standalone(
         chat=None,  # type: ignore[arg-type]
         token_stats=token_stats,
         trace_spans=trace_spans,
+        db=db,
     )
     trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
     mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
@@ -355,6 +372,7 @@ def create_console_app_standalone(
         chat=mock_chat,
         token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db, trace_spans=mock_trace_spans),
         trace_spans=mock_trace_spans,
+        db=mock_db,
     )
     _services = real_services
 
@@ -395,6 +413,70 @@ def create_console_app_standalone(
     app.include_router(bg_task_routes.router)
 
     gateway_base = f"http://127.0.0.1:{gateway_port}"
+
+    @app.api_route(
+        "/api/agents{path:path}",
+        methods=["GET", "POST"],
+    )
+    async def proxy_agents_http(request: Request, path: str = ""):
+        import httpx
+
+        target = f"{gateway_base}/api/agents{path}"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        body = await request.body()
+        try:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                resp = await client.request(
+                    method=request.method,
+                    url=target,
+                    headers={
+                        k: v for k, v in request.headers.items()
+                        if k.lower() not in ("host", "content-length")
+                    },
+                    content=body,
+                )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers),
+            )
+        except httpx.ConnectError:
+            return Response(
+                content='{"detail":"Gateway offline — agents unavailable"}',
+                status_code=503,
+                media_type="application/json",
+            )
+
+    @app.api_route(
+        "/api/core/version",
+        methods=["GET"],
+    )
+    async def proxy_core_version_http(request: Request):
+        import httpx
+
+        target = f"{gateway_base}/api/core/version"
+        try:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+                resp = await client.request(
+                    method=request.method,
+                    url=target,
+                    headers={
+                        k: v for k, v in request.headers.items()
+                        if k.lower() not in ("host", "content-length")
+                    },
+                )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers),
+            )
+        except httpx.ConnectError:
+            return Response(
+                content='{"detail":"Gateway offline — core version unavailable"}',
+                status_code=503,
+                media_type="application/json",
+            )
 
     @app.api_route(
         "/api/console/direct-tasks",
@@ -577,6 +659,7 @@ def create_console_app_standalone(
 
     # --- End chat proxy -------------------------------------------------
 
+    _mount_api_not_found(app)
     _mount_console_spa(app)
 
     return app

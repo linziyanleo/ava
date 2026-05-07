@@ -469,6 +469,7 @@ _SAFE_POST_MIGRATION_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_msg_trace ON session_messages(trace_id)",
     "CREATE INDEX IF NOT EXISTS idx_tu_trace ON token_usage(trace_id)",
     "CREATE INDEX IF NOT EXISTS idx_tu_span ON token_usage(trace_id, span_id)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_registry_status ON agent_registry(status)",
 ]
 
 _SCHEMA_DDL = """
@@ -589,6 +590,23 @@ CREATE TABLE IF NOT EXISTS media_records (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_media_ts ON media_records(timestamp);
+
+CREATE TABLE IF NOT EXISTS agent_registry (
+    instance_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    installed INTEGER NOT NULL DEFAULT 0,
+    path TEXT DEFAULT '',
+    version TEXT DEFAULT '',
+    capabilities TEXT DEFAULT '{}',
+    active_tasks INTEGER NOT NULL DEFAULT 0,
+    install_url TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    last_seen TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_registry_name ON agent_registry(name);
 
 CREATE TABLE IF NOT EXISTS skill_config (
     name TEXT PRIMARY KEY,

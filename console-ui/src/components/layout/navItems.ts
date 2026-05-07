@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Bot,
   Settings,
   Brain,
   Image,
@@ -23,6 +24,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { to: '/', icon: LayoutDashboard, label: '控制台' },
+  { to: '/agents', icon: Bot, label: 'Agents', allowedRoles: ['admin', 'editor', 'viewer', 'mock_tester'] },
   { to: '/config', icon: Settings, label: '配置' },
   { to: '/tasks', icon: Timer, label: '定时任务' },
   { to: '/bg-tasks', icon: Cpu, label: '后台任务', allowedRoles: ['admin', 'editor', 'viewer', 'mock_tester'] },

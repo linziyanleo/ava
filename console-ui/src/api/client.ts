@@ -2,6 +2,60 @@ const BASE = '/api'
 
 let onUnauthorized: (() => void) | null = null
 
+function isJsonResponse(res: Response): boolean {
+  const contentType = res.headers.get('content-type') || ''
+  return /\bapplication\/json\b|\+json\b/i.test(contentType)
+}
+
+function describeResponseBody(res: Response, text: string): string {
+  const trimmed = text.trimStart().toLowerCase()
+  if (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+    return 'HTML'
+  }
+
+  const contentType = res.headers.get('content-type')
+  if (contentType) {
+    return contentType.split(';')[0].trim() || 'non-JSON'
+  }
+  return 'non-JSON'
+}
+
+async function readJsonResponse<T>(res: Response, path: string): Promise<T> {
+  const text = await res.text()
+  if (!text.trim()) {
+    return undefined as T
+  }
+
+  const trimmed = text.trimStart()
+  if (!isJsonResponse(res) && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    const received = describeResponseBody(res, text)
+    throw new Error(
+      `Expected JSON from ${BASE}${path} but received ${received} (HTTP ${res.status}). The backend route may be missing or this frontend may be proxying to an older gateway.`,
+    )
+  }
+
+  try {
+    return JSON.parse(text) as T
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'parse failed'
+    throw new Error(`Invalid JSON from ${BASE}${path}: ${message}`)
+  }
+}
+
+function getErrorDetail(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || !('detail' in body)) {
+    return null
+  }
+  const detail = (body as { detail?: unknown }).detail
+  if (typeof detail === 'string') {
+    return detail
+  }
+  if (detail == null) {
+    return null
+  }
+  return JSON.stringify(detail)
+}
+
 export function setOnUnauthorized(cb: () => void) {
   onUnauthorized = cb
 }
@@ -31,11 +85,11 @@ export async function api<T = unknown>(
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `HTTP ${res.status}`)
+    const body = await readJsonResponse<unknown>(res, path).catch(() => ({}))
+    throw new Error(getErrorDetail(body) || `HTTP ${res.status}`)
   }
 
-  return res.json()
+  return readJsonResponse<T>(res, path)
 }
 
 export function wsUrl(path: string): string {
