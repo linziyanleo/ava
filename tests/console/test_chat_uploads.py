@@ -72,9 +72,11 @@ def test_chat_upload_route_saves_image_and_serves_preview(tmp_path, monkeypatch)
 
     item = payload["uploads"][0]
     assert item["filename"].endswith(".png")
+    assert item["kind"] == "image"
     assert item["path"].startswith("chat-uploads/")
     assert item["media_path"].endswith(item["filename"])
     assert item["preview_url"] == f"/api/media/images/{item['filename']}"
+    assert item["download_url"] == f"/api/media/files/{item['filename']}"
 
     preview = client.get(item["preview_url"])
     assert preview.status_code == 200
@@ -82,14 +84,38 @@ def test_chat_upload_route_saves_image_and_serves_preview(tmp_path, monkeypatch)
     assert preview.headers["content-type"].startswith("image/png")
 
 
-def test_chat_upload_route_rejects_non_image_files(tmp_path, monkeypatch):
+def test_chat_upload_route_saves_text_file_and_serves_download(tmp_path, monkeypatch):
     client, nanobot_dir = _create_client(tmp_path, monkeypatch)
     _login_admin(client, nanobot_dir)
 
     upload = client.post(
         "/api/chat/uploads",
-        files=[("files", ("notes.txt", b"not-an-image", "text/plain"))],
+        files=[("files", ("notes.txt", b"hello from a file", "text/plain"))],
+    )
+
+    assert upload.status_code == 200
+    item = upload.json()["uploads"][0]
+    assert item["filename"].endswith(".txt")
+    assert item["kind"] == "file"
+    assert item["path"].startswith("chat-uploads/")
+    assert item["media_path"].endswith(item["filename"])
+    assert item["preview_url"] is None
+    assert item["download_url"] == f"/api/media/files/{item['filename']}"
+
+    download = client.get(item["download_url"])
+    assert download.status_code == 200
+    assert download.content == b"hello from a file"
+    assert download.headers["content-type"].startswith("text/plain")
+
+
+def test_chat_upload_route_rejects_unsupported_files(tmp_path, monkeypatch):
+    client, nanobot_dir = _create_client(tmp_path, monkeypatch)
+    _login_admin(client, nanobot_dir)
+
+    upload = client.post(
+        "/api/chat/uploads",
+        files=[("files", ("program.exe", b"not-supported", "application/octet-stream"))],
     )
 
     assert upload.status_code == 400
-    assert "image" in upload.json()["detail"].lower()
+    assert "unsupported" in upload.json()["detail"].lower()

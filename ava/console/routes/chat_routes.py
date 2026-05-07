@@ -125,7 +125,7 @@ async def get_messages(
 
 
 @router.post("/uploads")
-async def upload_chat_images(
+async def upload_chat_files(
     request: Request,
     files: list[UploadFile] = File(...),
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
@@ -133,7 +133,7 @@ async def upload_chat_images(
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     if len(files) > 4:
-        raise HTTPException(status_code=400, detail="At most 4 images can be uploaded at once")
+        raise HTTPException(status_code=400, detail="At most 4 files can be uploaded at once")
 
     from ava.console.app import get_services_for_user
 
