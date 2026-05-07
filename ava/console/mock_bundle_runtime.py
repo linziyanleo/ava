@@ -169,10 +169,16 @@ class MockBackgroundTaskStore:
         page: int = 1,
         page_size: int = 20,
         session_key: str | None = None,
+        task_type: str | None = None,
+        status: str | None = None,
     ) -> dict[str, Any]:
         tasks = list(self._history.values())
         if session_key:
             tasks = [task for task in tasks if task.get("origin_session_key") == session_key]
+        if task_type:
+            tasks = [task for task in tasks if task.get("task_type") == task_type]
+        if status:
+            tasks = [task for task in tasks if task.get("status") == status]
         tasks.sort(key=lambda task: float(task.get("started_at") or 0), reverse=True)
         total = len(tasks)
         offset = max(page - 1, 0) * page_size

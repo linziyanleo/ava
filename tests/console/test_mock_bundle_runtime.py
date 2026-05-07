@@ -78,6 +78,9 @@ def test_mock_background_task_store_exposes_active_and_history_samples():
     history = store.query_history(page=1, page_size=10)
     assert {"succeeded", "failed", "cancelled"} <= {task["status"] for task in history["tasks"]}
 
+    failed_claude = store.query_history(task_type="claude_code", status="failed")
+    assert [task["task_id"] for task in failed_claude["tasks"]] == ["mock-task-fail-1"]
+
 
 @pytest.mark.parametrize(
     ("secret_key", "expire_minutes", "host", "cookie_secure", "team_domain", "audience", "expected"),

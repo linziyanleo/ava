@@ -50,12 +50,20 @@ async def list_history(
     page: int = 1,
     page_size: int = 20,
     session_key: str | None = None,
+    task_type: str | None = None,
+    status: str | None = None,
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"tasks": [], "total": 0, "page": page, "page_size": page_size}
-    return bg_store.query_history(page=page, page_size=page_size, session_key=session_key)
+    return bg_store.query_history(
+        page=page,
+        page_size=page_size,
+        session_key=session_key,
+        task_type=task_type,
+        status=status,
+    )
 
 
 @router.get("/{task_id}")

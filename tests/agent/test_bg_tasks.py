@@ -351,3 +351,65 @@ async def test_workspace_exclusive_replaces_existing(tmp_path: Path):
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+
+
+def test_query_history_filters_task_type_and_status(tmp_path: Path):
+    db = Database(tmp_path / "bg-tasks.sqlite3")
+    store = BackgroundTaskStore(db=db)
+    now = 1_700_000_000.0
+
+    snapshots = [
+        TaskSnapshot(
+            task_id="codex-ok",
+            task_type="codex",
+            origin_session_key="console:s1",
+            status="succeeded",
+            prompt_preview="codex ok",
+            started_at=now,
+            finished_at=now + 1,
+        ),
+        TaskSnapshot(
+            task_id="claude-fail",
+            task_type="claude_code",
+            origin_session_key="console:s1",
+            status="failed",
+            prompt_preview="claude fail",
+            started_at=now + 2,
+            finished_at=now + 3,
+        ),
+        TaskSnapshot(
+            task_id="codex-interrupted",
+            task_type="codex",
+            origin_session_key="console:s2",
+            status="interrupted",
+            prompt_preview="codex interrupted",
+            started_at=now + 4,
+            finished_at=now + 5,
+        ),
+        TaskSnapshot(
+            task_id="codex-running",
+            task_type="codex",
+            origin_session_key="console:s1",
+            status="running",
+            prompt_preview="codex running",
+            started_at=now + 6,
+        ),
+    ]
+    for snapshot in snapshots:
+        store._persist_task(snapshot)
+
+    codex_history = store.query_history(task_type="codex")
+    assert [task["task_id"] for task in codex_history["tasks"]] == [
+        "codex-interrupted",
+        "codex-ok",
+    ]
+
+    failed_history = store.query_history(status="failed")
+    assert [task["task_id"] for task in failed_history["tasks"]] == ["claude-fail"]
+
+    session_codex_history = store.query_history(
+        session_key="console:s1",
+        task_type="codex",
+        status="succeeded",
+    )
+    assert [task["task_id"] for task in session_codex_history["tasks"]] == ["codex-ok"]

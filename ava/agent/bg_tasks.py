@@ -1004,6 +1004,8 @@ class BackgroundTaskStore:
         page: int = 1,
         page_size: int = 20,
         session_key: str | None = None,
+        task_type: str | None = None,
+        status: str | None = None,
     ) -> dict[str, Any]:
         """从 DB 查询历史任务（已完成），分页返回。"""
         if not self._db:
@@ -1014,6 +1016,12 @@ class BackgroundTaskStore:
             if session_key:
                 where += " AND origin_session_key = ?"
                 params.append(session_key)
+            if task_type:
+                where += " AND task_type = ?"
+                params.append(task_type)
+            if status:
+                where += " AND status = ?"
+                params.append(status)
 
             count_row = self._db.fetchone(
                 f"SELECT COUNT(*) as cnt FROM bg_tasks {where}", tuple(params)

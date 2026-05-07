@@ -41,7 +41,7 @@ interface TaskItem {
   task_id: string
   task_type: string
   origin_session_key: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
   prompt_preview: string
   started_at: number | null
   finished_at: number | null
@@ -130,6 +130,7 @@ const STATUS_CONFIG: Record<
   succeeded: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: '成功' },
   failed: { icon: XOctagon, color: 'text-red-500', bg: 'bg-red-500/10', label: '失败' },
   cancelled: { icon: Ban, color: 'text-gray-400', bg: 'bg-gray-400/10', label: '已取消' },
+  interrupted: { icon: Ban, color: 'text-orange-400', bg: 'bg-orange-400/10', label: '已中断' },
 }
 
 function formatTime(ts: number | null): string {
@@ -776,8 +777,9 @@ export default function BgTasksPage() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const deepLinkScrolledRef = useRef<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const historyFilterRef = useRef<string>('all:all')
 
-  const [showHistory, setShowHistory] = useState(false)
+  const [showHistory, setShowHistory] = useState(true)
   const [history, setHistory] = useState<HistoryResponse | null>(null)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -841,23 +843,19 @@ export default function BgTasksPage() {
     }
   }, [])
 
-  const fetchHistory = useCallback(async (page: number) => {
-    setHistoryLoading(true)
-    try {
-      const res = await api<HistoryResponse>(`/bg-tasks/history?page=${page}&page_size=${PAGE_SIZE}`)
-      setHistory({
-        tasks: Array.isArray(res.tasks) ? res.tasks : [],
-        total: res.total ?? 0,
-        page: res.page ?? page,
-        page_size: res.page_size ?? PAGE_SIZE,
-      })
-      setHistoryPage(page)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载历史失败')
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [])
+  const fetchHistory = useCallback((
+    page: number,
+    taskType: TypeFilter,
+    taskStatus: StatusFilter,
+  ) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(PAGE_SIZE),
+    })
+    if (taskType !== 'all') params.set('task_type', taskType)
+    if (taskStatus !== 'all' && taskStatus !== 'running') params.set('status', taskStatus)
+    return api<HistoryResponse>(`/bg-tasks/history?${params.toString()}`)
+  }, [PAGE_SIZE])
 
   useEffect(() => {
     fetchOnce()
@@ -871,8 +869,53 @@ export default function BgTasksPage() {
   }, [fetchOnce, connectWs, mockMode])
 
   useEffect(() => {
-    if (showHistory && !history) fetchHistory(1)
-  }, [showHistory, history, fetchHistory])
+    if (!showHistory) return
+
+    const filterKey = `${typeFilter}:${statusFilter}`
+    if (historyFilterRef.current !== filterKey) {
+      historyFilterRef.current = filterKey
+      if (historyPage !== 1) {
+        setHistoryPage(1)
+        return
+      }
+    }
+
+    if (statusFilter === 'running') {
+      setHistoryLoading(false)
+      setHistory({
+        tasks: [],
+        total: 0,
+        page: 1,
+        page_size: PAGE_SIZE,
+      })
+      if (historyPage !== 1) setHistoryPage(1)
+      return
+    }
+
+    let cancelled = false
+    setHistoryLoading(true)
+    fetchHistory(historyPage, typeFilter, statusFilter)
+      .then(res => {
+        if (cancelled) return
+        setHistory({
+          tasks: Array.isArray(res.tasks) ? res.tasks : [],
+          total: res.total ?? 0,
+          page: res.page ?? historyPage,
+          page_size: res.page_size ?? PAGE_SIZE,
+        })
+        setError(null)
+      })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载历史失败')
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [showHistory, historyPage, typeFilter, statusFilter, fetchHistory, PAGE_SIZE])
 
   // Deep link: when data is ready, locate the task by task_id
   useEffect(() => {
@@ -1005,15 +1048,13 @@ export default function BgTasksPage() {
       </div>
 
       {/* Module D: filter bar */}
-      {data && (allTasks.length > 0 || hasFilter) && (
-        <FilterBar
-          typeFilter={typeFilter}
-          statusFilter={statusFilter}
-          onTypeChange={setTypeFilter}
-          onStatusChange={setStatusFilter}
-          onClear={clearFilters}
-        />
-      )}
+      <FilterBar
+        typeFilter={typeFilter}
+        statusFilter={statusFilter}
+        onTypeChange={setTypeFilter}
+        onStatusChange={setStatusFilter}
+        onClear={clearFilters}
+      />
 
       {error && (
         <div className="mb-3 p-3 rounded-lg text-sm bg-[var(--danger)]/10 text-[var(--danger)]">
@@ -1164,7 +1205,7 @@ export default function BgTasksPage() {
                   <Pagination
                     page={historyPage}
                     totalPages={historyTotalPages}
-                    onPageChange={p => fetchHistory(p)}
+                    onPageChange={setHistoryPage}
                   />
                 </>
               ) : (
