@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Copy, Check, ExternalLink } from 'lucide-react'
 import type { TurnTokenStats } from './types'
 import { formatTokenCount } from './utils'
+import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 
 interface TokenInfoPopoverProps {
   stats: TurnTokenStats
@@ -15,10 +16,12 @@ interface TokenInfoPopoverProps {
 export function TokenInfoPopover({ stats, sessionKey, turnSeq, isMobile, onClose }: TokenInfoPopoverProps) {
   const [copied, setCopied] = useState(false)
   const navigate = useNavigate()
+  const copyId = stats.trace_id || sessionKey || ''
+  const copyLabel = stats.trace_id ? '复制 Trace ID' : '复制 Session ID'
 
-  const handleCopySession = async () => {
-    if (!sessionKey) return
-    await navigator.clipboard.writeText(sessionKey)
+  const handleCopyId = async () => {
+    if (!copyId) return
+    await navigator.clipboard.writeText(copyId)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -58,19 +61,22 @@ export function TokenInfoPopover({ stats, sessionKey, turnSeq, isMobile, onClose
           {sessionKey && (
             <div className="mt-3 pt-3 border-t border-[var(--border)] flex gap-2">
               <button
-                onClick={handleCopySession}
+                onClick={handleCopyId}
                 className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                title="复制 Session ID"
+                title={copyLabel}
               >
                 {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-                <span>{copied ? '已复制' : '复制 ID'}</span>
+                <span>{copied ? '已复制' : copyLabel}</span>
               </button>
               <button
                 onClick={() => {
-                  const params = new URLSearchParams({ session_key: sessionKey })
-                  if (stats.conversation_id) params.set('conversation_id', stats.conversation_id)
-                  if (turnSeq != null) params.set('turn_seq', String(turnSeq))
-                  navigate(`/tokens?${params.toString()}`)
+                  navigate(buildTokenStatsNavUrl({
+                    sessionKey,
+                    conversationId: stats.conversation_id,
+                    turnSeq,
+                    traceId: stats.trace_id,
+                    spanId: stats.span_id,
+                  }))
                 }}
                 className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                 title="在 Token 统计中查看"
@@ -115,19 +121,22 @@ export function TokenInfoPopover({ stats, sessionKey, turnSeq, isMobile, onClose
       {sessionKey && (
         <div className="mt-2 pt-2 border-t border-[var(--border)] flex gap-1.5">
           <button
-            onClick={handleCopySession}
+            onClick={handleCopyId}
             className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="复制 Session ID"
+            title={copyLabel}
           >
             {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-            <span>{copied ? '已复制' : '复制 ID'}</span>
+            <span>{copied ? '已复制' : copyLabel}</span>
           </button>
           <button
             onClick={() => {
-              const params = new URLSearchParams({ session_key: sessionKey })
-              if (stats.conversation_id) params.set('conversation_id', stats.conversation_id)
-              if (turnSeq != null) params.set('turn_seq', String(turnSeq))
-              navigate(`/tokens?${params.toString()}`)
+              navigate(buildTokenStatsNavUrl({
+                sessionKey,
+                conversationId: stats.conversation_id,
+                turnSeq,
+                traceId: stats.trace_id,
+                spanId: stats.span_id,
+              }))
             }}
             className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
             title="在 Token 统计中查看"

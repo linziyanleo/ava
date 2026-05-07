@@ -9,6 +9,8 @@ Phase 1 只实装 coding 事件源，但读接口从第一天起就是通用的�
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import json
 import re
 import time
 import uuid
@@ -66,6 +68,9 @@ class TaskSnapshot:
     isolation_mode: str = "inplace"
     branch_name: str = ""
     worktree_path: str = ""
+    # deep-link binding fields
+    origin_conversation_id: str = ""
+    origin_turn_seq: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -75,7 +80,7 @@ class TaskSnapshot:
 
 @dataclass
 class SubmitResult:
-    """Returned by submit_coding_task to give callers workspace-aware context."""
+    """Returned by submit_task to give callers workspace-aware context."""
     task_id: str
     reused: bool
     replaced_task_id: str | None
@@ -83,17 +88,20 @@ class SubmitResult:
     active_in_session: list[str]
 
 
-CodingExecutor = Callable[..., Awaitable[dict[str, Any]]]
+TaskExecutor = Callable[..., Awaitable[dict[str, Any]]]
 
 
 class BackgroundTaskStore:
     """统一后台任务注册/状态机/timeline/持久化/digest。"""
 
-    def __init__(self, db: Any | None = None) -> None:
+    def __init__(self, db: Any | None = None, trace_spans: Any | None = None) -> None:
         self._db = db
+        self._trace_spans = trace_spans
         self._active: dict[str, TaskSnapshot] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._finished: dict[str, TaskSnapshot] = {}
+        self._captured_contexts: dict[str, contextvars.Context] = {}
+        self._trace_metadata: dict[str, dict[str, str]] = {}
         self._agent_loop: AgentLoop | None = None
         self._continuation_budgets: dict[str, int] = {}
         self._last_rebuild_result: Any | None = None
@@ -161,9 +169,9 @@ class BackgroundTaskStore:
     # 写入接口
     # ------------------------------------------------------------------
 
-    def submit_coding_task(
+    def submit_task(
         self,
-        executor: CodingExecutor,
+        executor: TaskExecutor,
         *,
         origin_session_key: str,
         prompt: str,
@@ -175,6 +183,8 @@ class BackgroundTaskStore:
         workspace: ExecutionWorkspace | None = None,
         replace_task_id: str | None = None,
         workspace_exclusive: bool = True,
+        origin_conversation_id: str = "",
+        origin_turn_seq: int | None = None,
         **executor_kwargs: Any,
     ) -> SubmitResult:
         ws_id = workspace.workspace_id if workspace else ""
@@ -191,10 +201,48 @@ class BackgroundTaskStore:
 
         task_id = uuid.uuid4().hex[:12]
         now = time.time()
+        captured_context = contextvars.copy_context()
 
         effective_project_path = project_path
         if workspace:
             effective_project_path = workspace.execution_cwd or project_path
+
+        try:
+            from ava.console.services.trace_context import current_trace_context, new_span_id
+
+            parent_ctx = captured_context.get(current_trace_context, None)
+            if parent_ctx is not None and self._trace_spans is not None:
+                dispatch_span_id = new_span_id()
+                start_ns = time.time_ns()
+                self._trace_spans.start_span(
+                    parent_ctx.trace_id,
+                    dispatch_span_id,
+                    parent_ctx.span_id,
+                    "dispatch_bg_task",
+                    "dispatch_bg_task",
+                    "internal",
+                    {
+                        "ava.task_type": task_type,
+                        "ava.task_id": task_id,
+                        "ava.workspace_id": ws_id,
+                        "ava.origin_session_key": origin_session_key,
+                    },
+                    start_ns=start_ns,
+                    session_key=origin_session_key,
+                )
+                self._trace_spans.end_span(
+                    parent_ctx.trace_id,
+                    dispatch_span_id,
+                    status="ok",
+                    end_ns=time.time_ns(),
+                )
+                self._trace_metadata[task_id] = {
+                    "trace_id": parent_ctx.trace_id,
+                    "parent_span_id": parent_ctx.span_id,
+                    "dispatch_span_id": dispatch_span_id,
+                }
+        except Exception as exc:
+            logger.warning("BackgroundTaskStore: failed to create dispatch trace span: {}", exc)
 
         snapshot = TaskSnapshot(
             task_id=task_id,
@@ -214,8 +262,11 @@ class BackgroundTaskStore:
             isolation_mode=workspace.isolation_mode if workspace else "inplace",
             branch_name=workspace.branch_name or "" if workspace else "",
             worktree_path=workspace.worktree_path or "" if workspace else "",
+            origin_conversation_id=origin_conversation_id,
+            origin_turn_seq=origin_turn_seq,
         )
         self._active[task_id] = snapshot
+        self._captured_contexts[task_id] = captured_context
         self._persist_task(snapshot, full_prompt=prompt)
         self._persist_event(task_id, "submitted", prompt[:100])
 
@@ -226,6 +277,23 @@ class BackgroundTaskStore:
         ]
 
         async def _run() -> None:
+            trace_token = None
+            turn_token = None
+            try:
+                from ava.console.services.trace_context import current_trace_context
+                from ava.patches.loop_patch import _token_record_context
+
+                captured = self._captured_contexts.get(task_id)
+                if captured is not None:
+                    trace_ctx = captured.get(current_trace_context, None)
+                    if trace_ctx is not None:
+                        trace_token = current_trace_context.set(trace_ctx)
+                    turn_state = captured.get(_token_record_context, None)
+                    if isinstance(turn_state, dict):
+                        turn_token = _token_record_context.set(turn_state)
+            except Exception as exc:
+                logger.warning("BackgroundTaskStore: failed to restore trace context: {}", exc)
+
             snapshot.status = "running"
             snapshot.started_at = time.time()
             self._record_event(task_id, "started")
@@ -271,6 +339,18 @@ class BackgroundTaskStore:
                 self._update_task_status(task_id, "failed", snapshot)
                 await self._on_complete(snapshot, None)
             finally:
+                try:
+                    from ava.console.services.trace_context import current_trace_context
+                    from ava.patches.loop_patch import _token_record_context
+
+                    if trace_token is not None:
+                        current_trace_context.reset(trace_token)
+                    if turn_token is not None:
+                        _token_record_context.reset(turn_token)
+                except Exception as exc:
+                    logger.warning("BackgroundTaskStore: failed to reset trace context: {}", exc)
+                self._captured_contexts.pop(task_id, None)
+                self._trace_metadata.pop(task_id, None)
                 self._finished[task_id] = self._active.pop(task_id, snapshot)
                 self._tasks.pop(task_id, None)
                 self._prune_finished()
@@ -284,6 +364,14 @@ class BackgroundTaskStore:
             workspace_id=ws_id,
             active_in_session=active_ids,
         )
+
+    def submit_coding_task(
+        self,
+        executor: TaskExecutor,
+        **kwargs: Any,
+    ) -> SubmitResult:
+        """Backward-compatible alias. New code should call submit_task."""
+        return self.submit_task(executor, **kwargs)
 
     def record_event(
         self, task_id: str, event: str, detail: str = "",
@@ -492,6 +580,19 @@ class BackgroundTaskStore:
                 return error_text
         return snapshot.error_message or snapshot.result_preview or "(no output)"
 
+    @classmethod
+    def _resolve_result_media(cls, result: dict[str, Any] | None = None) -> list[str]:
+        if not result:
+            return []
+        media = result.get("media") or result.get("media_paths") or []
+        if not isinstance(media, list):
+            return []
+        return [
+            item.strip()
+            for item in media
+            if isinstance(item, str) and item.strip()
+        ]
+
     # ------------------------------------------------------------------
     # 完成回调
     # ------------------------------------------------------------------
@@ -506,6 +607,7 @@ class BackgroundTaskStore:
 
         status_label = "SUCCESS" if snapshot.status == "succeeded" else "ERROR"
         result_text = self._resolve_result_text(snapshot, result)
+        media = self._resolve_result_media(result) if snapshot.status == "succeeded" else []
         formatted = (
             f"[Background Task {snapshot.task_id} {status_label}]\n"
             f"Type: {snapshot.task_type} | Duration: {snapshot.elapsed_ms}ms\n\n"
@@ -545,6 +647,7 @@ class BackgroundTaskStore:
                     channel=channel,
                     chat_id=chat_id,
                     content=formatted,
+                    media=media,
                 ))
                 if asyncio.iscoroutine(result_or_coro):
                     await result_or_coro
@@ -709,7 +812,6 @@ class BackgroundTaskStore:
         if not self._db:
             return
         try:
-            import json
             extra: dict[str, Any] = {
                 "cli_run_id": snapshot.cli_run_id,
                 "cli_session_id": snapshot.cli_session_id,
@@ -721,7 +823,10 @@ class BackgroundTaskStore:
                 "isolation_mode": snapshot.isolation_mode,
                 "branch_name": snapshot.branch_name,
                 "worktree_path": snapshot.worktree_path,
+                "origin_conversation_id": snapshot.origin_conversation_id,
+                "origin_turn_seq": snapshot.origin_turn_seq,
             }
+            extra.update(self._trace_metadata.get(snapshot.task_id, {}))
             if full_prompt:
                 extra["full_prompt"] = full_prompt
             if full_result:
@@ -772,6 +877,8 @@ class BackgroundTaskStore:
                 extra["isolation_mode"] = snapshot.isolation_mode
                 extra["branch_name"] = snapshot.branch_name
                 extra["worktree_path"] = snapshot.worktree_path
+                extra["origin_conversation_id"] = snapshot.origin_conversation_id
+                extra["origin_turn_seq"] = snapshot.origin_turn_seq
                 if full_result:
                     extra["full_result"] = full_result
                 self._db.execute(
@@ -855,6 +962,7 @@ class BackgroundTaskStore:
         finished = self._row_val(row, "finished_at", None)
         elapsed = int((finished - started) * 1000) if started and finished else 0
         extra = self._load_extra_json(self._row_val(row, "extra", "{}"))
+        raw_turn_seq = extra.get("origin_turn_seq", None)
         return TaskSnapshot(
             task_id=row["task_id"],
             task_type=row["task_type"],
@@ -877,6 +985,8 @@ class BackgroundTaskStore:
             isolation_mode=extra.get("isolation_mode", "inplace"),
             branch_name=extra.get("branch_name", ""),
             worktree_path=extra.get("worktree_path", ""),
+            origin_conversation_id=extra.get("origin_conversation_id", ""),
+            origin_turn_seq=int(raw_turn_seq) if raw_turn_seq is not None else None,
         )
 
     @staticmethod

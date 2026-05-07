@@ -47,6 +47,23 @@ async def get_image(
     return FileResponse(str(path), media_type=media_type)
 
 
+@router.get("/files/{filename}")
+async def get_file(
+    filename: str,
+    user: UserInfo | None = Depends(auth.optional_user),
+):
+    """Serve chat-uploaded files to authenticated users."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    from ava.console.app import get_services_for_user
+    path = get_services_for_user(user).media.get_image_path(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(str(path), media_type=media_type, filename=path.name)
+
+
 @router.delete("/records/{record_id}")
 async def delete_record(
     record_id: str,

@@ -8,11 +8,15 @@
 2. `coding` — 异步提交，输出 `round_status`（Turn A 结束）
 3. `coding_result` — 收到 `[Background Task Completed]`，解析结果（Turn B 开始）
 4. `regression` — 紧接 coding_result 执行，不拆 turn
-5. `final_verification`
+5. `root_cause_diagnosis` — 可选；同一 failure key 连续两轮失败时提交只读诊断
+6. `root_cause_result` — 可选；收到诊断结果并回灌下一轮 coder prompt
+7. `final_verification`
 
 `round0_planning` 必须先于任何 coding 行为发生。
 
 `coding` 和 `coding_result` 分属不同 turn，通过 `round_status.task_id` 关联。
+
+`root_cause_diagnosis` 和 `root_cause_result` 只在同一 `check_id + failure_taxonomy` 连续两轮失败且该 failure key 尚未诊断过时出现。
 
 ## Round Output
 
@@ -52,6 +56,7 @@ round_output:
     deprecated: []
     unchanged: []
   regression_report: ""
+  root_cause_report: null
   verdict: "pass | retry | escalate"
   feedback_for_coder:
     failed_pages: []
@@ -61,16 +66,39 @@ round_output:
     next_hint: ""
 ```
 
+### root_cause_report 字段
+
+```yaml
+root_cause_report:
+  trigger:
+    check_id: ""
+    failure_taxonomy: ""
+    consecutive_failures: 2
+  diagnosed:
+    - "checked route/component/state/style/test evidence"
+  likely_root_causes:
+    - cause: ""
+      confidence: "low | medium | high"
+      evidence: []
+  ruled_out: []
+  recommended_fix:
+    scope: []
+    approach: ""
+  prompt_delta: ""
+```
+
 ## Stop Policy
 
 默认停止条件：
 
-- `same_failure_twice`
+- `post_diagnostic_same_failure_twice`
 - `non_retryable_failure`
 - `manual_auth_required`
 - `max_rounds_reached`
 
-其中 `same_failure_twice` 必须按 `check_id + failure_taxonomy` 判定，不要只比较自然语言描述。
+其中 `same_failure_twice` 触发一次 `root_cause_diagnosis`，不直接 stop。`post_diagnostic_same_failure_twice` 才是真正停止条件。
+
+`same_failure_twice` 和 `post_diagnostic_same_failure_twice` 都必须按 `check_id + failure_taxonomy` 判定，不要只比较自然语言描述。
 
 ## Retry Policy
 

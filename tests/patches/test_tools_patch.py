@@ -40,3 +40,11 @@ class TestToolsPatch:
         source = inspect.getsource(apply_tools_patch)
         assert "categorized_memory" in source
         assert "MemoryTool" in source
+
+    def test_page_agent_receives_tool_registry(self):
+        """page_agent official_mcp backend can call wrapped MCP tools via registry."""
+        import inspect
+        from ava.patches.tools_patch import apply_tools_patch
+
+        source = inspect.getsource(apply_tools_patch)
+        assert "tool_registry=self.tools" in source

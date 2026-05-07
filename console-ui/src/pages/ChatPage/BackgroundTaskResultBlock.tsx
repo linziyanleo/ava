@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
-import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock3, XCircle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Bot, CheckCircle, ChevronDown, ChevronRight, Clock3, ExternalLink, XCircle } from 'lucide-react'
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { cn } from '../../lib/utils'
-import { formatTimestamp } from './utils'
+import { displayImagePath, extractImagePaths, formatTimestamp, imageUrl } from './utils'
 import { parseBackgroundTaskMessage } from './backgroundTask'
+import { ImageCarousel } from './ImageCarousel'
 
 function formatDuration(durationMs: number | null): string {
   if (durationMs == null || Number.isNaN(durationMs)) return 'unknown'
@@ -27,12 +29,39 @@ export function getBackgroundTaskPreview(content: string): string {
 interface BackgroundTaskResultBlockProps {
   content: string
   timestamp?: string
+  taskId?: string
+  sessionKey?: string
+  conversationId?: string | null
+  highlighted?: boolean
 }
 
-export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTaskResultBlockProps) {
+export function BackgroundTaskResultBlock({ content, timestamp, taskId: taskIdProp, highlighted }: BackgroundTaskResultBlockProps) {
+  const navigate = useNavigate()
   const parsed = parseBackgroundTaskMessage(content)
   const [expanded, setExpanded] = useState(() => (parsed?.body.length || 0) <= 220)
+  const [isHighlighted, setIsHighlighted] = useState(false)
   const preview = useMemo(() => getBackgroundTaskPreview(content), [content])
+  const imagePaths = useMemo(
+    () => parsed?.taskType === 'image_gen' ? extractImagePaths(parsed.body) : [],
+    [parsed?.body, parsed?.taskType],
+  )
+
+  const effectiveTaskId = taskIdProp ?? parsed?.taskId
+
+  const prevHighlightedRef = useRef(highlighted)
+  useEffect(() => {
+    if (highlighted && !prevHighlightedRef.current) {
+      setIsHighlighted(true)
+      const timer = setTimeout(() => setIsHighlighted(false), 2000)
+      return () => clearTimeout(timer)
+    }
+    prevHighlightedRef.current = highlighted
+  }, [highlighted])
+
+  const handleViewBgTask = useCallback(() => {
+    if (!effectiveTaskId) return
+    navigate(`/bg-tasks?task_id=${encodeURIComponent(effectiveTaskId)}`)
+  }, [navigate, effectiveTaskId])
 
   if (!parsed) return null
 
@@ -40,7 +69,16 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
   const statusLabel = isSuccess ? 'success' : parsed.status.toLowerCase()
 
   return (
-    <div className="my-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-xs overflow-hidden">
+    <div
+      data-bg-task-id={effectiveTaskId}
+      id={effectiveTaskId ? `bg-task-result-${effectiveTaskId}` : undefined}
+      className={cn(
+        'my-1.5 rounded-lg border text-xs overflow-hidden transition-all duration-500',
+        isHighlighted
+          ? 'border-[var(--accent)] bg-[var(--accent)]/5 ring-1 ring-[var(--accent)]/30'
+          : 'border-[var(--border)] bg-[var(--bg-secondary)]',
+      )}
+    >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] bg-[var(--bg-tertiary,var(--bg-secondary))]">
         <Bot className="w-3.5 h-3.5 shrink-0 text-[var(--text-secondary)]" />
         <span className="font-medium text-[var(--text-primary)]">Background Task</span>
@@ -58,9 +96,19 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
             : <XCircle className="w-3 h-3" />}
           {statusLabel}
         </span>
-        <span className="ml-auto flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+        <span className="ml-auto flex items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
           <Clock3 className="w-3 h-3" />
           {formatDuration(parsed.durationMs)}
+          {effectiveTaskId && (
+            <button
+              onClick={handleViewBgTask}
+              title="查看后台任务"
+              className="ml-1 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>后台任务</span>
+            </button>
+          )}
         </span>
       </div>
 
@@ -87,6 +135,22 @@ export function BackgroundTaskResultBlock({ content, timestamp }: BackgroundTask
 
             {expanded && (
               <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]">
+                {imagePaths.length > 0 && (
+                  <div className="mb-2 space-y-1.5">
+                    <ImageCarousel urls={imagePaths.map((path) => imageUrl(path))} alt="Generated image" maxHeight={220} />
+                    <div className="flex flex-wrap gap-1.5">
+                      {imagePaths.map((path) => (
+                        <span
+                          key={path}
+                          className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--text-secondary)]"
+                          title={path}
+                        >
+                          {displayImagePath(path)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <MarkdownRenderer content={parsed.body} />
               </div>
             )}

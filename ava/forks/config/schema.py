@@ -468,15 +468,18 @@ class GatewayConfig(Base):
 class WebSearchConfig(_UPSTREAM.WebSearchConfig):
     """沿用上游 Web 搜索配置。"""
 
-
     provider: str = "brave"
+
+
+class WebFetchConfig(_UPSTREAM.WebFetchConfig):
+    """沿用上游 Web 抓取配置。"""
 
 
 class WebToolsConfig(_UPSTREAM.WebToolsConfig):
     """沿用上游 Web 工具配置。"""
 
-
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(_UPSTREAM.ExecToolConfig):
@@ -501,10 +504,33 @@ class ClaudeCodeConfig(Base):
     base_url: str = ""
 
 
+class ImageGenConfig(Base):
+    """Image generation tool config."""
+
+    timeout: int = 300
+    background: bool = True
+    auto_continue: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("auto_continue", "autoContinue"),
+        serialization_alias="autoContinue",
+    )
+    auto_send: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("auto_send", "autoSend"),
+        serialization_alias="autoSend",
+    )
+
+
 class PageAgentConfig(Base):
     """通用 PageAgent 页面操作工具配置。"""
 
     enabled: bool = True
+    backend: str = "playwright"
+    mcp_server: str = Field(
+        default="page_agent_ext",
+        validation_alias=AliasChoices("mcp_server", "mcpServer"),
+        serialization_alias="mcpServer",
+    )
     api_base: str = Field(
         default="",
         validation_alias=AliasChoices("api_base", "apiBase"),
@@ -566,6 +592,11 @@ class ToolsConfig(_UPSTREAM.ToolsConfig):
 
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
+    image_gen: ImageGenConfig = Field(
+        default_factory=ImageGenConfig,
+        validation_alias=AliasChoices("image_gen", "imageGen"),
+        serialization_alias="imageGen",
+    )
     page_agent: PageAgentConfig = Field(
         default_factory=PageAgentConfig,
         validation_alias=AliasChoices("page_agent", "pageAgent"),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from difflib import SequenceMatcher
 import json
 import re
@@ -207,7 +208,7 @@ class ChatService:
         return self._db.fetchall(
             """
             SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                   reasoning_content, timestamp, conversation_id
+                   reasoning_content, timestamp, conversation_id, trace_id
               FROM session_messages
              WHERE session_id = ? AND conversation_id = ?
              ORDER BY seq, id
@@ -597,7 +598,7 @@ class ChatService:
             msg_rows = self._db.fetchall(
                 """
                 SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                       reasoning_content, timestamp, conversation_id
+                       reasoning_content, timestamp, conversation_id, trace_id
                   FROM session_messages
                  WHERE session_id = ? AND conversation_id = ?
                  ORDER BY seq, id
@@ -626,7 +627,12 @@ class ChatService:
                     msg["reasoning_content"] = mr["reasoning_content"]
                 if mr["timestamp"]:
                     msg["timestamp"] = mr["timestamp"]
-                msg["metadata"] = {"conversation_id": mr["conversation_id"] or ""}
+                trace_id = mr["trace_id"] or ""
+                msg["trace_id"] = trace_id
+                msg["metadata"] = {
+                    "conversation_id": mr["conversation_id"] or "",
+                    "trace_id": trace_id,
+                }
                 messages.append(msg)
             return messages
 
@@ -731,17 +737,63 @@ class ChatService:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
-        response = await self._agent.process_direct(
-            content=message,
-            session_key=session_key,
-            channel="console",
-            chat_id=user_id,
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            media=media,
+        process_task = asyncio.create_task(
+            self._agent.process_direct(
+                content=message,
+                session_key=session_key,
+                channel="console",
+                chat_id=user_id,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                media=media,
+            )
         )
+        active_tasks = getattr(self._agent, "_active_tasks", None)
+        tracked = False
+        if isinstance(active_tasks, dict):
+            active_tasks.setdefault(session_key, []).append(process_task)
+            tracked = True
+        try:
+            response = await process_task
+        finally:
+            if tracked and isinstance(active_tasks, dict):
+                tasks = active_tasks.get(session_key, [])
+                if process_task in tasks:
+                    tasks.remove(process_task)
+                if not tasks:
+                    active_tasks.pop(session_key, None)
         return self._normalize_direct_response_content(response)
+
+    async def stop_session(self, session_id: str) -> dict[str, Any]:
+        session_key = f"console:{session_id}"
+        total = 0
+        cancel_active = getattr(self._agent, "_cancel_active_tasks", None)
+        if callable(cancel_active):
+            total += int(await cancel_active(session_key))
+        else:
+            active_tasks = getattr(self._agent, "_active_tasks", None)
+            if isinstance(active_tasks, dict):
+                tasks = active_tasks.pop(session_key, [])
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                        total += 1
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        bg_store = getattr(self._agent, "bg_tasks", None)
+        cancel_bg = getattr(bg_store, "cancel_by_session", None)
+        if callable(cancel_bg):
+            total += int(await cancel_bg(session_key))
+
+        return {
+            "ok": True,
+            "stopped": total,
+            "message": f"Stopped {total} task(s)." if total else "No active task to stop.",
+        }
 
     def get_history(self, session_id: str) -> list[dict]:
         if self._use_db:
@@ -760,13 +812,18 @@ class ChatService:
                     meta = {}
             active_conversation_id = self._resolve_active_conversation_id(row["id"], meta)
             msg_rows = self._db.fetchall(
-                """SELECT role, content, timestamp FROM session_messages
+                """SELECT role, content, timestamp, trace_id FROM session_messages
                    WHERE session_id = ? AND conversation_id = ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != ''
                    ORDER BY seq""",
                 (row["id"], active_conversation_id),
             )
             return [
-                {"role": r["role"], "content": r["content"], "timestamp": r["timestamp"] or ""}
+                {
+                    "role": r["role"],
+                    "content": r["content"],
+                    "timestamp": r["timestamp"] or "",
+                    "trace_id": r["trace_id"] or "",
+                }
                 for r in msg_rows
             ]
 

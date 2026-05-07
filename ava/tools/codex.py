@@ -52,13 +52,23 @@ class CodexTool(Tool):
         self._channel = "cli"
         self._chat_id = "direct"
         self._session_key = "cli:direct"
+        self._conversation_id = ""
+        self._turn_seq: int | None = None
 
     def set_context(
-        self, channel: str, chat_id: str, *, session_key: str | None = None,
+        self,
+        channel: str,
+        chat_id: str,
+        *,
+        session_key: str | None = None,
+        conversation_id: str = "",
+        turn_seq: int | None = None,
     ) -> None:
         self._channel = channel
         self._chat_id = chat_id
         self._session_key = session_key or f"{channel}:{chat_id}"
+        self._conversation_id = conversation_id or ""
+        self._turn_seq = turn_seq
 
     @property
     def name(self) -> str:
@@ -138,7 +148,7 @@ class CodexTool(Tool):
             ws_id = f"{self._session_key}:{target.workspace_key}"
             workspace = make_inplace_workspace(target, workspace_id=ws_id)
 
-        result = self._task_store.submit_coding_task(
+        result = self._task_store.submit_task(
             executor=self._run_background,
             origin_session_key=self._session_key,
             prompt=prompt,
@@ -148,6 +158,8 @@ class CodexTool(Tool):
             auto_continue=mode == "standard",
             target=target,
             workspace=workspace,
+            origin_conversation_id=self._conversation_id,
+            origin_turn_seq=self._turn_seq,
             mode=mode,
             project=project,
         )

@@ -1,5 +1,5 @@
 import type { ToolsConfig } from './types'
-import { Section, FieldLabel, ArrayField, renderField } from './FormWidgets'
+import { Section, FieldLabel, ArrayField, KeyValueField, renderField } from './FormWidgets'
 
 export function ToolsSection({
   config,
@@ -10,6 +10,13 @@ export function ToolsSection({
   readOnly: boolean
   onChange: (c: ToolsConfig) => void
 }) {
+  const imageGen = {
+    timeout: config.imageGen?.timeout ?? 300,
+    background: config.imageGen?.background ?? true,
+    autoContinue: config.imageGen?.autoContinue ?? false,
+    autoSend: config.imageGen?.autoSend ?? true,
+  }
+
   return (
     <Section title="工具配置" infoKey="tools.restrictToWorkspace">
       <div className="space-y-3">
@@ -64,6 +71,25 @@ export function ToolsSection({
         </div>
       )}
 
+      <div className="mt-3">
+        <Section title="图片生成" infoKey="tools.imageGen.timeout" defaultOpen={false}>
+          <div className="space-y-3">
+            {renderField('timeout', imageGen.timeout, 'tools.imageGen.timeout', readOnly, (v) =>
+              onChange({ ...config, imageGen: { ...imageGen, timeout: v as number } }),
+            )}
+            {renderField('background', imageGen.background, 'tools.imageGen.background', readOnly, (v) =>
+              onChange({ ...config, imageGen: { ...imageGen, background: v as boolean } }),
+            )}
+            {renderField('autoContinue', imageGen.autoContinue, 'tools.imageGen.autoContinue', readOnly, (v) =>
+              onChange({ ...config, imageGen: { ...imageGen, autoContinue: v as boolean } }),
+            )}
+            {renderField('autoSend', imageGen.autoSend, 'tools.imageGen.autoSend', readOnly, (v) =>
+              onChange({ ...config, imageGen: { ...imageGen, autoSend: v as boolean } }),
+            )}
+          </div>
+        </Section>
+      </div>
+
       {config.mcpServers && Object.keys(config.mcpServers).length > 0 && (
         <div className="mt-3">
           <Section title="MCP 服务器" infoKey="tools.mcpServers" defaultOpen={false}>
@@ -102,6 +128,45 @@ export function ToolsSection({
                         mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, toolTimeout: v as number } },
                       }),
                     )}
+                    <div>
+                      <FieldLabel label="enabledTools" />
+                      <ArrayField
+                        value={serverConfig.enabledTools ?? []}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, enabledTools: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label="env" />
+                      <KeyValueField
+                        value={serverConfig.env ?? {}}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, env: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label="headers" />
+                      <KeyValueField
+                        value={serverConfig.headers ?? {}}
+                        onChange={(v) =>
+                          onChange({
+                            ...config,
+                            mcpServers: { ...config.mcpServers, [serverName]: { ...serverConfig, headers: v } },
+                          })
+                        }
+                        readOnly={readOnly}
+                      />
+                    </div>
                   </div>
                 </Section>
               ))}

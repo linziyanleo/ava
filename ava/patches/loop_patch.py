@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextvars
 import re
+import time
 import weakref
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -47,6 +48,13 @@ _MUTATING_FILE_TOOLS = frozenset({"write_file", "edit_file"})
 _TOOL_SUMMARY_RE = re.compile(r"^\s*Tool:\s*([A-Za-z0-9_:-]+)")
 _IMAGE_PLACEHOLDER_RE = re.compile(r"^\[image(?:: .+)?\]$")
 _IMAGE_PLACEHOLDER_INLINE_RE = re.compile(r"\[image(?:: ([^\]]+))?\]")
+_HIDDEN_STREAM_TAGS = (
+    ("<think>", "</think>", "<think"),
+    ("<thought>", "</thought>", "<thought"),
+)
+_STREAM_TAG_CONTINUATION_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-:>/"
+)
 
 
 def set_shared_db(db) -> None:
@@ -267,8 +275,22 @@ def _install_provider_token_recording_wrappers(provider) -> None:
             return
 
         async def wrapped(*args, __original=original, **kwargs):
-            response = await __original(*args, **kwargs)
             turn_state = _token_record_context.get()
+            if isinstance(turn_state, dict):
+                prepare_chat_span = turn_state.get("prepare_chat_span")
+                if callable(prepare_chat_span):
+                    prepare_chat_span()
+            try:
+                response = await __original(*args, **kwargs)
+            except BaseException as exc:
+                if isinstance(turn_state, dict):
+                    end_chat_span = turn_state.get("end_current_chat_span")
+                    if callable(end_chat_span):
+                        end_chat_span(
+                            status="error",
+                            status_message=str(exc)[:500],
+                        )
+                raise
             recorder = turn_state.get("record_immediately") if isinstance(turn_state, dict) else None
             if callable(recorder):
                 recorder(response)
@@ -279,6 +301,67 @@ def _install_provider_token_recording_wrappers(provider) -> None:
 
     _wrap("chat_with_retry")
     _wrap("chat_stream_with_retry")
+
+
+def _extract_stable_stream_text(raw_text: str) -> str:
+    """Return the visible stream prefix that is safe to emit incrementally.
+
+    This mirrors the upstream `<think>` / `<thought>` stripping semantics
+    without trimming whitespace, and with one extra constraint: any trailing
+    partial thinking tag stays buffered until it is disambiguated so the UI
+    never needs to retract an already-emitted `<`.
+    """
+    if not raw_text:
+        return ""
+
+    visible_parts: list[str] = []
+    idx = 0
+    text_len = len(raw_text)
+
+    while idx < text_len:
+        if raw_text[idx] != "<":
+            visible_parts.append(raw_text[idx])
+            idx += 1
+            continue
+
+        matched = False
+        for open_tag, close_tag, _ in _HIDDEN_STREAM_TAGS:
+            if not raw_text.startswith(open_tag, idx):
+                continue
+            close_idx = raw_text.find(close_tag, idx + len(open_tag))
+            if close_idx == -1:
+                return "".join(visible_parts)
+            idx = close_idx + len(close_tag)
+            matched = True
+            break
+        if matched:
+            continue
+
+        for _, _, malformed_prefix in _HIDDEN_STREAM_TAGS:
+            if not raw_text.startswith(malformed_prefix, idx):
+                continue
+            next_idx = idx + len(malformed_prefix)
+            if next_idx >= text_len:
+                return "".join(visible_parts)
+            next_char = raw_text[next_idx]
+            if next_char not in _STREAM_TAG_CONTINUATION_CHARS:
+                idx = next_idx
+                matched = True
+                break
+        if matched:
+            continue
+
+        suffix = raw_text[idx:]
+        if any(
+            open_tag.startswith(suffix) or malformed_prefix.startswith(suffix)
+            for open_tag, _, malformed_prefix in _HIDDEN_STREAM_TAGS
+        ):
+            return "".join(visible_parts)
+
+        visible_parts.append(raw_text[idx])
+        idx += 1
+
+    return "".join(visible_parts)
 
 
 def _sync_categorized_memory(consolidator, session_key: str | None, history_entry: str) -> None:
@@ -307,9 +390,11 @@ class _ToolGuardHook(AgentHook):
     def __init__(self, agent_loop):
         super().__init__()
         self._loop = agent_loop
+        self._tool_spans: list[tuple[str, str]] = []
 
     async def before_iteration(self, context) -> None:
         self._loop._pending_tool_guard = None
+        self._tool_spans = []
 
     async def before_execute_tools(self, context) -> None:
         response = getattr(context, "response", None)
@@ -324,8 +409,49 @@ class _ToolGuardHook(AgentHook):
             "declared_tool": declared_tool,
             "actual_tool_names": actual_tool_names,
         }
+        trace_spans = getattr(self._loop, "trace_spans", None)
+        if trace_spans is not None:
+            try:
+                from ava.console.services.trace_context import current_trace_context, new_span_id
+
+                parent_ctx = current_trace_context.get()
+                if parent_ctx is not None:
+                    turn_state = _token_record_context.get()
+                    session_key = turn_state.get("session_key", "") if isinstance(turn_state, dict) else ""
+                    conversation_id = turn_state.get("conversation_id", "") if isinstance(turn_state, dict) else ""
+                    turn_seq = turn_state.get("turn_seq") if isinstance(turn_state, dict) else None
+                    for tool_call in getattr(context, "tool_calls", []) or []:
+                        tool_name = getattr(tool_call, "name", "") or "unknown"
+                        span_id = new_span_id()
+                        trace_spans.start_span(
+                            parent_ctx.trace_id,
+                            span_id,
+                            parent_ctx.span_id,
+                            f"execute_tool {tool_name}",
+                            "execute_tool",
+                            "internal",
+                            {
+                                "gen_ai.tool.name": tool_name,
+                                "gen_ai.tool.call.id": getattr(tool_call, "id", "") or "",
+                            },
+                            start_ns=time.time_ns(),
+                            session_key=session_key,
+                            conversation_id=conversation_id,
+                            turn_seq=turn_seq,
+                        )
+                        self._tool_spans.append((parent_ctx.trace_id, span_id))
+            except Exception as exc:
+                logger.warning("Failed to start tool trace span: {}", exc)
 
     async def after_iteration(self, context) -> None:
+        trace_spans = getattr(self._loop, "trace_spans", None)
+        if trace_spans is not None:
+            for trace_id, span_id in self._tool_spans:
+                try:
+                    trace_spans.end_span(trace_id, span_id, status="ok", end_ns=time.time_ns())
+                except Exception as exc:
+                    logger.warning("Failed to end tool trace span: {}", exc)
+        self._tool_spans = []
         self._loop._pending_tool_guard = None
 
 
@@ -407,7 +533,7 @@ def _register_bg_task_commands(router, bg_store) -> None:
 
 
 def apply_loop_patch() -> str:
-    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.loop import AgentLoop, _LoopHook
     from nanobot.agent.memory import Consolidator
 
     required_methods = [
@@ -424,6 +550,62 @@ def apply_loop_patch() -> str:
 
     if getattr(AgentLoop._process_message, "_ava_loop_patched", False):
         return "loop_patch already applied (skipped)"
+
+    loop_hook_methods = ["__init__", "on_stream", "on_stream_end"]
+    missing_loop_hook = [name for name in loop_hook_methods if not hasattr(_LoopHook, name)]
+    if missing_loop_hook:
+        logger.warning("loop_patch skipped: _LoopHook missing methods {}", missing_loop_hook)
+        return f"loop_patch skipped (_LoopHook missing methods: {', '.join(missing_loop_hook)})"
+
+    # ------------------------------------------------------------------
+    # 0. Patch _LoopHook streaming so partial <think>/<thought> prefixes
+    #    never leak into the UI and trailing whitespace is preserved.
+    # ------------------------------------------------------------------
+    original_loop_hook_init = _LoopHook.__init__
+    original_loop_hook_on_stream_end = _LoopHook.on_stream_end
+
+    def patched_loop_hook_init(self: _LoopHook, *args, **kwargs) -> None:
+        original_loop_hook_init(self, *args, **kwargs)
+        self._ava_stream_emitted_text = ""
+
+    async def patched_loop_hook_on_stream(self: _LoopHook, context, delta: str) -> None:
+        self._stream_buf += delta
+        stable_text = _extract_stable_stream_text(self._stream_buf)
+        emitted_text = getattr(self, "_ava_stream_emitted_text", "")
+        if not stable_text.startswith(emitted_text):
+            return
+        incremental = stable_text[len(emitted_text):]
+        self._ava_stream_emitted_text = stable_text
+        turn_state = _token_record_context.get()
+        if isinstance(turn_state, dict) and not turn_state.get("first_token_event_recorded"):
+            chat_span = turn_state.get("chat_span_ctx")
+            trace_spans = turn_state.get("trace_spans")
+            chat_ctx = chat_span.get("ctx") if isinstance(chat_span, dict) else None
+            if chat_ctx is not None and trace_spans is not None:
+                try:
+                    trace_spans.append_event(
+                        chat_ctx.trace_id,
+                        chat_ctx.span_id,
+                        {"name": "gen_ai.first_token", "ts": time.time_ns()},
+                    )
+                    turn_state["first_token_event_recorded"] = True
+                except Exception as exc:
+                    logger.warning("Failed to append first-token trace event: {}", exc)
+        if incremental and self._on_stream:
+            await self._on_stream(incremental)
+
+    async def patched_loop_hook_on_stream_end(self: _LoopHook, context, *, resuming: bool) -> None:
+        try:
+            await original_loop_hook_on_stream_end(self, context, resuming=resuming)
+        finally:
+            self._ava_stream_emitted_text = ""
+
+    patched_loop_hook_init._ava_loop_patched = True
+    patched_loop_hook_on_stream._ava_loop_patched = True
+    patched_loop_hook_on_stream_end._ava_loop_patched = True
+    _LoopHook.__init__ = patched_loop_hook_init
+    _LoopHook.on_stream = patched_loop_hook_on_stream
+    _LoopHook.on_stream_end = patched_loop_hook_on_stream_end
 
     # ------------------------------------------------------------------
     # 1. Patch __init__ to inject extra attributes
@@ -443,6 +625,14 @@ def apply_loop_patch() -> str:
         self._pending_tool_guard = None
 
         try:
+            from ava.console.services.trace_spans_service import TraceSpanStore
+
+            self.trace_spans = TraceSpanStore(db) if db is not None else None
+        except Exception as exc:
+            logger.warning("Failed to init TraceSpanStore: {}", exc)
+            self.trace_spans = None
+
+        try:
             extra_hooks = list(getattr(self, "_extra_hooks", []))
             extra_hooks.append(_ToolGuardHook(self))
             self._extra_hooks = extra_hooks
@@ -455,7 +645,11 @@ def apply_loop_patch() -> str:
             from nanobot.config.paths import get_data_dir as _get_data_dir
             stats_data_dir = _get_data_dir()
             stats_data_dir.mkdir(parents=True, exist_ok=True)
-            self.token_stats = TokenStatsCollector(data_dir=stats_data_dir, db=db)
+            self.token_stats = TokenStatsCollector(
+                data_dir=stats_data_dir,
+                db=db,
+                trace_spans=getattr(self, "trace_spans", None),
+            )
         except Exception as exc:
             logger.warning("Failed to init TokenStatsCollector: {}", exc)
             self.token_stats = None
@@ -531,7 +725,7 @@ def apply_loop_patch() -> str:
         # BackgroundTaskStore
         try:
             from ava.agent.bg_tasks import BackgroundTaskStore
-            self.bg_tasks = BackgroundTaskStore(db=db)
+            self.bg_tasks = BackgroundTaskStore(db=db, trace_spans=getattr(self, "trace_spans", None))
             self.bg_tasks.set_agent_loop(self)
         except Exception as exc:
             logger.warning("Failed to init BackgroundTaskStore: {}", exc)
@@ -589,6 +783,8 @@ def apply_loop_patch() -> str:
                         image_gen_tool._token_stats = token_stats
                     if hasattr(image_gen_tool, "_media_service"):
                         image_gen_tool._media_service = media_service
+                    if hasattr(image_gen_tool, "_task_store"):
+                        image_gen_tool._task_store = getattr(self, "bg_tasks", None)
                 if cc_tool := self.tools.get("claude_code"):
                     if hasattr(cc_tool, "_token_stats"):
                         cc_tool._token_stats = token_stats
@@ -663,16 +859,40 @@ def apply_loop_patch() -> str:
     # ------------------------------------------------------------------
     original_set_tool_context = AgentLoop._set_tool_context
 
-    def patched_set_tool_context(self: AgentLoop, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        original_set_tool_context(self, channel, chat_id, message_id)
-        session_key = getattr(self, "_current_session_key", None) or f"{channel}:{chat_id}"
+    def patched_set_tool_context(
+        self: AgentLoop,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        original_set_tool_context(
+            self,
+            channel,
+            chat_id,
+            message_id,
+            metadata=metadata,
+            session_key=session_key,
+        )
+        session_key = session_key or getattr(self, "_current_session_key", None) or f"{channel}:{chat_id}"
+        conversation_id = getattr(self, "_current_conversation_id", "") or ""
+        turn_seq = getattr(self, "_current_turn_seq", None)
         for tool_name in self.tools.tool_names:
             tool = self.tools.get(tool_name)
             if tool and hasattr(tool, "set_context"):
                 try:
-                    tool.set_context(channel, chat_id, session_key=session_key)
+                    tool.set_context(
+                        channel, chat_id,
+                        session_key=session_key,
+                        conversation_id=conversation_id,
+                        turn_seq=turn_seq,
+                    )
                 except TypeError:
-                    tool.set_context(channel, chat_id)
+                    try:
+                        tool.set_context(channel, chat_id, session_key=session_key)
+                    except TypeError:
+                        tool.set_context(channel, chat_id)
 
     patched_set_tool_context._ava_loop_patched = True
     AgentLoop._set_tool_context = patched_set_tool_context
@@ -699,6 +919,7 @@ def apply_loop_patch() -> str:
                 "conversation_id": getattr(self, "_current_conversation_id", "") or "",
                 "user_message": getattr(self, "_current_user_message", "") or "",
                 "turn_seq": getattr(self, "_current_turn_seq", None),
+                "trace_id": "",
                 "record_ids": [],
                 "turn_iteration": 0,
                 "phase0_record_id": None,
@@ -709,11 +930,146 @@ def apply_loop_patch() -> str:
         turn_state.setdefault("record_ids", [])
         turn_state.setdefault("turn_iteration", 0)
         turn_state.setdefault("phase0_record_id", None)
+        if not turn_state.get("trace_id"):
+            try:
+                from ava.console.services.trace_context import new_trace_id
+
+                turn_state["trace_id"] = new_trace_id()
+            except Exception:
+                turn_state["trace_id"] = ""
 
         sk = turn_state.get("session_key", "") or ""
         conversation_id = turn_state.get("conversation_id", "") or ""
         user_msg = turn_state.get("user_message", "") or ""
         turn_seq = turn_state.get("turn_seq")
+        trace_spans = getattr(self, "trace_spans", None)
+        turn_state["trace_spans"] = trace_spans
+        turn_state["first_token_event_recorded"] = False
+        root_ctx = None
+        root_token = None
+
+        try:
+            if trace_spans is not None:
+                from ava.console.services.trace_context import (
+                    current_trace_context,
+                    start_span_sync,
+                )
+
+                root_ctx, root_token = start_span_sync(
+                    name="invoke_agent",
+                    operation_name="invoke_agent",
+                    kind="internal",
+                    attributes={
+                        "ava.session_key": sk,
+                        "ava.conversation_id": conversation_id,
+                        "ava.turn_seq": turn_seq,
+                    },
+                    store=trace_spans,
+                    parent=current_trace_context.get(),
+                    trace_id=turn_state.get("trace_id", "") or "",
+                    session_key=sk,
+                    conversation_id=conversation_id,
+                    turn_seq=turn_seq,
+                )
+                turn_state["trace_id"] = root_ctx.trace_id
+                turn_state["root_span_id"] = root_ctx.span_id
+                build_span_id = None
+                try:
+                    from ava.console.services.trace_context import new_span_id
+
+                    build_span_id = new_span_id()
+                    start_ns = time.time_ns()
+                    trace_spans.start_span(
+                        root_ctx.trace_id,
+                        build_span_id,
+                        root_ctx.span_id,
+                        "build_context messages",
+                        "build_context",
+                        "internal",
+                        {
+                            "ava.initial_messages": len(initial_messages or []),
+                        },
+                        start_ns=start_ns,
+                        session_key=sk,
+                        conversation_id=conversation_id,
+                        turn_seq=turn_seq,
+                    )
+                    trace_spans.end_span(
+                        root_ctx.trace_id,
+                        build_span_id,
+                        status="ok",
+                        end_ns=time.time_ns(),
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to record build_context trace span: {}", exc)
+        except Exception as exc:
+            logger.warning("Failed to start root trace span: {}", exc)
+            root_ctx = None
+            root_token = None
+
+        def _prepare_chat_span() -> None:
+            if turn_state.get("chat_span_ctx") or trace_spans is None or root_ctx is None:
+                return
+            try:
+                from ava.console.services.trace_context import start_span_sync
+
+                iteration = int(turn_state.get("turn_iteration", 0) or 0)
+                provider_name = type(self.provider).__name__.lower().replace("provider", "")
+                ctx, ctx_token = start_span_sync(
+                    name=f"chat {self.model}",
+                    operation_name="chat",
+                    kind="client",
+                    attributes={
+                        "gen_ai.operation.name": "chat",
+                        "gen_ai.request.model": self.model,
+                        "gen_ai.provider.name": provider_name,
+                        "ava.iteration": iteration,
+                    },
+                    store=trace_spans,
+                    parent=root_ctx,
+                    session_key=sk,
+                    conversation_id=conversation_id,
+                    turn_seq=turn_seq,
+                )
+                turn_state["chat_span_ctx"] = {"ctx": ctx, "ctx_token": ctx_token}
+            except Exception as exc:
+                logger.warning("Failed to start chat trace span: {}", exc)
+
+        def _end_current_chat_span(
+            *,
+            status: str = "ok",
+            status_message: str = "",
+            usage_data: dict | None = None,
+            finish_reason: str = "",
+        ) -> None:
+            chat_span = turn_state.get("chat_span_ctx")
+            if not isinstance(chat_span, dict):
+                return
+            try:
+                from ava.console.services.trace_context import end_span_sync
+
+                attrs: dict[str, object] = {}
+                if usage_data:
+                    attrs.update({
+                        "gen_ai.usage.input_tokens": usage_data.get("prompt_tokens", 0),
+                        "gen_ai.usage.output_tokens": usage_data.get("completion_tokens", 0),
+                        "gen_ai.response.finish_reasons": [finish_reason] if finish_reason else [],
+                    })
+                end_span_sync(
+                    chat_span.get("ctx"),
+                    store=trace_spans,
+                    status=status,
+                    status_message=status_message,
+                    attributes_merge=attrs,
+                    ctx_token=chat_span.get("ctx_token"),
+                )
+            except Exception as exc:
+                logger.warning("Failed to end chat trace span: {}", exc)
+            finally:
+                turn_state["chat_span_ctx"] = None
+
+        turn_state["prepare_chat_span"] = _prepare_chat_span
+        turn_state["end_current_chat_span"] = _end_current_chat_span
 
         # === 实时广播 + Phase 0 预记录（LLM 调用前，slash command 已过）===
         if sk and user_msg:
@@ -741,6 +1097,9 @@ def apply_loop_patch() -> str:
                 except Exception:
                     conv_history = ""
                 provider_name = type(self.provider).__name__.lower().replace("provider", "")
+                _prepare_chat_span()
+                chat_span = turn_state.get("chat_span_ctx") if isinstance(turn_state.get("chat_span_ctx"), dict) else {}
+                chat_ctx = chat_span.get("ctx") if isinstance(chat_span, dict) else None
                 phase0_id = token_stats.record(
                     model=self.model,
                     provider=provider_name,
@@ -753,6 +1112,9 @@ def apply_loop_patch() -> str:
                     conversation_history=conv_history,
                     finish_reason="pending",
                     model_role="pending",
+                    trace_id=getattr(chat_ctx, "trace_id", ""),
+                    span_id=getattr(chat_ctx, "span_id", ""),
+                    parent_span_id=getattr(chat_ctx, "parent_span_id", ""),
                 )
                 turn_state["phase0_record_id"] = phase0_id
                 if bus and hasattr(bus, "dispatch_observe_event") and phase0_id is not None:
@@ -841,6 +1203,11 @@ def apply_loop_patch() -> str:
                         current_turn_tokens=current_turn_tokens,
                         tool_names=tool_names_str,
                     )
+                    _end_current_chat_span(
+                        status="ok",
+                        usage_data=usage_data,
+                        finish_reason=finish_reason,
+                    )
                     turn_state["record_ids"].append(phase0_id)
                     turn_state["phase0_record_id"] = None
                     bus = getattr(self, "bus", None)
@@ -852,10 +1219,18 @@ def apply_loop_patch() -> str:
                             "phase": "completed",
                         })
                 except Exception as exc:
+                    _end_current_chat_span(
+                        status="error",
+                        status_message=str(exc)[:500],
+                        usage_data=usage_data,
+                        finish_reason=finish_reason,
+                    )
                     logger.warning("Failed to update Phase 0 record: {}", exc)
                 return
 
             try:
+                chat_span = turn_state.get("chat_span_ctx") if isinstance(turn_state.get("chat_span_ctx"), dict) else {}
+                chat_ctx = chat_span.get("ctx") if isinstance(chat_span, dict) else None
                 rec_id = token_stats.record(
                     model=self.model,
                     provider=provider_name,
@@ -874,6 +1249,14 @@ def apply_loop_patch() -> str:
                     cache_creation_tokens=usage_data.get("cache_creation_tokens"),
                     current_turn_tokens=current_turn_tokens,
                     tool_names=tool_names_str,
+                    trace_id=getattr(chat_ctx, "trace_id", ""),
+                    span_id=getattr(chat_ctx, "span_id", ""),
+                    parent_span_id=getattr(chat_ctx, "parent_span_id", ""),
+                )
+                _end_current_chat_span(
+                    status="ok",
+                    usage_data=usage_data,
+                    finish_reason=finish_reason,
                 )
                 if rec_id is not None:
                     turn_state["record_ids"].append(rec_id)
@@ -882,14 +1265,46 @@ def apply_loop_patch() -> str:
                     if row:
                         turn_state["record_ids"].append(row["id"])
             except Exception as exc:
+                _end_current_chat_span(
+                    status="error",
+                    status_message=str(exc)[:500],
+                    usage_data=usage_data,
+                    finish_reason=finish_reason,
+                )
                 logger.warning("Failed to record token stats inline: {}", exc)
 
         _install_provider_token_recording_wrappers(self.provider)
         turn_state["record_immediately"] = _record_immediately
+        run_error = None
         try:
             return await original_run_agent_loop(self, initial_messages, **kwargs)
+        except BaseException as exc:
+            run_error = exc
+            raise
         finally:
+            if turn_state.get("chat_span_ctx"):
+                _end_current_chat_span(
+                    status="error",
+                    status_message=str(run_error)[:500] if run_error else "LLM call did not finish",
+                )
+            if root_ctx is not None:
+                try:
+                    from ava.console.services.trace_context import end_span_sync
+
+                    end_span_sync(
+                        root_ctx,
+                        store=trace_spans,
+                        status="error" if run_error else "ok",
+                        status_message=str(run_error)[:500] if run_error else "",
+                        ctx_token=root_token,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to end root trace span: {}", exc)
             turn_state.pop("record_immediately", None)
+            turn_state.pop("prepare_chat_span", None)
+            turn_state.pop("end_current_chat_span", None)
+            turn_state.pop("trace_spans", None)
+            turn_state.pop("first_token_event_recorded", None)
             if owns_turn_state:
                 _token_record_context.reset(turn_state_token)
 
@@ -983,10 +1398,17 @@ def apply_loop_patch() -> str:
             "user_message": getattr(msg, "content", "") or "",
             "conversation_id": "",
             "turn_seq": None,
+            "trace_id": "",
             "record_ids": [],
             "turn_iteration": 0,
             "phase0_record_id": None,
         }
+        try:
+            from ava.console.services.trace_context import new_trace_id
+
+            turn_state["trace_id"] = new_trace_id()
+        except Exception:
+            turn_state["trace_id"] = ""
         self._current_session_key = sk
         self._current_user_message = turn_state["user_message"]
         self._current_conversation_id = ""

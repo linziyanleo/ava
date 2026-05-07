@@ -1,10 +1,12 @@
+import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { TurnGroup as TurnGroupType, TurnTokenStats, IterationTokenStats } from './types'
+import { cn } from '../../lib/utils'
 import { MessageBubble } from './MessageBubble'
 import { ToolCallBlock } from './ToolCallBlock'
 import { SubagentResultBlock, isSubagentMessage } from './SubagentResultBlock'
 import { BackgroundTaskResultBlock } from './BackgroundTaskResultBlock'
-import { isBackgroundTaskMessage } from './backgroundTask'
+import { isBackgroundTaskMessage, parseBackgroundTaskMessage } from './backgroundTask'
 import { getContentText } from './utils'
 
 interface TurnGroupProps {
@@ -14,6 +16,8 @@ interface TurnGroupProps {
   iterationStats?: Map<string, IterationTokenStats>
   sessionKey?: string
   suppressLoadingIndicator?: boolean
+  targetTaskId?: string | null
+  targetTurnSeq?: number | null
 }
 
 export function TurnGroupComponent({
@@ -23,6 +27,8 @@ export function TurnGroupComponent({
   iterationStats,
   sessionKey,
   suppressLoadingIndicator = false,
+  targetTaskId,
+  targetTurnSeq,
 }: TurnGroupProps) {
   const turnSeq = turn.turnSeq
   const maxIteration = turn.toolCalls.reduce((max, tc) => Math.max(max, tc.iteration), -1)
@@ -35,14 +41,42 @@ export function TurnGroupComponent({
     (s) => s.role === 'assistant' && s.tool_calls && getContentText(s.content),
   )
 
+  const isTargetTurn = targetTurnSeq != null && turnSeq === targetTurnSeq
+  const [turnHighlighted, setTurnHighlighted] = useState(false)
+  const prevIsTargetTurnRef = useRef(isTargetTurn)
+  useEffect(() => {
+    if (isTargetTurn && !prevIsTargetTurnRef.current) {
+      setTurnHighlighted(true)
+      const timer = setTimeout(() => setTurnHighlighted(false), 2000)
+      return () => clearTimeout(timer)
+    }
+    prevIsTargetTurnRef.current = isTargetTurn
+  }, [isTargetTurn])
+
   return (
-    <div className="space-y-2" id={index != null ? `turn-${index}` : undefined}>
+    <div
+      className={cn(
+        'space-y-2 rounded-md transition-all duration-500',
+        turnHighlighted && 'ring-1 ring-[var(--accent)]/40 bg-[var(--accent)]/5',
+      )}
+      id={turnSeq != null ? `turn-seq-${turnSeq}` : index != null ? `turn-${index}` : undefined}
+      data-turn-seq={turnSeq ?? undefined}
+    >
       {/* User message */}
       {isBackgroundTaskMessage(turn.userMessage.content)
-        ? <BackgroundTaskResultBlock
-            content={typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''}
-            timestamp={turn.userMessage.timestamp}
-          />
+        ? (() => {
+            const rawContent = typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''
+            const parsedTask = parseBackgroundTaskMessage(rawContent)
+            const tid = parsedTask?.taskId
+            return (
+              <BackgroundTaskResultBlock
+                content={rawContent}
+                timestamp={turn.userMessage.timestamp}
+                taskId={tid}
+                highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
+              />
+            )
+          })()
         : (turn.userMessage.metadata?.subagent_announce === true || isSubagentMessage(turn.userMessage.content))
         ? <SubagentResultBlock
             content={typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''}
@@ -52,15 +86,23 @@ export function TurnGroupComponent({
       }
 
       {/* Intermediate assistant messages with content before tool calls */}
-      {intermediateAssistants.map((msg, i) => (
-        isBackgroundTaskMessage(msg.content)
-          ? <BackgroundTaskResultBlock
+      {intermediateAssistants.map((msg, i) => {
+        if (isBackgroundTaskMessage(msg.content)) {
+          const rawContent = typeof msg.content === 'string' ? msg.content : ''
+          const parsedTask = parseBackgroundTaskMessage(rawContent)
+          const tid = parsedTask?.taskId
+          return (
+            <BackgroundTaskResultBlock
               key={`intermediate-${i}`}
-              content={typeof msg.content === 'string' ? msg.content : ''}
+              content={rawContent}
               timestamp={msg.timestamp}
+              taskId={tid}
+              highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
             />
-          : <MessageBubble key={`intermediate-${i}`} message={msg} isUser={false} />
-      ))}
+          )
+        }
+        return <MessageBubble key={`intermediate-${i}`} message={msg} isUser={false} />
+      })}
 
       {/* Tool calls — each rendered at the same level as message bubbles */}
       {turn.toolCalls.map((tc, i) => {
@@ -95,19 +137,30 @@ export function TurnGroupComponent({
               turn_seq: lastIter.turn_seq,
               prompt_tokens: lastIter.prompt_tokens,
               completion_tokens: lastIter.completion_tokens,
-              total_tokens: lastIter.total_tokens,
-              llm_calls: 1,
-              models: lastIter.model,
-            }
+	              total_tokens: lastIter.total_tokens,
+	              llm_calls: 1,
+	              models: lastIter.model,
+	              trace_id: lastIter.trace_id,
+	              span_id: lastIter.span_id,
+	            }
           }
         }
         return (
           isBackgroundTaskMessage(msg.content)
-            ? <BackgroundTaskResultBlock
-                key={`final-${i}`}
-                content={typeof msg.content === 'string' ? msg.content : ''}
-                timestamp={msg.timestamp}
-              />
+            ? (() => {
+                const rawContent = typeof msg.content === 'string' ? msg.content : ''
+                const parsedTask = parseBackgroundTaskMessage(rawContent)
+                const tid = parsedTask?.taskId
+                return (
+                  <BackgroundTaskResultBlock
+                    key={`final-${i}`}
+                    content={rawContent}
+                    timestamp={msg.timestamp}
+                    taskId={tid}
+                    highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
+                  />
+                )
+              })()
             : <MessageBubble
                 key={`final-${i}`}
                 message={msg}

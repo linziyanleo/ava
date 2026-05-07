@@ -32,6 +32,7 @@ metadata: {"nanobot":{"emoji":"🔁"}}
 
 6. `references/loop-contract.md` — round lifecycle、stop policy、coder feedback
 7. `references/testing-task.md` — Round 0 意图理解、checklist 生命周期
+8. `references/coder-debugging-guide.md` — coder debugging order
 
 > 关键原则：只加载当前测试涉及的页面 reference，不要一次全部读入。
 
@@ -133,6 +134,23 @@ round_status:
 3. **立即进入 Regression Round**——不要重复提交 coding，不要重新规划
 4. 如果结果是 ERROR，按失败升级规则处理
 
+### Root Cause Diagnosis Round
+
+当同一 `check_id + failure_taxonomy` 连续两轮失败时，不立刻 `escalate`。若该 failure key 尚未执行过根因分析，先提交只读诊断任务：
+
+- 使用 `claude_code(mode="readonly")`
+- 输入最近两轮 `regression_report`、失败 check、page_agent JSON/screenshot 证据、changed_files、目标页面 reference、当前 coding_summary
+- 禁止修改文件
+- 输出 `root_cause_report`
+
+收到诊断结果后：
+1. 将 `root_cause_report` 并入下一轮 coder prompt
+2. 对该 failure key 重置 `consecutive_failures=0`
+3. 记录 `diagnostic_attempted=true`
+4. 继续 Coding Round
+
+如果诊断后同一 failure key 再连续两轮失败，返回 `verdict=escalate`。
+
 ### 1. Round 0：生成测试任务
 
 按 `references/testing-task.md` 规则：
@@ -146,7 +164,14 @@ round_status:
 
 使用 `claude_code(mode="standard")` 或 `codex(mode="standard")` 异步提交实现或修复。
 
-给 coder 的输入至少包含：`goal`、`changed_files`、`failed_checks`、`failure_taxonomy`、只允许修改的目录范围。
+给 coder 的输入至少包含：
+
+- `goal`
+- `changed_files`
+- `failed_checks`
+- `failure_taxonomy`
+- `debugging_guidance`: 按 references/coder-debugging-guide.md 执行 route → component → props/state → style → verification
+- 只允许修改的目录范围
 
 提交后按上述 Turn A 行为输出阶段小结，等待 continuation。
 
@@ -187,7 +212,8 @@ round_status:
 ## 默认约束
 
 - v1 默认 `coding_tool=claude_code`，调用方式 `claude_code(mode="standard")`（异步）
-- `page_agent` 统一使用 `response_format="json"`
+- 回归断言需要结构化 Page State 时，`page_agent` 必须处于 `playwright` backend，并统一使用 `response_format="json"`
+- 如果当前 `page_agent` 配置为 `official_mcp`，它只提供任务级 `execute/get_status/stop_task`，不提供 Page State / screenshot / session preview；此时用 `playwright_daily_browser` 做 snapshot/screenshot 验收，或先切回 `playwright` backend 再跑本 skill
 - `vision` 只用于 `assertion_mode=visual|hybrid`
 - 默认 `rerun_policy=full_before_pass`
 
@@ -195,7 +221,7 @@ round_status:
 
 遇到以下情况直接 `escalate`：
 
-- 同一 `check_id + failure_taxonomy` 连续两轮失败
+- 诊断后同一 `check_id + failure_taxonomy` 再连续两轮失败
 - 登录态 / 权限要求无法自动满足
 - 问题属于 tooling/runtime，而不是当前页面实现
 

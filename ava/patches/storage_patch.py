@@ -211,6 +211,17 @@ def apply_storage_patch() -> str:
         """Save only the active conversation slice for a session."""
         conn = db._get_conn()
         active_conversation_id = _get_session_conversation_id(session)
+        try:
+            from ava.patches.loop_patch import _token_record_context
+
+            turn_state = _token_record_context.get(None)
+        except Exception:
+            turn_state = None
+        current_trace_id = (
+            (turn_state or {}).get("trace_id", "")
+            if isinstance(turn_state, dict)
+            else ""
+        )
 
         metadata_json = json.dumps(session.metadata, ensure_ascii=False)
         token_stats_json = json.dumps(
@@ -344,15 +355,17 @@ def apply_storage_patch() -> str:
                     continue
                 if logical_signature is not None and logical_signature in existing_logical_signatures:
                     continue
+                trace_id = msg.get("trace_id") or (current_trace_id if seq >= db_count else "")
 
                 conn.execute(
                     """INSERT INTO session_messages
-                       (session_id, seq, conversation_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         session_id,
                         seq,
                         active_conversation_id,
+                        trace_id,
                         msg.get("role", ""),
                         content,
                         tool_calls_json,
@@ -406,6 +419,8 @@ def apply_storage_patch() -> str:
                 msg["name"] = msg_row["name"]
             if msg_row["reasoning_content"]:
                 msg["reasoning_content"] = msg_row["reasoning_content"]
+            if msg_row["trace_id"]:
+                msg["trace_id"] = msg_row["trace_id"]
             messages.append(msg)
 
         try:

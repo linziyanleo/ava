@@ -1,6 +1,6 @@
 """End-to-end flow tests simulating actual runtime behavior.
 
-Tests the full lifecycle: tool.execute -> resolve_target -> submit_coding_task
+Tests the full lifecycle: tool.execute -> resolve_target -> submit_task
 -> background execution -> completion callback -> status query with workspace metadata.
 """
 from __future__ import annotations
@@ -221,7 +221,7 @@ async def test_parallel_workspace_isolation(tmp_path: Path):
         await asyncio.sleep(30)
         return {"result": "done"}
 
-    submit_a = store.submit_coding_task(
+    submit_a = store.submit_task(
         executor=_slow,
         origin_session_key="test:parallel",
         prompt="Work on branch A",
@@ -229,7 +229,7 @@ async def test_parallel_workspace_isolation(tmp_path: Path):
         target=target,
         workspace=ws_a,
     )
-    submit_b = store.submit_coding_task(
+    submit_b = store.submit_task(
         executor=_slow,
         origin_session_key="test:parallel",
         prompt="Work on branch B",
@@ -286,7 +286,7 @@ async def test_bg_task_routes_workspace_query(tmp_path: Path):
     async def _fast(**_kw):
         return {"result": "ok"}
 
-    submit = store.submit_coding_task(
+    submit = store.submit_task(
         executor=_fast,
         origin_session_key="test:route",
         prompt="Route test",

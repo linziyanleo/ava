@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ava.console import auth
-from ava.console.models import UserInfo
 from ava.console.middleware import get_client_ip
+from ava.console.models import UserInfo
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -31,6 +32,10 @@ class ToggleSkillRequest(BaseModel):
     enabled: bool
 
 
+class MCPTestRequest(BaseModel):
+    name: str
+
+
 @router.get("/tools")
 async def list_tools(
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
@@ -38,6 +43,61 @@ async def list_tools(
     """List all built-in tools."""
     from ava.console.app import get_services_for_user
     return {"tools": get_services_for_user(user).skills.list_tools()}
+
+
+@router.get("/mcp/status")
+async def mcp_status(
+    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+):
+    """List configured MCP servers with redacted config and runtime status."""
+    from ava.console.app import get_services_for_user
+    svc = get_services_for_user(user)
+    agent_loop = getattr(svc.chat, "_agent", None) if svc.chat else None
+    return svc.skills.mcp_status(agent_loop=agent_loop)
+
+
+@router.post("/mcp/test")
+async def mcp_test(
+    body: MCPTestRequest,
+    request: Request,
+    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+):
+    """Run a short independent MCP probe for a configured server."""
+    from ava.console.app import get_services
+    svc = get_services()
+
+    try:
+        result = await svc.skills.test_mcp_server(body.name)
+        svc.audit.log(
+            user=user.username, role=user.role,
+            action="skill.mcp.test",
+            target=body.name,
+            ip=get_client_ip(request),
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/mcp/reconnect")
+async def mcp_reconnect(
+    request: Request,
+    user: UserInfo = Depends(auth.require_role("admin")),
+):
+    """Reconnect MCP servers if the runtime supports it."""
+    from ava.console.app import get_services
+    svc = get_services()
+    agent_loop = getattr(svc.chat, "_agent", None) if svc.chat else None
+    result = svc.skills.reconnect_mcp(agent_loop=agent_loop)
+    svc.audit.log(
+        user=user.username, role=user.role,
+        action="skill.mcp.reconnect",
+        target=result.get("scope", "all"),
+        ip=get_client_ip(request),
+    )
+    if not result.get("ok") and result.get("status") == "unsupported":
+        return JSONResponse(status_code=501, content=result)
+    return result
 
 
 @router.get("/list")

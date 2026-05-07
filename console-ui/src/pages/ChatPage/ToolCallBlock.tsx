@@ -6,6 +6,7 @@ import type { ToolCallWithResult, TurnTokenStats, IterationTokenStats } from './
 import { getContentText, imageUrl, extractImagePaths, formatTokenCount, formatTimestamp, calcDuration } from './utils'
 import { ImageCarousel } from './ImageCarousel'
 import { api } from '../../api/client'
+import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 
 interface MediaRecord {
   id: string
@@ -143,22 +144,29 @@ function TokenStatsLink({
   sessionKey,
   conversationId,
   turnSeq,
+  traceId,
+  spanId,
 }: {
   sessionKey?: string
   conversationId?: string
   turnSeq?: number | null
+  traceId?: string
+  spanId?: string
 }) {
   const navigate = useNavigate()
 
-  if (!sessionKey || turnSeq == null) return null
+  if (!sessionKey && !traceId) return null
 
   return (
     <button
       onClick={() => {
-        const params = new URLSearchParams({ session_key: sessionKey })
-        if (conversationId) params.set('conversation_id', conversationId)
-        params.set('turn_seq', String(turnSeq))
-        navigate(`/tokens?${params.toString()}`)
+        navigate(buildTokenStatsNavUrl({
+          sessionKey,
+          conversationId,
+          turnSeq,
+          traceId,
+          spanId,
+        }))
       }}
       className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--bg-tertiary)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors"
       title="查看当前工具块对应的 Token 统计"
@@ -263,6 +271,8 @@ export function ToolCallBlock({
 
   const mediaImageUrls = regexImageUrls.length > 0 ? regexImageUrls : apiImageUrls
   const effectiveConversationId = conversationId || iterationStats?.conversation_id || tokenStats?.conversation_id || ''
+  const effectiveTraceId = iterationStats?.trace_id || tokenStats?.trace_id || ''
+  const effectiveSpanId = iterationStats?.span_id || tokenStats?.span_id || ''
 
   if (fnName === 'claude_code') {
     const prompt = (parsedArgs.prompt || '') as string
@@ -361,6 +371,8 @@ export function ToolCallBlock({
               sessionKey={sessionKey}
               conversationId={effectiveConversationId}
               turnSeq={turnSeq}
+              traceId={effectiveTraceId}
+              spanId={effectiveSpanId}
             />
 
             {/* Result */}
@@ -486,6 +498,8 @@ export function ToolCallBlock({
                 sessionKey={sessionKey}
                 conversationId={effectiveConversationId}
                 turnSeq={turnSeq}
+                traceId={effectiveTraceId}
+                spanId={effectiveSpanId}
               />
 
               {codexResult && (
@@ -614,6 +628,8 @@ export function ToolCallBlock({
               sessionKey={sessionKey}
               conversationId={effectiveConversationId}
               turnSeq={turnSeq}
+              traceId={effectiveTraceId}
+              spanId={effectiveSpanId}
             />
 
             {paResult?.url && paResult.url !== 'unknown' && (
@@ -710,6 +726,8 @@ export function ToolCallBlock({
               sessionKey={sessionKey}
               conversationId={effectiveConversationId}
               turnSeq={turnSeq}
+              traceId={effectiveTraceId}
+              spanId={effectiveSpanId}
             />
             {args && args !== '{}' && !displayPrompt && (
               <div className="pt-1.5">
@@ -779,6 +797,8 @@ export function ToolCallBlock({
               sessionKey={sessionKey}
               conversationId={effectiveConversationId}
               turnSeq={turnSeq}
+              traceId={effectiveTraceId}
+              spanId={effectiveSpanId}
             />
             <div>
               <div className="text-[var(--text-secondary)] mb-0.5 font-medium">Arguments</div>

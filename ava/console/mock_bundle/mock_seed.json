@@ -121,6 +121,14 @@
       "timestamp": "2026-04-07T08:50:06+08:00"
     },
     {
+      "session_key": "console:mock-session-1",
+      "seq": 2,
+      "conversation_id": "mock-conv-1",
+      "role": "assistant",
+      "content": "[Background Task mock-task-ok-1 SUCCESS]\nType: coding | Duration: 120000ms\n\nInserted summary and detailed token rows for mock conversations.\nSeeded token stats for mock_tester dashboard with 3 conversations.",
+      "timestamp": "2026-04-07T09:02:00+08:00"
+    },
+    {
       "session_key": "console:mock-session-2",
       "seq": 0,
       "conversation_id": "mock-conv-2",
@@ -273,7 +281,7 @@
       "content": [
         {
           "type": "text",
-          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code and Codex.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
+          "text": "## Mock Review Summary\n- Chat page now shows `page_agent`, `vision`, `transcribe`, generic `memory_tool`, `image_gen`, `claude_code`, and `codex` blocks.\n- Session header and per-turn token entry both jump to the `Token Stats` page.\n- Background Tasks page keeps active `queued/running` samples plus history states for Claude Code, Codex, and image generation.\n\n```ts\nconst mockCoverage = ['chat', 'bg-tasks', 'persona', 'skills', 'tokens']\n```"
         }
       ],
       "timestamp": "2026-04-07T09:10:36+08:00"
@@ -585,7 +593,9 @@
         }
       ],
       "full_prompt": "Patch mock_tester coverage for chat and background tasks.\n- Seed full block types in chat mock data\n- Add running/queued/history background task samples",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-run-2",
@@ -629,7 +639,51 @@
         }
       ],
       "full_prompt": "Add workspace metadata display to background task cards.",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
+    },
+    {
+      "task_id": "mock-task-img-run-1",
+      "task_type": "image_gen",
+      "origin_session_key": "console:mock-session-2",
+      "status": "running",
+      "prompt_preview": "Generate a transparent PNG of Rowlet writing code.",
+      "started_at": 1775527900,
+      "finished_at": null,
+      "elapsed_ms": 0,
+      "result_preview": "",
+      "error_message": "",
+      "phase": "generating",
+      "last_tool_name": "image_gen",
+      "todo_summary": null,
+      "project_path": "workspace/media/generated",
+      "cli_run_id": "",
+      "cli_session_id": "",
+      "repo_root": "",
+      "workdir_relpath": "",
+      "workspace_key": "",
+      "workspace_id": "",
+      "execution_cwd": "workspace/media/generated",
+      "isolation_mode": "inplace",
+      "branch_name": "",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527900,
+          "event": "submitted",
+          "detail": "Generate a transparent PNG of Rowlet writing code."
+        },
+        {
+          "timestamp": 1775527903,
+          "event": "started",
+          "detail": ""
+        }
+      ],
+      "full_prompt": "Generate a transparent PNG of Rowlet writing code.",
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-queue-1",
@@ -668,10 +722,59 @@
         }
       ],
       "full_prompt": "Review whether mock Pages.md still misses any read-only regression route.",
-      "full_result": ""
+      "full_result": "",
+      "origin_conversation_id": "mock-conv-3",
+      "origin_turn_seq": 0
     }
   ],
   "bg_tasks_history": [
+    {
+      "task_id": "mock-task-image-ok-1",
+      "task_type": "image_gen",
+      "origin_session_key": "console:mock-session-2",
+      "status": "succeeded",
+      "prompt_preview": "Generate Rowlet writing code on a transparent background as PNG.",
+      "started_at": 1775527600,
+      "finished_at": 1775527720,
+      "elapsed_ms": 120000,
+      "result_preview": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png",
+      "error_message": "",
+      "phase": "completed",
+      "last_tool_name": "image_gen",
+      "todo_summary": null,
+      "project_path": "workspace/media/generated",
+      "cli_run_id": "",
+      "cli_session_id": "",
+      "repo_root": "",
+      "workdir_relpath": "",
+      "workspace_key": "",
+      "workspace_id": "",
+      "execution_cwd": "workspace/media/generated",
+      "isolation_mode": "inplace",
+      "branch_name": "",
+      "worktree_path": "",
+      "timeline": [
+        {
+          "timestamp": 1775527600,
+          "event": "submitted",
+          "detail": "Generate Rowlet writing code on a transparent background as PNG."
+        },
+        {
+          "timestamp": 1775527604,
+          "event": "started",
+          "detail": ""
+        },
+        {
+          "timestamp": 1775527720,
+          "event": "succeeded",
+          "detail": "Generated two PNG files"
+        }
+      ],
+      "full_prompt": "Generate Rowlet writing code on a transparent background as PNG.",
+      "full_result": "Generated image(s): workspace/media/generated/mock-sky.png, workspace/media/generated/mock-grid.png\nTransparent PNG mock output is ready.",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
+    },
     {
       "task_id": "mock-task-ok-1",
       "task_type": "coding",
@@ -715,7 +818,9 @@
         }
       ],
       "full_prompt": "Seed token stats examples for mock_tester dashboard.",
-      "full_result": "Inserted summary and detailed token rows for mock conversations."
+      "full_result": "Inserted summary and detailed token rows for mock conversations.",
+      "origin_conversation_id": "mock-conv-1",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-fail-1",
@@ -760,7 +865,9 @@
         }
       ],
       "full_prompt": "Backfill mock browser preview frames for mock_tester.",
-      "full_result": "Blocked: browser preview remains excluded from the mock-safe role by design."
+      "full_result": "Blocked: browser preview remains excluded from the mock-safe role by design.",
+      "origin_conversation_id": "mock-conv-2",
+      "origin_turn_seq": 0
     },
     {
       "task_id": "mock-task-cancel-1",
@@ -805,7 +912,9 @@
         }
       ],
       "full_prompt": "Refactor every console route to share one role matrix helper.",
-      "full_result": "Cancelled before execution completed."
+      "full_result": "Cancelled before execution completed.",
+      "origin_conversation_id": "mock-conv-3",
+      "origin_turn_seq": 0
     }
   ],
   "skill_config": [

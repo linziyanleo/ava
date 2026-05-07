@@ -4,7 +4,9 @@
 
 默认 `deterministic-first`。
 
-优先用 `page_agent(response_format="json")` 的结构化结果做判断：
+优先用确定性结构化结果做判断。
+
+当 `page_agent` 使用 `playwright` backend 时，优先读取 `page_agent(response_format="json")` 的结构化结果：
 
 - `page.url`
 - `page.title`
@@ -13,6 +15,8 @@
 - `page_state.alerts`
 - `page_state.forms`
 - `page_state.buttons`
+
+当 `page_agent` 使用 `official_mcp` backend 时，它只提供任务级 `execute/get_status/stop_task`，不提供 Page State、截图存档或 session preview。此时用 `mcp_playwright_daily_browser_snapshot()` 作为结构化验收来源，用 `mcp_playwright_daily_browser_take_screenshot()` 作为视觉证据来源。
 
 只有这些事实不够时，才升级到 `screenshot + vision`。
 

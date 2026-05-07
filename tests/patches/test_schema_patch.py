@@ -59,7 +59,7 @@ class TestSchemaPatch:
         from ava.patches.a_schema_patch import apply_schema_patch
 
         apply_schema_patch()
-        from nanobot.config.schema import MCPServerConfig, ProvidersConfig, WebSearchConfig
+        from nanobot.config.schema import MCPServerConfig, ProvidersConfig, WebFetchConfig, WebSearchConfig, WebToolsConfig
 
         assert "mistral" in ProvidersConfig.model_fields
         assert "ollama" in ProvidersConfig.model_fields
@@ -78,6 +78,12 @@ class TestSchemaPatch:
         assert "provider" in WebSearchConfig.model_fields
         assert "base_url" in WebSearchConfig.model_fields
         assert web_search.provider == "brave"
+
+        web_fetch = WebFetchConfig()
+        assert "use_jina_reader" in WebFetchConfig.model_fields
+        assert web_fetch.use_jina_reader is True
+        assert "fetch" in WebToolsConfig.model_fields
+        assert isinstance(WebToolsConfig().fetch, WebFetchConfig)
 
     def test_channels_keep_builtin_defaults_and_plugin_extras(self):
         """T1.3d: ChannelsConfig 既保留内建默认结构，也保留未知 plugin 节点。"""
@@ -114,6 +120,9 @@ class TestSchemaPatch:
         assert dumped["agents"]["defaults"]["heartbeat"]["interval_s"] == 1800
         assert dumped["gateway"]["console"]["enabled"] is True
         assert dumped["tools"]["exec"]["autoVenv"] is True
+        assert dumped["tools"]["imageGen"]["timeout"] == 300
+        assert dumped["tools"]["imageGen"]["autoContinue"] is False
+        assert dumped["tools"]["imageGen"]["autoSend"] is True
         assert dumped["tools"]["claudeCode"]["model"] == "claude-sonnet-4-20250514"
         assert dumped["token_stats"]["snapshot_content_max_chars"] == 3000
         assert dumped["token_stats"]["record_full_request_payload"] is False

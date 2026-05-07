@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import re
 import uuid
 from pathlib import Path
@@ -17,8 +18,43 @@ _CHAT_UPLOAD_MIME_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
     "image/gif": ".gif",
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "text/plain": ".txt",
+    "text/markdown": ".md",
+    "text/csv": ".csv",
+    "application/json": ".json",
+    "application/xml": ".xml",
+    "text/xml": ".xml",
+    "text/html": ".html",
+    "application/x-yaml": ".yaml",
+    "text/yaml": ".yaml",
+    "application/toml": ".toml",
 }
-_MAX_CHAT_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+_CHAT_UPLOAD_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_CHAT_UPLOAD_DOCUMENT_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".csv",
+    ".json",
+    ".xml",
+    ".html",
+    ".htm",
+    ".log",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+}
+_CHAT_UPLOAD_ALLOWED_EXTENSIONS = _CHAT_UPLOAD_IMAGE_EXTENSIONS | _CHAT_UPLOAD_DOCUMENT_EXTENSIONS
+_MAX_CHAT_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024
 
 
 class MediaService:
@@ -163,7 +199,7 @@ class MediaService:
     @staticmethod
     def _safe_stem(name: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")
-        return cleaned or "pasted-image"
+        return cleaned or "upload"
 
     @staticmethod
     def build_display_path(image_ref: str) -> str:
@@ -182,18 +218,31 @@ class MediaService:
         return f"/api/media/images/{filename}"
 
     def save_chat_upload(self, *, filename: str | None, mime_type: str | None, data: bytes) -> dict[str, Any]:
-        mime = (mime_type or "").lower().strip()
-        if mime not in _CHAT_UPLOAD_MIME_EXTENSIONS:
-            raise ValueError("Only PNG, JPEG, WEBP, and GIF images are supported")
-        if not data:
-            raise ValueError("Uploaded image is empty")
-        if len(data) > _MAX_CHAT_UPLOAD_SIZE_BYTES:
-            raise ValueError("Image exceeds 10MB limit")
-
         requested_name = filename or ""
+        guessed_mime = mimetypes.guess_type(requested_name)[0]
+        raw_mime = (mime_type or "").lower().strip()
+        mime = guessed_mime if raw_mime in {"", "application/octet-stream"} and guessed_mime else raw_mime
+
+        if not data:
+            raise ValueError("Uploaded file is empty")
+        if len(data) > _MAX_CHAT_UPLOAD_SIZE_BYTES:
+            raise ValueError("File exceeds 50MB limit")
+
         requested_suffix = Path(requested_name).suffix.lower()
-        suffix = requested_suffix if requested_suffix in _CHAT_UPLOAD_MIME_EXTENSIONS.values() else _CHAT_UPLOAD_MIME_EXTENSIONS[mime]
-        stem = self._safe_stem(Path(requested_name).stem or "pasted-image")
+        image_suffix = _CHAT_UPLOAD_MIME_EXTENSIONS.get(mime or "") if (mime or "").startswith("image/") else None
+        if image_suffix:
+            suffix = requested_suffix if requested_suffix in _CHAT_UPLOAD_IMAGE_EXTENSIONS else image_suffix
+            kind = "image"
+        elif requested_suffix in _CHAT_UPLOAD_ALLOWED_EXTENSIONS:
+            suffix = requested_suffix
+            kind = "file"
+        elif mime in _CHAT_UPLOAD_MIME_EXTENSIONS:
+            suffix = _CHAT_UPLOAD_MIME_EXTENSIONS[mime]
+            kind = "file"
+        else:
+            raise ValueError("Unsupported file type. Supported uploads: images, PDF, DOCX, XLSX, PPTX, and text files")
+
+        stem = self._safe_stem(Path(requested_name).stem or "upload")
         stored_filename = f"chat-{uuid.uuid4().hex[:12]}-{stem}{suffix}"
 
         self._chat_upload_dir.mkdir(parents=True, exist_ok=True)
@@ -204,9 +253,11 @@ class MediaService:
             "filename": stored_filename,
             "media_path": str(stored_path),
             "path": self.build_display_path(str(stored_path)),
-            "mime_type": mime,
+            "mime_type": mime or "application/octet-stream",
+            "kind": kind,
             "size_bytes": len(data),
-            "preview_url": self.build_preview_url(stored_filename),
+            "preview_url": self.build_preview_url(stored_filename) if kind == "image" else None,
+            "download_url": f"/api/media/files/{stored_filename}",
         }
 
     def _iter_lookup_paths(self, filename: str):

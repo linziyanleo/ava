@@ -14,7 +14,13 @@ export interface MessageImageRef {
   previewUrl: string
 }
 
+export interface MessageFileRef {
+  rawPath: string
+  displayPath: string
+}
+
 const IMAGE_PLACEHOLDER_RE = /\[image:\s*([^\]]+?)\]/gi
+const FILE_PLACEHOLDER_RE = /\[file:\s*([^\]]+?)\]/gi
 
 export function parseScene(filename: string): SceneType {
   const name = filename.replace(/\.jsonl$/, '')
@@ -292,9 +298,17 @@ export function displayImagePath(path: string): string {
 export function extractMessageImages(
   content: string | null | MessageContentBlock[],
 ): { text: string; images: MessageImageRef[] } {
+  const { text, images } = extractMessageAttachments(content)
+  return { text, images }
+}
+
+export function extractMessageAttachments(
+  content: string | null | MessageContentBlock[],
+): { text: string; images: MessageImageRef[]; files: MessageFileRef[] } {
   const source = getContentText(content)
   const seen = new Set<string>()
   const images: MessageImageRef[] = []
+  const files: MessageFileRef[] = []
 
   const text = source
     .replace(IMAGE_PLACEHOLDER_RE, (_match, rawPath: string) => {
@@ -308,10 +322,20 @@ export function extractMessageImages(
       })
       return ''
     })
+    .replace(FILE_PLACEHOLDER_RE, (_match, rawPath: string) => {
+      const trimmed = rawPath.trim()
+      if (!trimmed || seen.has(trimmed)) return ''
+      seen.add(trimmed)
+      files.push({
+        rawPath: trimmed,
+        displayPath: displayImagePath(trimmed),
+      })
+      return ''
+    })
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { text, images }
+  return { text, images, files }
 }
 
 const GENERATED_RE = /Generated image\(s\):\s*(.+)/

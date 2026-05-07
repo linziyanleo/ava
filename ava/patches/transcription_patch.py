@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import mimetypes
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ import httpx
 from loguru import logger
 
 from ava.launcher import register_patch
+from ava.runtime import config_overlay
 from ava.runtime import paths as runtime_paths
 
 _ZENMUX_VERTEX_BASE_URL = "https://zenmux.ai/api/vertex-ai/v1"
@@ -39,21 +39,13 @@ def _normalize_transcription_provider(provider: str | None) -> str:
 
 
 def _read_proxy_from_raw_config() -> str | None:
-    """从 raw config / extra_config 里读取 web proxy。"""
-    proxy: str | None = None
+    """从有效配置里读取 web proxy。"""
     try:
-        config_path = runtime_paths.resolve_ava_home() / "config.json"
-        if config_path.exists():
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-            proxy = data.get("tools", {}).get("web", {}).get("proxy") or None
-
-        extra_path = runtime_paths.resolve_ava_home() / "extra_config.json"
-        if extra_path.exists():
-            extra = json.loads(extra_path.read_text(encoding="utf-8"))
-            proxy = extra.get("tools", {}).get("web", {}).get("proxy") or proxy
+        data = config_overlay.load_effective_config_data(runtime_paths.get_config_path())
+        return data.get("tools", {}).get("web", {}).get("proxy") or None
     except Exception as exc:
         logger.warning("transcription_patch: failed to read proxy config: {}", exc)
-    return proxy
+    return None
 
 
 def _load_runtime_config() -> Any | None:

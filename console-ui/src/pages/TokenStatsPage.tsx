@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { useResponsiveMode } from '../hooks/useResponsiveMode';
 import ConversationHistoryView from '../components/ConversationHistoryView';
+import IdentityField from '../components/IdentityField';
+import TraceTimelineDrawer from '../components/TraceTimelineDrawer';
 import type { ConversationMeta, TurnGroup as ChatTurnGroup } from './ChatPage/types';
 import { getContentText, groupTurns } from './ChatPage/utils';
 import {
@@ -55,6 +57,9 @@ interface TokenRecord {
   cache_creation_tokens: number;
   cost_usd: number;
   tool_names: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string;
 }
 
 interface ModelStats {
@@ -87,6 +92,8 @@ interface RecordsResponse {
 interface TurnSummaryRecord {
   conversation_id: string;
   turn_seq: number | null;
+  trace_id?: string;
+  span_id?: string;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
@@ -107,6 +114,9 @@ interface TurnIterationRecord {
   model_role: string;
   tool_names: string;
   finish_reason: string;
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string;
 }
 
 type TokenStatsView = 'records' | 'turns' | 'charts';
@@ -411,6 +421,8 @@ function buildFilterStr(
   cStart: string,
   cEnd: string,
   modelRole: ModelRoleFilter,
+  traceId: string,
+  spanId: string,
 ): string {
   const params = new URLSearchParams();
   if (sk) params.set('session_key', sk);
@@ -418,6 +430,8 @@ function buildFilterStr(
   if (model) params.set('model', model);
   if (provider) params.set('provider', provider);
   if (turnSeq) params.set('turn_seq', turnSeq);
+  if (traceId) params.set('trace_id', traceId);
+  if (spanId) params.set('span_id', spanId);
   if (modelRole && modelRole !== 'all') params.set('model_role', modelRole);
   if (preset === 'custom') {
     if (cStart) params.set('start_time', new Date(cStart).toISOString());
@@ -445,7 +459,9 @@ export default function TokenStatsPage() {
       ? makeTurnKey(appliedConversationId, appliedTurnSeq)
       : null;
   const isSessionMode = Boolean(appliedSessionKey);
-  const [view, setView] = useState<TokenStatsView>(() => (searchParams.get('session_key') ? 'turns' : 'records'));
+  const [view, setView] = useState<TokenStatsView>(() => (
+    searchParams.get('trace_id') ? 'records' : (searchParams.get('session_key') ? 'turns' : 'records')
+  ));
   const [summary, setSummary] = useState<TokenSummary | null>(null);
   const [records, setRecords] = useState<TokenRecord[]>([]);
   const [sessionTurnSummaries, setSessionTurnSummaries] = useState<TurnSummaryRecord[]>([]);
@@ -459,6 +475,7 @@ export default function TokenStatsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(searchParams.get('trace_id'));
   const [loading, setLoading] = useState(false);
   useAuth();
   const pageSize = 50;
@@ -468,6 +485,8 @@ export default function TokenStatsPage() {
   const [filterModel, setFilterModel] = useState(searchParams.get('model') || '');
   const [filterProvider, setFilterProvider] = useState(searchParams.get('provider') || '');
   const [filterTurnSeq, setFilterTurnSeq] = useState(searchParams.get('turn_seq') || '');
+  const [filterTraceId, setFilterTraceId] = useState(searchParams.get('trace_id') || '');
+  const [filterSpanId, setFilterSpanId] = useState(searchParams.get('span_id') || '');
   const [filterModelRole, setFilterModelRole] = useState<ModelRoleFilter>('all');
   const [timePreset, setTimePreset] = useState<TimePreset>('all');
   const [customStart, setCustomStart] = useState('');
@@ -480,6 +499,8 @@ export default function TokenStatsPage() {
     filterModel,
     filterProvider,
     filterTurnSeq,
+    filterTraceId,
+    filterSpanId,
     filterModelRole,
     timePreset,
     customStart,
@@ -495,6 +516,8 @@ export default function TokenStatsPage() {
       filterModel,
       filterProvider,
       filterTurnSeq,
+      filterTraceId,
+      filterSpanId,
       filterModelRole,
       timePreset,
       customStart,
@@ -506,6 +529,8 @@ export default function TokenStatsPage() {
     filterModel,
     filterProvider,
     filterTurnSeq,
+    filterTraceId,
+    filterSpanId,
     filterModelRole,
     timePreset,
     customStart,
@@ -535,6 +560,8 @@ export default function TokenStatsPage() {
         f.customStart,
         f.customEnd,
         f.filterModelRole,
+        f.filterTraceId,
+        f.filterSpanId,
       );
       const sep = filterStr ? '&' : '';
       const r = await api<RecordsResponse>(
@@ -694,13 +721,18 @@ export default function TokenStatsPage() {
     const m = searchParams.get('model') || '';
     const p = searchParams.get('provider') || '';
     const ts = searchParams.get('turn_seq') || '';
+    const tr = searchParams.get('trace_id') || '';
+    const sp = searchParams.get('span_id') || '';
     queueMicrotask(() => {
       setFilterSessionKey(sk);
       setFilterConversationId(cv);
       setFilterModel(m);
       setFilterProvider(p);
       setFilterTurnSeq(ts);
-      setView(sk ? 'turns' : 'records');
+      setFilterTraceId(tr);
+      setFilterSpanId(sp);
+      setSelectedTraceId(tr || null);
+      setView(tr ? 'records' : (sk ? 'turns' : 'records'));
       filtersRef.current = {
         ...filtersRef.current,
         filterSessionKey: sk,
@@ -708,6 +740,8 @@ export default function TokenStatsPage() {
         filterModel: m,
         filterProvider: p,
         filterTurnSeq: ts,
+        filterTraceId: tr,
+        filterSpanId: sp,
       };
       void loadRecords(0);
     });
@@ -753,7 +787,10 @@ export default function TokenStatsPage() {
     if (filterModel) newParams.model = filterModel;
     if (filterProvider) newParams.provider = filterProvider;
     if (filterTurnSeq) newParams.turn_seq = filterTurnSeq;
-    setView(filterSessionKey ? 'turns' : 'records');
+    if (filterTraceId) newParams.trace_id = filterTraceId;
+    if (filterSpanId) newParams.span_id = filterSpanId;
+    setSelectedTraceId(filterTraceId || null);
+    setView(filterTraceId ? 'records' : (filterSessionKey ? 'turns' : 'records'));
     setSearchParams(newParams, { replace: true });
     loadRecords(0);
   };
@@ -764,23 +801,28 @@ export default function TokenStatsPage() {
     setFilterModel('');
     setFilterProvider('');
     setFilterTurnSeq('');
+    setFilterTraceId('');
+    setFilterSpanId('');
     setFilterModelRole('all');
     setTimePreset('all');
     setCustomStart('');
     setCustomEnd('');
     setSearchParams({}, { replace: true });
-    filtersRef.current = {
-      filterSessionKey: '',
+	    filtersRef.current = {
+	      filterSessionKey: '',
       filterConversationId: '',
       filterModel: '',
       filterProvider: '',
       filterTurnSeq: '',
+      filterTraceId: '',
+      filterSpanId: '',
       filterModelRole: 'all',
       timePreset: 'all',
       customStart: '',
-      customEnd: '',
-    };
-    setView('records');
+	      customEnd: '',
+	    };
+	    setSelectedTraceId(null);
+	    setView('records');
     loadRecords(0);
   };
 
@@ -799,6 +841,8 @@ export default function TokenStatsPage() {
     filterModel ||
     filterProvider ||
     filterTurnSeq ||
+    filterTraceId ||
+    filterSpanId ||
     filterModelRole !== 'all' ||
     timePreset !== 'all';
 
@@ -1239,6 +1283,26 @@ export default function TokenStatsPage() {
                   className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
                 />
               </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-[10px] text-[var(--text-secondary)] mb-1 block">Trace ID</label>
+                <input
+                  type="text"
+                  value={filterTraceId}
+                  onChange={e => setFilterTraceId(e.target.value)}
+                  placeholder="32 hex chars"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
+                />
+              </div>
+              <div className="flex-1 min-w-[140px]">
+                <label className="text-[10px] text-[var(--text-secondary)] mb-1 block">Span ID</label>
+                <input
+                  type="text"
+                  value={filterSpanId}
+                  onChange={e => setFilterSpanId(e.target.value)}
+                  placeholder="16 hex chars"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 focus:border-[var(--accent)] outline-none"
+                />
+              </div>
               {timePreset === 'custom' && (
                 <>
                   <div>
@@ -1319,6 +1383,7 @@ export default function TokenStatsPage() {
                       record={r}
                       expanded={expandedRow === i}
                       onToggle={() => setExpandedRow(expandedRow === i ? null : i)}
+                      onViewTrace={traceId => setSelectedTraceId(traceId)}
                     />
                   ))
                 )}
@@ -1364,10 +1429,11 @@ export default function TokenStatsPage() {
           turnSummaries={filteredTurnSummaries}
           turnIterationsByKey={turnIterationsByKey}
           turnKey={makeTurnKey}
-          chatTurnsByKey={sessionChatTurnsByKey}
-          turnRecordsByKey={turnRecordsByKey}
-          loadingTurnRecords={loadingTurnRecords}
-        />
+	          chatTurnsByKey={sessionChatTurnsByKey}
+	          turnRecordsByKey={turnRecordsByKey}
+	          loadingTurnRecords={loadingTurnRecords}
+	          onViewTrace={traceId => setSelectedTraceId(traceId)}
+	        />
       ) : (
         /* ============ Charts View ============ */
         <div className="space-y-6">
@@ -1514,6 +1580,9 @@ export default function TokenStatsPage() {
           )}
         </div>
       )}
+      {selectedTraceId && (
+        <TraceTimelineDrawer traceId={selectedTraceId} onClose={() => setSelectedTraceId(null)} />
+      )}
     </div>
   );
 }
@@ -1541,52 +1610,6 @@ function CopyablePre({ children, className }: { children: string; className?: st
         title="复制到剪贴板"
       >
         {copied ? <Check className="w-3.5 h-3.5 text-[var(--success)]" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
-    </div>
-  );
-}
-
-function TraceIdField({ traceId, label = 'Trace ID' }: { traceId: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  if (!traceId) return null;
-
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(traceId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[var(--text-secondary)] text-xs">{label}:</span>
-      <span
-        className="font-mono text-xs text-[var(--text-primary)] break-all select-all"
-        title={traceId}
-      >
-        {traceId}
-      </span>
-      <button
-        onClick={handleCopy}
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-        title="复制 Trace ID"
-      >
-        {copied ? (
-          <>
-            <Check className="w-3 h-3 text-[var(--success)]" />
-            已复制
-          </>
-        ) : (
-          <>
-            <Copy className="w-3 h-3" />
-            复制
-          </>
-        )}
       </button>
     </div>
   );
@@ -1680,10 +1703,12 @@ function RecordRow({
   record: r,
   expanded,
   onToggle,
+  onViewTrace,
 }: {
   record: TokenRecord;
   expanded: boolean;
   onToggle: () => void;
+  onViewTrace: (traceId: string) => void;
 }) {
   const callLabel = getCallLabel(r.tool_names, r.finish_reason);
   const callToneClass = getCallLabelTone(r.tool_names, r.finish_reason);
@@ -1746,10 +1771,34 @@ function RecordRow({
         </td>
       </tr>
       {expanded && (
-        <tr className="bg-[var(--bg-tertiary)]/20 border-b border-[var(--border)]/50">
-          <td colSpan={11} className="px-4 py-3 overflow-hidden">
-            <div className="space-y-2 text-xs min-w-0">
-              {r.conversation_id && <TraceIdField traceId={r.conversation_id} />}
+	        <tr className="bg-[var(--bg-tertiary)]/20 border-b border-[var(--border)]/50">
+	          <td colSpan={11} className="px-4 py-3 overflow-hidden">
+	            <div className="space-y-2 text-xs min-w-0">
+	              {(r.conversation_id || r.trace_id || r.span_id || r.parent_span_id) && (
+	                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+	                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+	                    <div className="space-y-1 min-w-0">
+	                      <IdentityField value={r.conversation_id} label="Conversation ID" />
+	                      <IdentityField value={r.trace_id} label="Trace ID" />
+	                      <IdentityField value={r.span_id} label="Span ID" />
+	                      <IdentityField value={r.parent_span_id} label="Parent Span ID" />
+	                    </div>
+	                    {r.trace_id && (
+	                      <button
+	                        type="button"
+	                        onClick={e => {
+	                          e.stopPropagation();
+	                          onViewTrace(r.trace_id);
+	                        }}
+	                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+	                      >
+	                        <BarChart3 className="h-3.5 w-3.5" />
+	                        View Trace
+	                      </button>
+	                    )}
+	                  </div>
+	                </div>
+	              )}
               <div>
                 <span className="text-[var(--text-secondary)]">Session:</span>{' '}
                 <span className="font-mono">{r.session_key || '—'}</span>
@@ -1824,11 +1873,12 @@ function TurnClusterList({
   turnIterationsByKey,
   turnKey,
   chatTurnsByKey,
-  turnRecordsByKey,
-  loadingTurnRecords,
-}: {
-  loading: boolean;
-  sessionKey: string;
+	  turnRecordsByKey,
+	  loadingTurnRecords,
+	  onViewTrace,
+	}: {
+	  loading: boolean;
+	  sessionKey: string;
   activeTurnKey: string | null;
   activeTurnSeq: number | null;
   expandedTurnKey: string | null;
@@ -1836,10 +1886,11 @@ function TurnClusterList({
   turnSummaries: TurnSummaryRecord[];
   turnIterationsByKey: Map<string, TurnIterationRecord[]>;
   turnKey: (convId: string, turnSeq: number) => string;
-  chatTurnsByKey: ChatTurnMap;
-  turnRecordsByKey: Record<string, TokenRecord[]>;
-  loadingTurnRecords: Record<string, boolean>;
-}) {
+	  chatTurnsByKey: ChatTurnMap;
+	  turnRecordsByKey: Record<string, TokenRecord[]>;
+	  loadingTurnRecords: Record<string, boolean>;
+	  onViewTrace: (traceId: string) => void;
+	}) {
   if (loading) {
     return (
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-8 text-center text-[var(--text-secondary)]">
@@ -1949,11 +2000,28 @@ function TurnClusterList({
                   </div>
                 </div>
               </div>
-            </button>
-
-            {expanded && (
+	            </button>
+	
+	            {summary.trace_id && (
+	              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-primary)]/40 px-4 py-2">
+	                <IdentityField value={summary.trace_id} label="Trace ID" className="min-w-0" />
+	                <button
+	                  type="button"
+	                  onClick={event => {
+	                    event.stopPropagation();
+	                    onViewTrace(summary.trace_id || '');
+	                  }}
+	                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)]"
+	                >
+	                  <BarChart3 className="h-3.5 w-3.5" />
+	                  View Trace
+	                </button>
+	              </div>
+	            )}
+	
+	            {expanded && (
               <div className="border-t border-[var(--border)] bg-[var(--bg-tertiary)]/15 px-4 py-4 space-y-4">
-                {summary.conversation_id && <TraceIdField traceId={summary.conversation_id} />}
+	                {summary.conversation_id && <IdentityField value={summary.conversation_id} label="Conversation ID" />}
                 <div className="text-[11px] text-[var(--text-secondary)]">
                   Session: <span className="font-mono text-[var(--text-primary)] break-all">{sessionKey}</span>
                 </div>

@@ -54,6 +54,12 @@ cd bridge && npm run build
 git diff --check
 ```
 
+## Trace 速查
+
+- `trace_id` 是单个 agent turn 的端到端链路 ID；`span_id` 是单个操作；`parent_span_id` 表示层级。
+- 运行时 span 落在 SQLite `trace_spans`，token 行通过 `token_usage.trace_id/span_id/parent_span_id` join 回 span。
+- 查询与 Console 入口见 `docs/observability.md`。
+
 ## 当前仓库边界
 
 - `nanobot` 是外部 checkout，不要再把上游源码重新放回本仓库根目录

@@ -20,6 +20,10 @@ def _fork_module_is_healthy(module: ModuleType) -> bool:
             return False
         if not hasattr(module, "DreamConfig"):
             return False
+        if not hasattr(module, "WebFetchConfig"):
+            return False
+        if "fetch" not in getattr(module.WebToolsConfig, "model_fields", {}):
+            return False
 
         dumped = module.Config().model_dump(mode="json", by_alias=True)
         defaults = dumped["agents"]["defaults"]
