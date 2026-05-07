@@ -55,6 +55,30 @@ async def create_session(
 ):
     return _get_chat_service(user).create_session(user.username, body.title)
 
+
+@router.post("/sessions/{session_id}/stop")
+async def stop_session(
+    request: Request,
+    session_id: str,
+    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+):
+    svc_chat = _get_chat_service(user)
+    result = await svc_chat.stop_session(session_id)
+
+    from ava.console.app import get_services_for_user
+
+    svc = get_services_for_user(user)
+    svc.audit.log(
+        user=user.username,
+        role=user.role,
+        action="chat.stop",
+        target=session_id,
+        detail={"stopped": result.get("stopped", 0)},
+        ip=get_client_ip(request),
+    )
+    return result
+
+
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
@@ -314,15 +338,22 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     ),
                 )
 
-            response = await svc_chat.send_message(
-                session_id=session_id,
-                message=content,
-                user_id=user.username,
-                media=media,
-                on_progress=on_progress,
-                on_stream=on_stream,
-                on_stream_end=on_stream_end,
-            )
+            try:
+                response = await svc_chat.send_message(
+                    session_id=session_id,
+                    message=content,
+                    user_id=user.username,
+                    media=media,
+                    on_progress=on_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                )
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise
+                await _dispatch_listener_event("Stopped.", event_type="complete")
+                continue
             await _dispatch_listener_event(response, event_type="complete")
 
     except WebSocketDisconnect as exc:

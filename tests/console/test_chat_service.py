@@ -1,4 +1,5 @@
 import json
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +42,37 @@ class _FakeAgentLoop:
             "media": media,
         })
         return "ok"
+
+
+class _CancellableAgentLoop:
+    def __init__(self):
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}
+        self.started = asyncio.Event()
+        self.subagents = SimpleNamespace(cancel_by_session=self._cancel_subagents)
+        self.bg_tasks = SimpleNamespace(cancel_by_session=self._cancel_bg_tasks)
+        self.bg_cancelled: list[str] = []
+
+    async def _cancel_subagents(self, _session_key: str) -> int:
+        return 0
+
+    async def _cancel_bg_tasks(self, session_key: str) -> int:
+        self.bg_cancelled.append(session_key)
+        return 2
+
+    async def _cancel_active_tasks(self, key: str) -> int:
+        tasks = self._active_tasks.pop(key, [])
+        cancelled = sum(1 for task in tasks if not task.done() and task.cancel())
+        for task in tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        return cancelled
+
+    async def process_direct(self, **_kwargs):
+        self.started.set()
+        await asyncio.Event().wait()
+        return "should not finish"
 
 
 def _insert_session(db: Database, *, key: str, metadata: dict):
@@ -246,6 +278,36 @@ async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
         "on_stream_end": None,
         "media": ["/tmp/example.png"],
     }]
+
+
+@pytest.mark.asyncio
+async def test_stop_session_cancels_tracked_console_turn_and_bg_tasks(tmp_path):
+    agent_loop = _CancellableAgentLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    send_task = asyncio.create_task(
+        service.send_message(
+            session_id="abc123",
+            message="long task",
+            user_id="tester",
+        )
+    )
+    await agent_loop.started.wait()
+
+    active_tasks = agent_loop._active_tasks["console:abc123"]
+    assert len(active_tasks) == 1
+    assert active_tasks[0] is not send_task
+
+    result = await service.stop_session("abc123")
+
+    assert result == {
+        "ok": True,
+        "stopped": 3,
+        "message": "Stopped 3 task(s).",
+    }
+    assert agent_loop.bg_cancelled == ["console:abc123"]
+    with pytest.raises(asyncio.CancelledError):
+        await send_task
 
 
 @pytest.mark.asyncio
