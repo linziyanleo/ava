@@ -227,6 +227,7 @@ def create_console_app(
     from ava.console.routes import (
         auth_routes,
         config_routes,
+        direct_task_routes,
         file_routes,
         gateway_routes,
         chat_routes,
@@ -242,6 +243,7 @@ def create_console_app(
 
     app.include_router(auth_routes.router)
     app.include_router(config_routes.router)
+    app.include_router(direct_task_routes.router)
     app.include_router(file_routes.router)
     app.include_router(gateway_routes.router)
     app.include_router(chat_routes.router)
@@ -392,8 +394,41 @@ def create_console_app_standalone(
     app.include_router(skills_routes.router)
     app.include_router(bg_task_routes.router)
 
-    # --- Chat reverse proxy to gateway ----------------------------------
     gateway_base = f"http://127.0.0.1:{gateway_port}"
+
+    @app.api_route(
+        "/api/console/direct-tasks",
+        methods=["POST"],
+    )
+    async def proxy_direct_task_http(request: Request):
+        import httpx
+
+        target = f"{gateway_base}/api/console/direct-tasks"
+        body = await request.body()
+        try:
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+                resp = await client.request(
+                    method=request.method,
+                    url=target,
+                    headers={
+                        k: v for k, v in request.headers.items()
+                        if k.lower() not in ("host", "content-length")
+                    },
+                    content=body,
+                )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers),
+            )
+        except httpx.ConnectError:
+            return Response(
+                content='{"detail":"Gateway offline — direct tasks unavailable"}',
+                status_code=503,
+                media_type="application/json",
+            )
+
+    # --- Chat reverse proxy to gateway ----------------------------------
 
     @app.api_route(
         "/api/chat/{path:path}",

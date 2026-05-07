@@ -13,6 +13,35 @@ export interface ChatComposePayload {
   attachments: File[]
 }
 
+export type DirectTaskType = 'codex' | 'claude_code' | 'image_gen'
+export type DirectTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+
+export interface DirectTaskSubmitParams {
+  task_type: DirectTaskType
+  prompt: string
+  project_path?: string
+  params?: {
+    mode?: 'standard' | 'readonly'
+    session_id?: string
+    auto_continue?: boolean
+    continue_after_completion?: boolean
+    reference_image?: string
+  }
+}
+
+export interface DirectTaskMessage {
+  type: 'direct_task'
+  task_id: string
+  task_type: DirectTaskType
+  session_key: string
+  prompt_preview: string
+  status: DirectTaskStatus
+  started_at: number | null
+  elapsed_ms: number
+  result_preview?: string
+  error_message?: string
+}
+
 export interface ChatFileUpload {
   filename: string
   media_path: string

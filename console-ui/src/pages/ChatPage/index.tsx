@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
-import type { ChatComposePayload, ChatFileUpload, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
+import type { ChatComposePayload, ChatFileUpload, DirectTaskMessage, DirectTaskStatus, DirectTaskSubmitParams, DirectTaskType, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
 import {
@@ -21,8 +21,32 @@ import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
 
 const SESSION_LIST_POLL_MS = 30_000
+const DIRECT_TASK_POLL_MS = 2_000
 const MAX_RECONNECT_DELAY_MS = 15_000
 const SEND_WATCHDOG_MS = 120_000
+const FINAL_DIRECT_TASK_STATUSES = new Set<DirectTaskStatus>(['succeeded', 'failed', 'cancelled', 'interrupted'])
+
+interface DirectTaskSubmitResponse {
+  task_id: string
+  status: DirectTaskStatus
+  task_type: DirectTaskType
+}
+
+interface BackgroundTaskListItem {
+  task_id: string
+  task_type: DirectTaskType | string
+  origin_session_key: string
+  status: DirectTaskStatus
+  prompt_preview: string
+  started_at: number | null
+  elapsed_ms: number
+  result_preview?: string
+  error_message?: string
+}
+
+interface BackgroundTaskListResponse {
+  tasks: BackgroundTaskListItem[]
+}
 
 function getReconnectDelay(attempt: number): number {
   return Math.min(500 * 2 ** attempt, MAX_RECONNECT_DELAY_MS)
@@ -61,6 +85,7 @@ export default function ChatPage() {
   const [currentMeta, setCurrentMeta] = useState<SessionMeta | null>(null)
   const [turns, setTurns] = useState<TurnGroup[]>([])
   const [inFlightTurn, setInFlightTurn] = useState<InFlightTurn | null>(null)
+  const [directTasks, setDirectTasks] = useState<DirectTaskMessage[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
   const [transportStatus, setTransportStatus] = useState<ChatStreamStatus>('idle')
@@ -187,6 +212,9 @@ export default function ChatPage() {
   activeConversationIdRef.current = activeConversationId
   const turnsRef = useRef(turns)
   turnsRef.current = turns
+  const directTasksRef = useRef(directTasks)
+  directTasksRef.current = directTasks
+  const refreshedDirectTaskIdsRef = useRef<Set<string>>(new Set())
 
   const refreshSessionView = useCallback(async (
     sessionKey: string,
@@ -716,6 +744,74 @@ export default function ChatPage() {
   const refreshSessionViewRef = useRef(refreshSessionView)
   refreshSessionViewRef.current = refreshSessionView
 
+  useEffect(() => {
+    if (!activeSession) return
+    const sessionTasks = directTasksRef.current.filter((task) => task.session_key === activeSession)
+    if (sessionTasks.length === 0) return
+
+    let disposed = false
+
+    const syncDirectTasks = async () => {
+      const trackedIds = new Set(
+        directTasksRef.current
+          .filter((task) => task.session_key === activeSession)
+          .map((task) => task.task_id),
+      )
+      if (trackedIds.size === 0) return
+
+      try {
+        const response = await api<BackgroundTaskListResponse>(
+          `/bg-tasks?session_key=${encodeURIComponent(activeSession)}&include_finished=true`,
+        )
+        if (disposed) return
+        const byId = new Map(response.tasks.map((task) => [task.task_id, task]))
+        let shouldRefreshSession = false
+        for (const current of directTasksRef.current) {
+          if (current.session_key !== activeSession) continue
+          const next = byId.get(current.task_id)
+          if (
+            next
+            && FINAL_DIRECT_TASK_STATUSES.has(next.status)
+            && !FINAL_DIRECT_TASK_STATUSES.has(current.status)
+            && !refreshedDirectTaskIdsRef.current.has(current.task_id)
+          ) {
+            refreshedDirectTaskIdsRef.current.add(current.task_id)
+            shouldRefreshSession = true
+          }
+        }
+        setDirectTasks((prev) => prev.map((task) => {
+          if (task.session_key !== activeSession) return task
+          const next = byId.get(task.task_id)
+          if (!next) return task
+          const nextStatus = next.status
+          return {
+            ...task,
+            status: nextStatus,
+            started_at: next.started_at,
+            elapsed_ms: next.elapsed_ms || (next.started_at ? Math.max(Date.now() - next.started_at * 1000, 0) : 0),
+            result_preview: next.result_preview || task.result_preview,
+            error_message: next.error_message || '',
+          }
+        }))
+        if (shouldRefreshSession) {
+          void refreshSessionViewRef.current(activeSession, {
+            preferredConversationId: activeConversationIdRef.current,
+            silent: true,
+          })
+        }
+      } catch (err) {
+        console.error('Failed to sync direct tasks:', err)
+      }
+    }
+
+    void syncDirectTasks()
+    const timer = setInterval(syncDirectTasks, DIRECT_TASK_POLL_MS)
+    return () => {
+      disposed = true
+      clearInterval(timer)
+    }
+  }, [activeSession, directTasks.length])
+
   const handleSend = async ({ text, attachments }: ChatComposePayload) => {
     if (mockMode) return
     if (!wsRef.current || sending || inFlightTurn || !currentMeta || activeConversationId !== currentMeta.conversation_id) return
@@ -773,6 +869,53 @@ export default function ChatPage() {
     }
   }
 
+  const handleDirectTaskSubmit = useCallback(async ({ task_type, prompt, project_path, params }: DirectTaskSubmitParams) => {
+    if (
+      mockMode ||
+      !activeSession ||
+      !currentMeta ||
+      activeConversationId !== currentMeta.conversation_id
+    ) {
+      return
+    }
+
+    setError('')
+    setSending(true)
+    try {
+      const response = await api<DirectTaskSubmitResponse>('/console/direct-tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          task_type,
+          prompt,
+          project_path,
+          params: params || {},
+          session_key: activeSession,
+          conversation_id: activeConversationId || '',
+          turn_seq: getNextTurnSeq(turnsRef.current),
+        }),
+      })
+      const task: DirectTaskMessage = {
+        type: 'direct_task',
+        task_id: response.task_id,
+        task_type: response.task_type,
+        session_key: activeSession,
+        prompt_preview: prompt.slice(0, 200),
+        status: response.status || 'queued',
+        started_at: Date.now() / 1000,
+        elapsed_ms: 0,
+        result_preview: '',
+        error_message: '',
+      }
+      setDirectTasks((prev) => [task, ...prev.filter((item) => item.task_id !== task.task_id)].slice(0, 20))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to submit direct task'
+      setError(msg)
+      throw err
+    } finally {
+      setSending(false)
+    }
+  }, [activeConversationId, activeSession, currentMeta, mockMode])
+
   const handleStopCurrentTurn = useCallback(async () => {
     if (
       mockMode ||
@@ -785,12 +928,13 @@ export default function ChatPage() {
 
     setError('')
     try {
+      const sessionId = activeSession.replace(/^console:/, '')
       await api<{ ok: boolean; stopped: number; message: string }>(
-        `/chat/sessions/${encodeURIComponent(activeSession)}/stop`,
+        `/chat/sessions/${encodeURIComponent(sessionId)}/stop`,
         { method: 'POST' },
       )
       clearConsoleInFlight()
-      void refreshSessionViewRef.current(`console:${activeSession}`, {
+      void refreshSessionViewRef.current(activeSession, {
         preferredConversationId: activeConversationIdRef.current,
         silent: true,
       })
@@ -807,6 +951,7 @@ export default function ChatPage() {
     ? (conversationLists[activeSession] || []).find((item) => item.conversation_id === activeConversationId) || null
     : null
   const isReadOnlyConversation = mockMode || !currentMeta || activeConversationId !== currentMeta.conversation_id
+  const activeDirectTasks = directTasks.filter((task) => task.session_key === activeSession)
 
   return (
     <div className={isMobile ? '-m-4 -mb-20 h-[calc(100dvh-4rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden' : '-m-6 h-[calc(100vh)] flex flex-col overflow-hidden'}>
@@ -880,6 +1025,7 @@ export default function ChatPage() {
           conversationId={activeConversationId}
           turns={turns}
           inFlightTurn={inFlightTurn}
+          directTasks={activeDirectTasks}
           loading={loadingMessages}
           isConsole={isConsole && !!activeSession}
           isReadOnly={isReadOnlyConversation}
@@ -888,6 +1034,7 @@ export default function ChatPage() {
           sendDisabled={sending || !!inFlightTurn}
           onSend={handleSend}
           onStopCurrentTurn={handleStopCurrentTurn}
+          onSubmitDirectTask={handleDirectTaskSubmit}
           onRefresh={handleRefresh}
           isMobile={isMobile}
           onToggleSessionPanel={() => setMobileSessionOpen(v => !v)}

@@ -3,11 +3,13 @@ import { FileText, Plus, Send, X } from 'lucide-react'
 import { InputActionMenu } from './InputActionMenu'
 import type { ChatCommand } from './commands'
 import { findCommandsByPrefix } from './commands'
-import type { ChatComposePayload } from './types'
+import { ImageGenPanel } from './ImageGenPanel'
+import type { ChatComposePayload, DirectTaskSubmitParams, DirectTaskType } from './types'
 
 interface ChatInputProps {
   onSend: (payload: ChatComposePayload) => Promise<void> | void
   onStopCurrentTurn: () => Promise<void> | void
+  onSubmitDirectTask: (params: DirectTaskSubmitParams) => Promise<void> | void
   sendDisabled: boolean
   isMobile?: boolean
 }
@@ -21,6 +23,15 @@ interface PendingAttachment {
 
 const MAX_HEIGHT = 200
 const MAX_ATTACHMENTS = 4
+
+function parseDirectTaskCommand(text: string): { taskType: DirectTaskType; prompt: string } | null {
+  const match = text.match(/^\/(codex|claude-code)(?:\s+([\s\S]*))?$/)
+  if (!match) return null
+  return {
+    taskType: match[1] === 'claude-code' ? 'claude_code' : 'codex',
+    prompt: (match[2] || '').trim(),
+  }
+}
 
 function extensionForMime(mime: string): string {
   switch (mime) {
@@ -65,12 +76,13 @@ function formatFileSize(size: number): string {
   return `${size} B`
 }
 
-export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }: ChatInputProps) {
+export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendDisabled, isMobile }: ChatInputProps) {
   const [input, setInput] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [pasteError, setPasteError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [slashOpen, setSlashOpen] = useState(false)
+  const [imageGenOpen, setImageGenOpen] = useState(false)
   const [activeCommandIndex, setActiveCommandIndex] = useState(0)
   const isComposingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -115,6 +127,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }:
   const closeActionMenus = useCallback(() => {
     setMenuOpen(false)
     setSlashOpen(false)
+    setImageGenOpen(false)
     focusTextarea()
   }, [focusTextarea])
 
@@ -181,6 +194,32 @@ export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }:
   const handleSend = async () => {
     const text = input.trim()
     if ((!text && attachments.length === 0) || sendDisabled) return
+    const directTask = parseDirectTaskCommand(text)
+    if (directTask) {
+      if (!directTask.prompt) {
+        setPasteError('请输入 direct task prompt')
+        return
+      }
+      if (attachments.length > 0) {
+        setPasteError('Direct task commands do not support attachments')
+        return
+      }
+      try {
+        await onSubmitDirectTask({
+          task_type: directTask.taskType,
+          prompt: directTask.prompt,
+          params: { mode: 'standard' },
+        })
+        setInput('')
+        setPasteError('')
+        setMenuOpen(false)
+        setSlashOpen(false)
+      } catch (err) {
+        console.error('Failed to submit direct task:', err)
+        return
+      }
+      return
+    }
     try {
       await onSend({
         text,
@@ -226,6 +265,8 @@ export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }:
         await command.run({
           send: onSend,
           stopCurrentTurn: onStopCurrentTurn,
+          submitDirectTask: onSubmitDirectTask,
+          openImageGenPanel: () => setImageGenOpen(true),
           setInput,
           closeMenu: closeActionMenus,
         })
@@ -245,7 +286,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }:
     } finally {
       focusTextarea()
     }
-  }, [closeActionMenus, focusTextarea, input, onSend, onStopCurrentTurn, sendDisabled])
+  }, [closeActionMenus, focusTextarea, input, onSend, onStopCurrentTurn, onSubmitDirectTask, sendDisabled])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isComposingRef.current) return
@@ -358,6 +399,28 @@ export function ChatInput({ onSend, onStopCurrentTurn, sendDisabled, isMobile }:
           />
         </div>
         <div className="relative flex-1">
+          <ImageGenPanel
+            open={imageGenOpen}
+            submitting={sendDisabled}
+            onClose={() => {
+              setImageGenOpen(false)
+              focusTextarea()
+            }}
+            onSubmit={async (prompt, params) => {
+              try {
+                await onSubmitDirectTask({
+                  task_type: 'image_gen',
+                  prompt,
+                  params,
+                })
+                setImageGenOpen(false)
+                setPasteError('')
+                focusTextarea()
+              } catch (err) {
+                console.error('Failed to submit image generation task:', err)
+              }
+            }}
+          />
           <textarea
             ref={textareaRef}
             value={input}

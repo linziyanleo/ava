@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
-import type { ChatComposePayload, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
+import type { ChatComposePayload, DirectTaskMessage, DirectTaskSubmitParams, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
 import { TurnGroupComponent } from './TurnGroup'
@@ -9,6 +9,7 @@ import { ChatInput } from './ChatInput'
 import { SearchModal } from './SearchModal'
 import { ContextInspector } from './ContextInspector'
 import { InFlightTurnBlock } from './InFlightTurnBlock'
+import { TaskStatusCard } from './TaskStatusCard'
 import type { InFlightTurn } from './inFlightTurn'
 import { formatTokenCount } from './utils'
 import { api } from '../../api/client';
@@ -20,6 +21,7 @@ interface MessageAreaProps {
   conversationId: string | null
   turns: TurnGroup[]
   inFlightTurn: InFlightTurn | null
+  directTasks: DirectTaskMessage[]
   loading: boolean
   isConsole: boolean
   isReadOnly?: boolean
@@ -28,6 +30,7 @@ interface MessageAreaProps {
   sendDisabled: boolean
   onSend: (payload: ChatComposePayload) => Promise<void> | void
   onStopCurrentTurn: () => Promise<void> | void
+  onSubmitDirectTask: (params: DirectTaskSubmitParams) => Promise<void> | void
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
@@ -35,7 +38,7 @@ interface MessageAreaProps {
   targetTurnSeq?: number | null
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, directTasks, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onSubmitDirectTask, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -305,6 +308,9 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
             {inFlightTurn && (
               <InFlightTurnBlock turn={inFlightTurn} />
             )}
+            {directTasks.map((task) => (
+              <TaskStatusCard key={task.task_id} task={task} />
+            ))}
           </>
         )}
         <div ref={bottomRef} />
@@ -328,6 +334,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
         <ChatInput
           onSend={onSend}
           onStopCurrentTurn={onStopCurrentTurn}
+          onSubmitDirectTask={onSubmitDirectTask}
           sendDisabled={sendDisabled}
           isMobile={isMobile}
         />

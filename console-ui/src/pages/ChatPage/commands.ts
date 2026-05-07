@@ -1,10 +1,12 @@
-import { Square } from 'lucide-react'
+import { Image as ImageIcon, Square, Terminal, Zap } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ChatComposePayload } from './types'
+import type { ChatComposePayload, DirectTaskSubmitParams } from './types'
 
 export interface ChatCommandRunContext {
   send: (payload: ChatComposePayload) => Promise<void> | void
   stopCurrentTurn: () => Promise<void> | void
+  submitDirectTask: (params: DirectTaskSubmitParams) => Promise<void> | void
+  openImageGenPanel: () => void
   setInput: (text: string) => void
   closeMenu: () => void
 }
@@ -27,6 +29,27 @@ export const CHAT_COMMANDS: ChatCommand[] = [
     icon: Square,
     runWhenBusy: true,
     run: ({ stopCurrentTurn }) => stopCurrentTurn(),
+  },
+  {
+    id: '/codex',
+    label: 'Codex',
+    description: 'Run Codex task directly',
+    icon: Zap,
+    populateOnly: true,
+  },
+  {
+    id: '/claude-code',
+    label: 'Claude Code',
+    description: 'Run Claude Code task directly',
+    icon: Terminal,
+    populateOnly: true,
+  },
+  {
+    id: '/image-gen',
+    label: 'Image Gen',
+    description: 'Generate image with parameters',
+    icon: ImageIcon,
+    run: ({ openImageGenPanel }) => openImageGenPanel(),
   },
 ]
 
