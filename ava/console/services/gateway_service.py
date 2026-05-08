@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -10,6 +11,21 @@ from ava.console.models import GatewayStatus
 
 if TYPE_CHECKING:
     from ava.runtime.lifecycle import LifecycleManager
+
+
+def _current_process_rss_bytes() -> int | None:
+    try:
+        import resource
+
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except (ImportError, OSError, ValueError):
+        return None
+
+    if rss <= 0:
+        return None
+    if sys.platform == "darwin":
+        return int(rss)
+    return int(rss * 1024)
 
 
 class GatewayService:
@@ -29,12 +45,14 @@ class GatewayService:
     def get_status(self) -> GatewayStatus:
         if self._lifecycle:
             status = self._lifecycle.get_status()
+            status.setdefault("memory_rss_bytes", _current_process_rss_bytes())
             return GatewayStatus(**status)
 
         return GatewayStatus(
             running=True,
             gateway_port=self._gateway_port,
             console_port=self._console_port,
+            memory_rss_bytes=_current_process_rss_bytes(),
         )
 
     async def restart(self, delay_ms: int = 5000, force: bool = False) -> dict[str, Any]:

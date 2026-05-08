@@ -1,1 +1,1 @@
-"""Web Console extension for nanobot."""
+"""AVA Agent Control Plane web console."""

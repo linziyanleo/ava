@@ -422,6 +422,11 @@ class ConsoleConfig(Base):
         validation_alias=AliasChoices("session_cookie_samesite", "sessionCookieSameSite"),
         serialization_alias="sessionCookieSameSite",
     )
+    default_responder_agent_id: str = Field(
+        default="nanobot",
+        validation_alias=AliasChoices("default_responder_agent_id", "defaultResponderAgentId"),
+        serialization_alias="defaultResponderAgentId",
+    )
     cloudflare_access_team_domain: str = Field(
         default="",
         validation_alias=AliasChoices("cloudflare_access_team_domain", "cloudflareAccessTeamDomain"),
@@ -625,8 +630,12 @@ class TokenStatsConfig(Base):
     )
 
 
-class Config(BaseSettings):
-    """sidecar 根配置。"""
+class NanobotConfig(BaseSettings):
+    """Nanobot agent 专属根配置。
+
+    `Config` 仍作为历史兼容导出；新 Console 解耦语义应把这组
+    agents/channels/providers/tools 字段视为 Nanobot-owned 配置。
+    """
 
     model_config = _UPSTREAM.Config.model_config
 
@@ -713,6 +722,10 @@ class Config(BaseSettings):
         """返回指定模型使用的 API key。"""
         provider = self.get_provider(model)
         return provider.api_key if provider else None
+
+
+class Config(NanobotConfig):
+    """Backward-compatible alias for the Nanobot root config."""
 
     def get_api_base(self, model: str | None = None) -> str | None:
         """返回指定模型使用的 API base。"""

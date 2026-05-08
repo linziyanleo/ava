@@ -24,7 +24,20 @@ if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
     from ava.agent.worktree_manager import ExecutionWorkspace, ProjectTarget
 
-TaskStatus = Literal["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]
+TaskStatus = Literal[
+    "pending",
+    "awaiting_deps",
+    "queued",
+    "running",
+    "streaming",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "skipped",
+]
+ACTIVE_STATUSES = {"pending", "awaiting_deps", "queued", "running", "streaming"}
+FINISHED_STATUSES = {"succeeded", "failed", "cancelled", "interrupted", "skipped"}
 
 _MAX_CONTINUATION_BUDGET = 5
 _FINISHED_RETENTION_MAX_ITEMS = 20
@@ -73,6 +86,9 @@ class TaskSnapshot:
     origin_turn_seq: int | None = None
     # trace binding fields
     trace_id: str = ""
+    chain_id: str = ""
+    parent_task_ids: list[str] = field(default_factory=list)
+    node_kind: str = ""
     parent_span_id: str = ""
     dispatch_span_id: str = ""
 
@@ -189,6 +205,9 @@ class BackgroundTaskStore:
         workspace_exclusive: bool = True,
         origin_conversation_id: str = "",
         origin_turn_seq: int | None = None,
+        chain_id: str = "",
+        parent_task_ids: list[str] | None = None,
+        node_kind: str = "",
         **executor_kwargs: Any,
     ) -> SubmitResult:
         ws_id = workspace.workspace_id if workspace else ""
@@ -271,6 +290,9 @@ class BackgroundTaskStore:
             origin_conversation_id=origin_conversation_id,
             origin_turn_seq=origin_turn_seq,
             trace_id=trace_metadata.get("trace_id", ""),
+            chain_id=chain_id,
+            parent_task_ids=list(parent_task_ids or []),
+            node_kind=node_kind,
             parent_span_id=trace_metadata.get("parent_span_id", ""),
             dispatch_span_id=trace_metadata.get("dispatch_span_id", ""),
         )
@@ -403,19 +425,19 @@ class BackgroundTaskStore:
     def find_active_by_workspace(self, workspace_id: str) -> list[TaskSnapshot]:
         return [
             s for s in self._active.values()
-            if s.workspace_id == workspace_id and s.status in ("queued", "running")
+            if s.workspace_id == workspace_id and s.status in ACTIVE_STATUSES
         ]
 
     def find_active_by_target(self, workspace_key: str) -> list[TaskSnapshot]:
         return [
             s for s in self._active.values()
-            if s.workspace_key == workspace_key and s.status in ("queued", "running")
+            if s.workspace_key == workspace_key and s.status in ACTIVE_STATUSES
         ]
 
     def list_active_by_session(self, session_key: str) -> list[TaskSnapshot]:
         return [
             s for s in self._active.values()
-            if s.origin_session_key == session_key and s.status in ("queued", "running")
+            if s.origin_session_key == session_key and s.status in ACTIVE_STATUSES
         ]
 
     def _sync_cancel_and_wait(self, task_id: str) -> None:
@@ -458,6 +480,14 @@ class BackgroundTaskStore:
             return f"Task {task_id} already finished."
         return f"Task {task_id} not found."
 
+    def cancel_sync(self, task_id: str) -> str:
+        if task_id in self._tasks:
+            self._sync_cancel_and_wait(task_id)
+            return f"Task {task_id} cancelled."
+        if task_id in self._finished:
+            return f"Task {task_id} already finished."
+        return f"Task {task_id} not found."
+
     async def cancel_by_session(self, session_key: str) -> int:
         cancelled = 0
         task_ids = [
@@ -475,6 +505,8 @@ class BackgroundTaskStore:
         task_id: str | None = None,
         session_key: str | None = None,
         task_type: str | None = None,
+        trace_id: str | None = None,
+        chain_id: str | None = None,
         include_finished: bool = True,
         verbose: bool = False,
     ) -> dict[str, Any]:
@@ -493,14 +525,36 @@ class BackgroundTaskStore:
             tasks.extend(self._active.values())
             if include_finished:
                 tasks.extend(self._finished.values())
+            if trace_id and self._db:
+                seen_ids = {task.task_id for task in tasks}
+                for db_snapshot in self._load_snapshots_by_trace_id(
+                    trace_id,
+                    include_finished=include_finished,
+                ):
+                    if db_snapshot.task_id not in seen_ids:
+                        tasks.append(db_snapshot)
+                        seen_ids.add(db_snapshot.task_id)
+            if chain_id and self._db:
+                seen_ids = {task.task_id for task in tasks}
+                for db_snapshot in self._load_snapshots_by_chain_id(
+                    chain_id,
+                    include_finished=include_finished,
+                ):
+                    if db_snapshot.task_id not in seen_ids:
+                        tasks.append(db_snapshot)
+                        seen_ids.add(db_snapshot.task_id)
 
         if session_key:
             tasks = [t for t in tasks if t.origin_session_key == session_key]
         if task_type:
             tasks = [t for t in tasks if t.task_type == task_type]
+        if trace_id:
+            tasks = [t for t in tasks if t.trace_id == trace_id]
+        if chain_id:
+            tasks = [t for t in tasks if t.chain_id == chain_id]
 
         tasks.sort(key=lambda t: t.started_at or 0, reverse=True)
-        running = sum(1 for t in tasks if t.status in ("queued", "running"))
+        running = sum(1 for t in tasks if t.status in ACTIVE_STATUSES)
 
         return {
             "running": running,
@@ -526,7 +580,7 @@ class BackgroundTaskStore:
 
         lines = ["## Active Background Tasks"]
         for t in sorted(all_relevant, key=lambda x: x.started_at or 0, reverse=True)[:5]:
-            if t.status in ("queued", "running"):
+            if t.status in ACTIVE_STATUSES:
                 elapsed = int(time.time() - (t.started_at or time.time()))
                 lines.append(
                     f"- [{t.task_type}:{t.task_id}] {t.status} {elapsed}s "
@@ -834,6 +888,12 @@ class BackgroundTaskStore:
                 "worktree_path": snapshot.worktree_path,
                 "origin_conversation_id": snapshot.origin_conversation_id,
                 "origin_turn_seq": snapshot.origin_turn_seq,
+                "trace_id": snapshot.trace_id,
+                "chain_id": snapshot.chain_id,
+                "parent_task_ids": snapshot.parent_task_ids,
+                "node_kind": snapshot.node_kind,
+                "parent_span_id": snapshot.parent_span_id,
+                "dispatch_span_id": snapshot.dispatch_span_id,
             }
             extra.update(self._trace_metadata.get(snapshot.task_id, {}))
             if full_prompt:
@@ -889,6 +949,9 @@ class BackgroundTaskStore:
                 extra["origin_conversation_id"] = snapshot.origin_conversation_id
                 extra["origin_turn_seq"] = snapshot.origin_turn_seq
                 extra["trace_id"] = snapshot.trace_id
+                extra["chain_id"] = snapshot.chain_id
+                extra["parent_task_ids"] = snapshot.parent_task_ids
+                extra["node_kind"] = snapshot.node_kind
                 extra["parent_span_id"] = snapshot.parent_span_id
                 extra["dispatch_span_id"] = snapshot.dispatch_span_id
                 if full_result:
@@ -969,12 +1032,68 @@ class BackgroundTaskStore:
             logger.warning("BackgroundTaskStore: load snapshot failed: {}", exc)
             return None
 
+    def _load_snapshots_by_trace_id(
+        self,
+        trace_id: str,
+        *,
+        include_finished: bool = True,
+    ) -> list[TaskSnapshot]:
+        if not self._db or not trace_id:
+            return []
+        try:
+            clauses = ["extra LIKE ?"]
+            params: list[Any] = [f'%"trace_id": "{trace_id}"%']
+            if not include_finished:
+                clauses.append("status IN ('pending', 'awaiting_deps', 'queued', 'running', 'streaming')")
+            rows = self._db.fetchall(
+                f"""SELECT task_id, task_type, origin_session_key, status,
+                          prompt_preview, project_path, started_at, finished_at,
+                          result_preview, error_message, extra
+                   FROM bg_tasks
+                   WHERE {" AND ".join(clauses)}
+                   ORDER BY started_at DESC""",
+                tuple(params),
+            )
+            return [self._snapshot_from_db_row(row) for row in rows]
+        except Exception as exc:
+            logger.warning("BackgroundTaskStore: load snapshots by trace failed: {}", exc)
+            return []
+
+    def _load_snapshots_by_chain_id(
+        self,
+        chain_id: str,
+        *,
+        include_finished: bool = True,
+    ) -> list[TaskSnapshot]:
+        if not self._db or not chain_id:
+            return []
+        try:
+            clauses = ["extra LIKE ?"]
+            params: list[Any] = [f'%"chain_id": "{chain_id}"%']
+            if not include_finished:
+                clauses.append("status IN ('pending', 'awaiting_deps', 'queued', 'running', 'streaming')")
+            rows = self._db.fetchall(
+                f"""SELECT task_id, task_type, origin_session_key, status,
+                          prompt_preview, project_path, started_at, finished_at,
+                          result_preview, error_message, extra
+                   FROM bg_tasks
+                   WHERE {" AND ".join(clauses)}
+                   ORDER BY started_at DESC""",
+                tuple(params),
+            )
+            return [self._snapshot_from_db_row(row) for row in rows]
+        except Exception as exc:
+            logger.warning("BackgroundTaskStore: load snapshots by chain failed: {}", exc)
+            return []
+
     def _snapshot_from_db_row(self, row: Any) -> TaskSnapshot:
         started = self._row_val(row, "started_at", None)
         finished = self._row_val(row, "finished_at", None)
         elapsed = int((finished - started) * 1000) if started and finished else 0
         extra = self._load_extra_json(self._row_val(row, "extra", "{}"))
         raw_turn_seq = extra.get("origin_turn_seq", None)
+        raw_parent_task_ids = extra.get("parent_task_ids", [])
+        parent_task_ids = raw_parent_task_ids if isinstance(raw_parent_task_ids, list) else []
         return TaskSnapshot(
             task_id=row["task_id"],
             task_type=row["task_type"],
@@ -1000,6 +1119,9 @@ class BackgroundTaskStore:
             origin_conversation_id=extra.get("origin_conversation_id", ""),
             origin_turn_seq=int(raw_turn_seq) if raw_turn_seq is not None else None,
             trace_id=extra.get("trace_id", ""),
+            chain_id=extra.get("chain_id", ""),
+            parent_task_ids=[str(item) for item in parent_task_ids],
+            node_kind=extra.get("node_kind", ""),
             parent_span_id=extra.get("parent_span_id", ""),
             dispatch_span_id=extra.get("dispatch_span_id", ""),
         )
@@ -1021,12 +1143,14 @@ class BackgroundTaskStore:
         session_key: str | None = None,
         task_type: str | None = None,
         status: str | None = None,
+        trace_id: str | None = None,
+        chain_id: str | None = None,
     ) -> dict[str, Any]:
         """从 DB 查询历史任务（已完成），分页返回。"""
         if not self._db:
             return {"tasks": [], "total": 0, "page": page, "page_size": page_size}
         try:
-            where = "WHERE status IN ('succeeded','failed','cancelled','interrupted')"
+            where = "WHERE status IN ('succeeded','failed','cancelled','interrupted','skipped')"
             params: list[Any] = []
             if session_key:
                 where += " AND origin_session_key = ?"
@@ -1037,6 +1161,12 @@ class BackgroundTaskStore:
             if status:
                 where += " AND status = ?"
                 params.append(status)
+            if trace_id:
+                where += " AND extra LIKE ?"
+                params.append(f'%"trace_id": "{trace_id}"%')
+            if chain_id:
+                where += " AND extra LIKE ?"
+                params.append(f'%"chain_id": "{chain_id}"%')
 
             count_row = self._db.fetchone(
                 f"SELECT COUNT(*) as cnt FROM bg_tasks {where}", tuple(params)

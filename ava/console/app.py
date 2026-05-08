@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from loguru import logger
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ava.adapters.nanobot.discovery import resolve_nanobot_checkout
 from ava.console import auth
 from ava.console.middleware import setup_cors
+from ava.console.middleware import get_client_ip
 from ava.console.mock_bundle_runtime import (
     MockBackgroundTaskStore,
     MockGatewayService,
@@ -29,11 +30,14 @@ from ava.console.services.chat_service import ChatService
 from ava.console.services.config_service import ConfigService
 from ava.console.services.file_service import FileService
 from ava.console.services.gateway_service import GatewayService
+from ava.console.services.lan_access_service import LanAccessService
 from ava.console.services.media_service import MediaService
 from ava.console.services.skills_service import SkillsService
 from ava.console.services.token_stats_service import TokenStatsCollector
 from ava.console.services.trace_spans_service import TraceSpanStore
 from ava.console.services.user_service import UserService
+from ava.agent.workflow_store import ArtifactStore, WorkflowStore
+from ava.agents.process_manager import AgentProcessManager
 
 
 @dataclass
@@ -43,11 +47,16 @@ class Services:
     config: ConfigService
     files: FileService
     gateway: GatewayService | MockGatewayService
+    lan_access: LanAccessService
     media: MediaService
     skills: SkillsService
     chat: ChatService | None = None
     token_stats: TokenStatsCollector | None = None
     trace_spans: TraceSpanStore | None = None
+    workflow_store: WorkflowStore | None = None
+    artifact_store: ArtifactStore | None = None
+    agent_process_manager: AgentProcessManager | None = None
+    agent_lifecycle_events: list[dict[str, Any]] = field(default_factory=list)
     db: Any | None = None
     mock: "Services | None" = None
 
@@ -133,6 +142,40 @@ def _mount_api_not_found(app: FastAPI) -> None:
         raise HTTPException(status_code=404, detail=f"API route not found: /api/{full_path}")
 
 
+def _install_device_audit_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def audit_device_access(request: Request, call_next):
+        response = await call_next(request)
+        device_id = getattr(request.state, "device_id", None)
+        if device_id:
+            try:
+                svc = get_services()
+                svc.lan_access.mark_device_seen(device_id, ip=get_client_ip(request))
+                svc.audit.log(
+                    user=f"device:{device_id}",
+                    role="read_only",
+                    action="lan.device_access",
+                    target=request.url.path,
+                    detail={"method": request.method, "status_code": response.status_code},
+                    ip=get_client_ip(request),
+                )
+            except Exception:
+                logger.debug("Failed to audit LAN device access", exc_info=True)
+        return response
+
+
+def _install_lan_https_redirect_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def redirect_lan_http_to_https(request: Request, call_next):
+        try:
+            target = get_services().lan_access.https_redirect_location(str(request.url))
+        except Exception:
+            target = None
+        if target:
+            return RedirectResponse(target, status_code=307)
+        return await call_next(request)
+
+
 def create_console_app(
     nanobot_dir: Path,
     workspace: Path,
@@ -166,9 +209,15 @@ def create_console_app(
     from ava.storage import Database
     mock_db = Database(mock_runtime.db_path)
     trace_spans = TraceSpanStore(db) if db is not None else None
+    workflow_store = WorkflowStore(db) if db is not None else None
+    artifact_store = ArtifactStore(db) if db is not None else None
     if token_stats_collector is not None:
         token_stats_collector._trace_spans = trace_spans
     mock_trace_spans = TraceSpanStore(mock_db) if mock_db is not None else None
+    mock_workflow_store = WorkflowStore(mock_db) if mock_db is not None else None
+    mock_artifact_store = ArtifactStore(mock_db) if mock_db is not None else None
+    agent_lifecycle_events: list[dict[str, Any]] = []
+    agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
 
     real_services = Services(
         users=users,
@@ -180,6 +229,7 @@ def create_console_app(
             gateway_port=config.gateway.port,
             console_port=console_cfg.port,
         ),
+        lan_access=LanAccessService(nanobot_dir, console_port=console_cfg.port),
         media=MediaService(db=db),
         skills=SkillsService(
             workspace,
@@ -191,6 +241,10 @@ def create_console_app(
         chat=ChatService(agent_loop, workspace, db=db),
         token_stats=token_stats_collector,
         trace_spans=trace_spans,
+        workflow_store=workflow_store,
+        artifact_store=artifact_store,
+        agent_process_manager=agent_process_manager,
+        agent_lifecycle_events=agent_lifecycle_events,
         db=db,
     )
     if trace_spans is not None:
@@ -204,6 +258,7 @@ def create_console_app(
         config=ConfigService(mock_runtime.root),
         files=FileService(mock_runtime.workspace, mock_runtime.root),
         gateway=MockGatewayService(console_cfg.port),
+        lan_access=LanAccessService(mock_runtime.root, console_port=console_cfg.port),
         media=MediaService(
             media_dir=mock_runtime.media_dir,
             screenshot_dir=mock_runtime.media_dir.parent / "screenshots",
@@ -223,19 +278,23 @@ def create_console_app(
             trace_spans=mock_trace_spans,
         ) if mock_db is not None else None,
         trace_spans=mock_trace_spans,
+        workflow_store=mock_workflow_store,
+        artifact_store=mock_artifact_store,
         db=mock_db,
     )
     _services = real_services
+    auth.set_device_token_validator(real_services.lan_access.validate_device_token)
 
     app = FastAPI(
-        title="Nanobot Console",
-        description="Web management console for Nanobot",
+        title="AVA Agent Control Plane",
+        description="Local web management console for AVA agents",
         version="0.1.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
 
     setup_cors(app)
+    _install_device_audit_middleware(app)
 
     from ava.console.routes import (
         agent_routes,
@@ -244,6 +303,7 @@ def create_console_app(
         direct_task_routes,
         file_routes,
         gateway_routes,
+        lan_access_routes,
         chat_routes,
         media_routes,
         user_routes,
@@ -251,6 +311,7 @@ def create_console_app(
         token_routes,
         trace_routes,
         skills_routes,
+        workflow_routes,
         page_agent_routes,
     )
     from ava.console.routes import bg_task_routes
@@ -261,7 +322,9 @@ def create_console_app(
     app.include_router(direct_task_routes.router)
     app.include_router(file_routes.router)
     app.include_router(gateway_routes.router)
+    app.include_router(lan_access_routes.router)
     app.include_router(chat_routes.router)
+    app.include_router(chat_routes.messages_router)
     app.include_router(media_routes.router)
     app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
@@ -269,6 +332,7 @@ def create_console_app(
     app.include_router(trace_routes.router)
     app.include_router(skills_routes.router)
     app.include_router(page_agent_routes.router)
+    app.include_router(workflow_routes.router)
     app.include_router(bg_task_routes.router)
 
     _mount_api_not_found(app)
@@ -320,6 +384,12 @@ def create_console_app_standalone(
     mock_db = Database(mock_runtime.db_path)
     trace_spans = TraceSpanStore(db)
     mock_trace_spans = TraceSpanStore(mock_db)
+    workflow_store = WorkflowStore(db)
+    artifact_store = ArtifactStore(db)
+    mock_workflow_store = WorkflowStore(mock_db)
+    mock_artifact_store = ArtifactStore(mock_db)
+    agent_lifecycle_events: list[dict[str, Any]] = []
+    agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
 
     token_stats = None
     if token_stats_dir:
@@ -334,6 +404,7 @@ def create_console_app_standalone(
             gateway_port=gateway_port,
             console_port=console_port,
         ),
+        lan_access=LanAccessService(nanobot_dir, console_port=console_port),
         media=MediaService(db=db),
         skills=SkillsService(
             workspace,
@@ -345,6 +416,10 @@ def create_console_app_standalone(
         chat=None,  # type: ignore[arg-type]
         token_stats=token_stats,
         trace_spans=trace_spans,
+        workflow_store=workflow_store,
+        artifact_store=artifact_store,
+        agent_process_manager=agent_process_manager,
+        agent_lifecycle_events=agent_lifecycle_events,
         db=db,
     )
     trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
@@ -357,6 +432,7 @@ def create_console_app_standalone(
         config=ConfigService(mock_runtime.root),
         files=FileService(mock_runtime.workspace, mock_runtime.root),
         gateway=MockGatewayService(console_port),
+        lan_access=LanAccessService(mock_runtime.root, console_port=console_port),
         media=MediaService(
             media_dir=mock_runtime.media_dir,
             screenshot_dir=mock_runtime.media_dir.parent / "screenshots",
@@ -372,31 +448,37 @@ def create_console_app_standalone(
         chat=mock_chat,
         token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db, trace_spans=mock_trace_spans),
         trace_spans=mock_trace_spans,
+        workflow_store=mock_workflow_store,
+        artifact_store=mock_artifact_store,
         db=mock_db,
     )
     _services = real_services
+    auth.set_device_token_validator(real_services.lan_access.validate_device_token)
 
     app = FastAPI(
-        title="Nanobot Console",
-        description="Web management console for Nanobot (standalone)",
+        title="AVA Agent Control Plane",
+        description="Standalone local web management console for AVA agents",
         version="0.1.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
 
     setup_cors(app)
+    _install_device_audit_middleware(app)
 
     from ava.console.routes import (
         auth_routes,
         config_routes,
         file_routes,
         gateway_routes,
+        lan_access_routes,
         media_routes,
         user_routes,
         audit_routes,
         token_routes,
         trace_routes,
         skills_routes,
+        workflow_routes,
     )
     from ava.console.routes import bg_task_routes
 
@@ -404,12 +486,14 @@ def create_console_app_standalone(
     app.include_router(config_routes.router)
     app.include_router(file_routes.router)
     app.include_router(gateway_routes.router)
+    app.include_router(lan_access_routes.router)
     app.include_router(media_routes.router)
     app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(token_routes.router)
     app.include_router(trace_routes.router)
     app.include_router(skills_routes.router)
+    app.include_router(workflow_routes.router)
     app.include_router(bg_task_routes.router)
 
     gateway_base = f"http://127.0.0.1:{gateway_port}"

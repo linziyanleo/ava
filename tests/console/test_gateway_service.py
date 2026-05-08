@@ -14,6 +14,8 @@ def test_get_status_without_lifecycle():
     assert status.running is True
     assert status.gateway_port == 9999
     assert status.console_port == 7777
+    assert status.memory_rss_bytes is not None
+    assert status.memory_rss_bytes > 0
 
 
 def test_get_status_with_lifecycle():
@@ -35,6 +37,8 @@ def test_get_status_with_lifecycle():
     assert status.pid == 42
     assert status.supervised is True
     assert status.boot_generation == 3
+    assert status.memory_rss_bytes is not None
+    assert status.memory_rss_bytes > 0
     lc.get_status.assert_called_once()
 
 

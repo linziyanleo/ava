@@ -12,10 +12,11 @@ IGNORED_NAMES = {".DS_Store", "__pycache__", ".git", "node_modules", ".venv"}
 
 
 class FileService:
-    def __init__(self, workspace: Path, nanobot_dir: Path):
+    def __init__(self, workspace: Path, ava_home: Path):
         self._roots = {
             "workspace": workspace.resolve(),
-            "nanobot": nanobot_dir.resolve(),
+            "agent_home": ava_home.resolve(),
+            "nanobot": ava_home.resolve(),
         }
 
     def _resolve_and_validate(self, path: str) -> Path:

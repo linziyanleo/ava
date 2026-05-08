@@ -175,6 +175,8 @@ def apply_console_patch() -> str:
                         (console_cfg.host if console_cfg else None)
                         or os.environ.get("CAFE_CONSOLE_HOST", "127.0.0.1")
                     )
+                    from ava.console.services.lan_access_service import resolve_console_bind_host
+                    console_host = resolve_console_bind_host(nanobot_dir, console_host)
                     validate_console_security(console_cfg, console_host)
 
                     # Get AgentLoop reference from loop_patch (set during __init__)

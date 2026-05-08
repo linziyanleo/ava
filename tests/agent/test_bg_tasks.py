@@ -367,6 +367,10 @@ def test_query_history_filters_task_type_and_status(tmp_path: Path):
             prompt_preview="codex ok",
             started_at=now,
             finished_at=now + 1,
+            trace_id="trace-codex",
+            chain_id="chain-codex",
+            parent_task_ids=["root-task"],
+            node_kind="codex_step",
         ),
         TaskSnapshot(
             task_id="claude-fail",
@@ -413,3 +417,18 @@ def test_query_history_filters_task_type_and_status(tmp_path: Path):
         status="succeeded",
     )
     assert [task["task_id"] for task in session_codex_history["tasks"]] == ["codex-ok"]
+
+    trace_history = store.query_history(trace_id="trace-codex")
+    assert [task["task_id"] for task in trace_history["tasks"]] == ["codex-ok"]
+
+    trace_status = store.get_status(trace_id="trace-codex")
+    assert [task["task_id"] for task in trace_status["tasks"]] == ["codex-ok"]
+    assert trace_status["tasks"][0]["chain_id"] == "chain-codex"
+    assert trace_status["tasks"][0]["parent_task_ids"] == ["root-task"]
+    assert trace_status["tasks"][0]["node_kind"] == "codex_step"
+
+    chain_history = store.query_history(chain_id="chain-codex")
+    assert [task["task_id"] for task in chain_history["tasks"]] == ["codex-ok"]
+
+    chain_status = store.get_status(chain_id="chain-codex")
+    assert [task["task_id"] for task in chain_status["tasks"]] == ["codex-ok"]

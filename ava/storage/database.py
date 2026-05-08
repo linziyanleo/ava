@@ -75,6 +75,14 @@ class Database:
             conn.execute("ALTER TABLE session_messages ADD COLUMN trace_id TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE session_messages ADD COLUMN from_agent_id TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE session_messages ADD COLUMN mentioned_agent_ids TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass
         for sql in _SAFE_POST_MIGRATION_SQL:
             try:
                 conn.execute(sql)
@@ -335,13 +343,15 @@ class Database:
             tool_calls_json = json.dumps(msg["tool_calls"], ensure_ascii=False) if msg.get("tool_calls") else None
             conn.execute(
                 """INSERT INTO session_messages
-                   (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, seq, conversation_id, trace_id, from_agent_id, mentioned_agent_ids, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     seq,
                     conversation_id,
                     msg.get("trace_id", ""),
+                    msg.get("from_agent_id", ""),
+                    json.dumps(msg.get("mentioned_agent_ids", []), ensure_ascii=False),
                     msg.get("role", ""),
                     msg.get("content") if isinstance(msg.get("content"), str) else json.dumps(msg.get("content"), ensure_ascii=False) if msg.get("content") else None,
                     tool_calls_json,
@@ -470,6 +480,17 @@ _SAFE_POST_MIGRATION_SQL: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_tu_trace ON token_usage(trace_id)",
     "CREATE INDEX IF NOT EXISTS idx_tu_span ON token_usage(trace_id, span_id)",
     "CREATE INDEX IF NOT EXISTS idx_agent_registry_status ON agent_registry(status)",
+    """CREATE TABLE IF NOT EXISTS session_compressions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        compressed_at TEXT NOT NULL,
+        before_tokens INTEGER NOT NULL,
+        after_tokens INTEGER NOT NULL,
+        summary_text TEXT NOT NULL,
+        before_after_diff TEXT DEFAULT '{}',
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_session_compressions_session ON session_compressions(session_id, compressed_at)",
 ]
 
 _SCHEMA_DDL = """
@@ -502,10 +523,24 @@ CREATE TABLE IF NOT EXISTS session_messages (
     tool_call_id TEXT,
     name TEXT,
     reasoning_content TEXT,
+    from_agent_id TEXT DEFAULT '',
+    mentioned_agent_ids TEXT DEFAULT '[]',
     timestamp TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_msg_session_seq ON session_messages(session_id, seq);
+
+CREATE TABLE IF NOT EXISTS session_compressions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    compressed_at TEXT NOT NULL,
+    before_tokens INTEGER NOT NULL,
+    after_tokens INTEGER NOT NULL,
+    summary_text TEXT NOT NULL,
+    before_after_diff TEXT DEFAULT '{}',
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_compressions_session ON session_compressions(session_id, compressed_at);
 
 CREATE TABLE IF NOT EXISTS token_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

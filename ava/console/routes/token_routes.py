@@ -21,7 +21,7 @@ def _get_collector(user: UserInfo):
 
 @router.get("/tokens")
 async def get_token_stats(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Token usage summary: totals + by_model + by_provider."""
     return _get_collector(user).get_summary()
@@ -41,7 +41,7 @@ async def get_token_records(
     model_role: str | None = Query(None, description="Filter by model role (e.g. claude_code, chat, mini, voice, vision)"),
     trace_id: str | None = Query(None, description="Filter by trace id"),
     span_id: str | None = Query(None, description="Filter by span id"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Individual LLM call records (newest first), with optional filters."""
     collector = _get_collector(user)
@@ -65,7 +65,7 @@ async def get_token_records(
 
 @router.get("/tokens/by-model")
 async def get_tokens_by_model(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Token usage aggregated by model."""
     return _get_collector(user).get_by_model()
@@ -73,7 +73,7 @@ async def get_tokens_by_model(
 
 @router.get("/tokens/by-provider")
 async def get_tokens_by_provider(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Token usage aggregated by provider."""
     return _get_collector(user).get_by_provider()
@@ -83,7 +83,7 @@ async def get_tokens_by_provider(
 async def get_tokens_by_session(
     session_key: str = Query(..., description="Session key (e.g. telegram:12345)"),
     conversation_id: str | None = Query(None, description="Logical conversation id"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Per-turn token aggregation for a specific session."""
     return _get_collector(user).get_by_session(session_key, conversation_id=conversation_id)
@@ -93,7 +93,7 @@ async def get_tokens_by_session(
 async def get_tokens_by_session_detailed(
     session_key: str = Query(..., description="Session key"),
     conversation_id: str | None = Query(None, description="Logical conversation id"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Per-iteration token records for a specific session (no aggregation)."""
     return _get_collector(user).get_by_session_detailed(session_key, conversation_id=conversation_id)
@@ -102,7 +102,7 @@ async def get_tokens_by_session_detailed(
 @router.get("/tokens/timeline")
 async def get_token_timeline(
     interval: str = Query("hour", pattern="^(hour|day)$"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Token usage aggregated by time interval."""
     return _get_collector(user).get_timeline(interval=interval)

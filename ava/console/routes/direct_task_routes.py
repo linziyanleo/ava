@@ -50,6 +50,7 @@ async def submit_direct_task(
         bg_store=bg_store,
         token_stats=svc.token_stats,
         media_service=svc.media,
+        config_service=svc.config,
     )
 
     trace_ctx = None
@@ -106,6 +107,8 @@ async def submit_direct_task(
         if trace_ctx is not None:
             result["trace_id"] = trace_ctx.trace_id
             finish_trace("ok")
+        result["origin_conversation_id"] = body.conversation_id or ""
+        result["origin_turn_seq"] = body.turn_seq
     finally:
         if trace_token is not None:
             finish_trace("error", "Direct task submit did not finish cleanly")

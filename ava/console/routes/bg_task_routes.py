@@ -25,8 +25,10 @@ async def list_tasks(
     session_key: str | None = None,
     workspace_id: str | None = None,
     workspace_key: str | None = None,
+    trace_id: str | None = None,
+    chain_id: str | None = None,
     include_finished: bool = True,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
@@ -39,10 +41,15 @@ async def list_tasks(
         tasks = bg_store.find_active_by_target(workspace_key)
         return {"running": len(tasks), "total": len(tasks), "tasks": [t.to_dict() for t in tasks]}
 
-    return bg_store.get_status(
-        session_key=session_key,
-        include_finished=include_finished,
-    )
+    kwargs = {
+        "session_key": session_key,
+        "include_finished": include_finished,
+    }
+    if trace_id is not None:
+        kwargs["trace_id"] = trace_id
+    if chain_id is not None:
+        kwargs["chain_id"] = chain_id
+    return bg_store.get_status(**kwargs)
 
 
 @router.get("/history")
@@ -52,22 +59,29 @@ async def list_history(
     session_key: str | None = None,
     task_type: str | None = None,
     status: str | None = None,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    trace_id: str | None = None,
+    chain_id: str | None = None,
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"tasks": [], "total": 0, "page": page, "page_size": page_size}
-    return bg_store.query_history(
-        page=page,
-        page_size=page_size,
-        session_key=session_key,
-        task_type=task_type,
-        status=status,
-    )
+    kwargs = {
+        "page": page,
+        "page_size": page_size,
+        "session_key": session_key,
+        "task_type": task_type,
+        "status": status,
+    }
+    if trace_id is not None:
+        kwargs["trace_id"] = trace_id
+    if chain_id is not None:
+        kwargs["chain_id"] = chain_id
+    return bg_store.query_history(**kwargs)
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"error": "BackgroundTaskStore not initialized"}
@@ -78,7 +92,7 @@ async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role("adm
 
 
 @router.get("/{task_id}/detail")
-async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
     """获取任务的完整 prompt、result 和 workspace metadata。"""
     bg_store = _get_bg_store(user)
     if not bg_store:
@@ -102,7 +116,7 @@ async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_ro
 
 
 @router.get("/{task_id}/timeline")
-async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"events": []}
@@ -117,7 +131,7 @@ async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_role(
 
 
 @router.post("/{task_id}/cancel")
-async def cancel_task(task_id: str, user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def cancel_task(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"message": "BackgroundTaskStore not initialized"}

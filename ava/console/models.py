@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ConsoleRole = Literal["admin", "editor", "viewer", "mock_tester"]
+ConsoleRole = Literal["admin", "editor", "viewer", "read_only", "mock_tester"]
 
 
 class LoginRequest(BaseModel):
@@ -81,6 +81,11 @@ class ChatSessionInfo(BaseModel):
 
 class ChatSessionCreateRequest(BaseModel):
     title: str = ""
+    participants: list[str] = Field(default_factory=list)
+
+
+class ChatSessionUpdateRequest(BaseModel):
+    participants: list[str] | None = None
 
 
 class AuditEntry(BaseModel):
@@ -125,6 +130,7 @@ class GatewayStatus(BaseModel):
     uptime_seconds: float | None = None
     gateway_port: int | None = None
     console_port: int | None = None
+    memory_rss_bytes: int | None = None
     supervised: bool = False
     supervisor: str | None = None
     restart_pending: bool = False

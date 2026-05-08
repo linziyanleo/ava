@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from ava.console import auth
 from ava.console.app import create_console_app
+from ava.console.routes import agent_routes
 
 
 class _FakeBgStore:
@@ -60,11 +61,11 @@ def test_agent_route_lists_agents_for_viewer(tmp_path, monkeypatch):
     checkout = _make_nanobot_checkout(tmp_path / "nanobot")
     monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
     monkeypatch.setattr(
-        "ava.console.services.agent_registry_service.shutil.which",
+        "ava.agents.adapter.shutil.which",
         lambda name: f"/usr/local/bin/{name}" if name == "codex" else None,
     )
     monkeypatch.setattr(
-        "ava.console.services.agent_registry_service.subprocess.run",
+        "ava.agents.adapter.subprocess.run",
         lambda args, **_kwargs: SimpleNamespace(stdout=f"{Path(args[0]).name} 0.1.0\n", stderr=""),
     )
 
@@ -116,6 +117,78 @@ def test_agent_route_lists_agents_for_viewer(tmp_path, monkeypatch):
 
     viewer_cancel = client.post("/api/agents/codex/tasks/cancel", headers=_headers("viewer"))
     assert viewer_cancel.status_code == 403
+
+
+def test_agent_process_lifecycle_routes_require_editor_and_proxy_service(tmp_path, monkeypatch):
+    monkeypatch.setattr("ava.console.app.prepare_console_ui_dist", lambda: None)
+    checkout = _make_nanobot_checkout(tmp_path / "nanobot")
+    monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
+
+    calls: list[tuple[str, str, bool | None]] = []
+
+    class FakeRegistryService:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start_agent(self, agent_name: str):
+            calls.append(("start", agent_name, None))
+            return {"agent": agent_name, "status": "running", "pid": 123}
+
+        def stop_agent(self, agent_name: str, *, force: bool = False):
+            calls.append(("stop", agent_name, force))
+            return {"agent": agent_name, "running": False, "pid": None}
+
+        def restart_agent(self, agent_name: str, *, force: bool = False):
+            calls.append(("restart", agent_name, force))
+            return {"agent": agent_name, "status": "running", "pid": 456}
+
+        def healthcheck_agent(self, agent_name: str):
+            calls.append(("health", agent_name, None))
+            return {"agent": agent_name, "running": True, "pid": 456}
+
+    monkeypatch.setattr(agent_routes, "AgentRegistryService", FakeRegistryService)
+
+    nanobot_dir = tmp_path / "nanobot-home"
+    workspace = tmp_path / "workspace"
+    nanobot_dir.mkdir()
+    workspace.mkdir()
+    app = create_console_app(
+        nanobot_dir=nanobot_dir,
+        workspace=workspace,
+        agent_loop=SimpleNamespace(
+            lifecycle_manager=None,
+            bg_tasks=None,
+            tools=SimpleNamespace(get=lambda _name: None),
+            version="nanobot-test",
+        ),
+        config=_build_config(),
+        token_stats_collector=None,
+        db=None,
+    )
+    client = TestClient(app)
+
+    viewer_start = client.post("/api/agents/codex/process/start", headers=_headers("viewer"))
+    assert viewer_start.status_code == 403
+
+    start = client.post("/api/agents/codex/process/start", headers=_headers("editor"))
+    stop = client.post("/api/agents/codex/process/stop?force=true", headers=_headers("editor"))
+    restart = client.post("/api/agents/codex/process/restart?force=true", headers=_headers("editor"))
+    health = client.get("/api/agents/codex/process/health", headers=_headers("viewer"))
+
+    assert start.status_code == 200
+    assert start.json()["pid"] == 123
+    assert stop.status_code == 200
+    assert stop.json()["running"] is False
+    assert restart.status_code == 200
+    assert restart.json()["pid"] == 456
+    assert health.status_code == 200
+    assert health.json()["running"] is True
+    assert calls == [
+        ("start", "codex", None),
+        ("stop", "codex", True),
+        ("restart", "codex", True),
+        ("health", "codex", None),
+    ]
 
 
 def test_missing_api_route_returns_json_before_spa_fallback(tmp_path, monkeypatch):

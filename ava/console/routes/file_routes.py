@@ -18,8 +18,8 @@ class FileDeleteRequest(BaseModel):
 
 @router.get("/tree")
 async def get_tree(
-    root: str = Query("workspace", description="Root: 'workspace' or 'nanobot'"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    root: str = Query("workspace", description="Root: 'workspace' or 'agent_home'"),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     from ava.console.app import get_services_for_user
     try:
@@ -31,7 +31,7 @@ async def get_tree(
 @router.get("/read")
 async def read_file(
     path: str = Query(..., description="File path"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     from ava.console.app import get_services_for_user
     try:

@@ -24,7 +24,7 @@ async def list_records(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     from ava.console.app import get_services_for_user
     return get_services_for_user(user).media.query(page=page, size=size, search=search)

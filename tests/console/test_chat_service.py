@@ -44,6 +44,29 @@ class _FakeAgentLoop:
         return "ok"
 
 
+class _AgentContextLoop(_FakeAgentLoop):
+    def __init__(self):
+        super().__init__()
+        self.contexts: list[dict[str, object]] = []
+
+    async def process_direct(self, **kwargs):
+        self.contexts.append(dict(getattr(self, "_current_chat_agent_context", {})))
+        return await super().process_direct(**kwargs)
+
+
+class _AgentSkillContextLoop(_FakeAgentLoop):
+    def __init__(self):
+        super().__init__()
+        self.skill_contexts: list[dict[str, object]] = []
+
+    async def process_direct(self, **kwargs):
+        self.skill_contexts.append({
+            "skill_names": list(getattr(self, "_ava_forced_skill_names", [])),
+            "skill_contents": dict(getattr(self, "_ava_forced_skill_contents", {})),
+        })
+        return await super().process_direct(**kwargs)
+
+
 class _CancellableAgentLoop:
     def __init__(self):
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
@@ -105,14 +128,30 @@ def _insert_message(
     content: str,
     timestamp: str,
     trace_id: str = "",
+    from_agent_id: str = "",
+    mentioned_agent_ids: list[str] | None = None,
 ):
     db.execute(
         """
         INSERT INTO session_messages
-            (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (session_id, seq, conversation_id, trace_id, from_agent_id, mentioned_agent_ids, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (session_id, seq, conversation_id, trace_id, role, content, None, None, None, None, timestamp),
+        (
+            session_id,
+            seq,
+            conversation_id,
+            trace_id,
+            from_agent_id,
+            json.dumps(mentioned_agent_ids or [], ensure_ascii=False),
+            role,
+            content,
+            None,
+            None,
+            None,
+            None,
+            timestamp,
+        ),
     )
     db.commit()
 
@@ -225,6 +264,186 @@ def test_get_messages_defaults_to_active_conversation(tmp_path):
     assert [msg["content"] for msg in old_messages] == ["old question"]
 
 
+def test_create_session_persists_participants_from_request(tmp_path):
+    service, db = _create_service(tmp_path)
+
+    created = service.create_session(
+        "tester",
+        title="Multi agent",
+        participants=["nanobot", "codex", "codex:default"],
+    )
+    sessions = service.list_sessions()
+
+    assert created["session_id"]
+    assert sessions[0]["title"] == "Multi agent"
+    assert sessions[0]["participants"] == ["nanobot", "codex"]
+    row = db.fetchone("SELECT metadata FROM sessions WHERE key = ?", (f"console:{created['session_id']}",))
+    assert row is not None
+    assert json.loads(row["metadata"])["participants"] == ["nanobot", "codex"]
+
+
+def test_context_size_uses_recorded_prompt_tokens_and_breakdown(tmp_path):
+    service, db = _create_service(tmp_path)
+    created = service.create_session("tester")
+    service.record_console_message(
+        created["session_id"],
+        role="user",
+        content="summarize this short thread",
+        from_agent_id="user",
+    )
+    _insert_token_usage(
+        db,
+        session_key=f"console:{created['session_id']}",
+        conversation_id=created["conversation_id"],
+        prompt_tokens=123,
+        completion_tokens=10,
+        total_tokens=133,
+        turn_seq=0,
+    )
+
+    result = service.get_context_size(created["session_id"])
+
+    assert result["used_tokens"] == 123
+    assert result["model_limit"] == 200_000
+    assert result["breakdown"]["recorded_prompt"] == 123
+    assert "messages" in result["breakdown"]
+
+
+def test_compress_context_persists_history_and_keeps_recent_messages(tmp_path):
+    service, _db = _create_service(tmp_path)
+    created = service.create_session("tester")
+    for index in range(10):
+        content = (
+            f"recent message {index}"
+            if index >= 8
+            else f"old message {index} " + ("important details " * 80)
+        )
+        service.record_console_message(
+            created["session_id"],
+            role="user" if index % 2 == 0 else "assistant",
+            content=content,
+            from_agent_id="user" if index % 2 == 0 else "nanobot",
+        )
+
+    result = service.compress_context(created["session_id"], keep_recent=4)
+
+    assert result["after_tokens"] < result["before_tokens"]
+    assert "compression_preview" in result
+    assert "before_after_diff" in result
+    assert [item["content"] for item in result["before_after_diff"]["kept_messages"]][-2:] == [
+        "recent message 8",
+        "recent message 9",
+    ]
+    history = service.list_context_compressions(created["session_id"])
+    assert len(history) == 1
+    assert history[0]["before_tokens"] == result["before_tokens"]
+
+
+def test_create_session_defaults_to_console_default_responder(tmp_path):
+    (tmp_path / "console").mkdir()
+    (tmp_path / "console" / "console-config.json").write_text(
+        json.dumps({"gateway": {"console": {"defaultResponderAgentId": "codex"}}}),
+        encoding="utf-8",
+    )
+    service, _db = _create_service(tmp_path)
+
+    service.create_session("tester")
+    sessions = service.list_sessions()
+
+    assert sessions[0]["default_responder_agent_id"] == "codex"
+    assert sessions[0]["participants"] == ["codex"]
+    assert service.get_session_default_responder_agent_id(sessions[0]["key"].split(":", 1)[1]) == "codex"
+
+
+def test_get_messages_returns_agent_metadata_and_legacy_defaults(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="console:abc123",
+        metadata={"conversation_id": "conv_agents", "participants": ["nanobot", "codex"]},
+    )
+    _insert_message(
+        db,
+        session_id=session_id,
+        conversation_id="conv_agents",
+        seq=0,
+        role="user",
+        content="@codex write code",
+        timestamp="2026-04-07T01:00:00+00:00",
+        from_agent_id="user",
+        mentioned_agent_ids=["codex"],
+    )
+    _insert_message(
+        db,
+        session_id=session_id,
+        conversation_id="conv_agents",
+        seq=1,
+        role="assistant",
+        content="done",
+        timestamp="2026-04-07T01:00:10+00:00",
+    )
+
+    messages = service.get_messages("console:abc123")
+
+    assert messages[0]["from_agent_id"] == "user"
+    assert messages[0]["mentioned_agent_ids"] == ["codex"]
+    assert messages[0]["metadata"]["mentioned_agent_ids"] == ["codex"]
+    assert messages[1]["from_agent_id"] == "nanobot"
+    assert messages[1]["mentioned_agent_ids"] == []
+
+
+def test_record_console_message_persists_agent_metadata(tmp_path):
+    service, db = _create_service(tmp_path)
+    created = service.create_session("tester", participants=["nanobot", "codex"])
+
+    record = service.record_console_message(
+        created["session_id"],
+        role="user",
+        content="@codex write code",
+        from_agent_id="user",
+        mentioned_agent_ids=["codex"],
+    )
+    service.record_console_message(
+        created["session_id"],
+        role="assistant",
+        content="[Background Task task_1 QUEUED]\nType: codex | Duration: 0ms",
+        from_agent_id="codex",
+    )
+
+    messages = service.get_messages(f"console:{created['session_id']}")
+
+    assert record["conversation_id"] == created["conversation_id"]
+    assert record["turn_seq"] == 0
+    assert [message["from_agent_id"] for message in messages] == ["user", "codex"]
+    assert messages[0]["mentioned_agent_ids"] == ["codex"]
+    rows = db.fetchall("SELECT seq, from_agent_id FROM session_messages ORDER BY seq")
+    assert [(row["seq"], row["from_agent_id"]) for row in rows] == [(0, "user"), (1, "codex")]
+
+
+def test_next_console_turn_ref_predicts_active_conversation_turn(tmp_path):
+    service, _db = _create_service(tmp_path)
+    created = service.create_session("tester", participants=["nanobot"])
+
+    first = service.next_console_turn_ref(created["session_id"])
+
+    assert first == {
+        "session_key": f"console:{created['session_id']}",
+        "conversation_id": created["conversation_id"],
+        "turn_seq": 0,
+    }
+
+    service.record_console_message(
+        created["session_id"],
+        role="user",
+        content="first task",
+        from_agent_id="user",
+    )
+
+    second = service.next_console_turn_ref(created["session_id"])
+    assert second["conversation_id"] == created["conversation_id"]
+    assert second["turn_seq"] == 1
+
+
 def test_get_history_includes_trace_id(tmp_path):
     service, db = _create_service(tmp_path)
     session_id = _insert_session(
@@ -255,6 +474,47 @@ def test_get_history_includes_trace_id(tmp_path):
     ]
 
 
+def test_get_messages_by_trace_id_returns_session_metadata(tmp_path):
+    service, db = _create_service(tmp_path)
+    session_id = _insert_session(
+        db,
+        key="console:abc123",
+        metadata={"conversation_id": "conv_trace"},
+    )
+    _insert_message(
+        db,
+        session_id=session_id,
+        conversation_id="conv_trace",
+        seq=0,
+        role="user",
+        content="trace question",
+        timestamp="2026-04-07T01:00:00+00:00",
+        trace_id="trace-deeplink",
+    )
+    _insert_message(
+        db,
+        session_id=session_id,
+        conversation_id="conv_other",
+        seq=0,
+        role="user",
+        content="other question",
+        timestamp="2026-04-07T02:00:00+00:00",
+        trace_id="trace-other",
+    )
+
+    messages = service.get_messages_by_trace_id("trace-deeplink")
+
+    assert [msg["content"] for msg in messages] == ["trace question"]
+    assert messages[0]["trace_id"] == "trace-deeplink"
+    assert messages[0]["metadata"] == {
+        "session_key": "console:abc123",
+        "conversation_id": "conv_trace",
+        "trace_id": "trace-deeplink",
+        "from_agent_id": "user",
+        "mentioned_agent_ids": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
     agent_loop = _FakeAgentLoop()
@@ -278,6 +538,52 @@ async def test_send_message_passes_media_paths_to_agent_loop(tmp_path):
         "on_stream_end": None,
         "media": ["/tmp/example.png"],
     }]
+
+
+@pytest.mark.asyncio
+async def test_send_message_sets_agent_context_and_merges_mentions(tmp_path):
+    agent_loop = _AgentContextLoop()
+    db = Database(tmp_path / "chat.db")
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=db)
+    created = service.create_session("tester", participants=["nanobot"])
+
+    result = await service.send_message(
+        session_id=created["session_id"],
+        message="@codex write tests",
+        user_id="tester",
+    )
+
+    assert result == "ok"
+    assert agent_loop.contexts == [{
+        "from_agent_id": "user",
+        "mentioned_agent_ids": ["codex"],
+        "default_responder_agent_id": "nanobot",
+    }]
+    assert not hasattr(agent_loop, "_current_chat_agent_context")
+    session = service.list_sessions()[0]
+    assert session["participants"] == ["nanobot", "codex"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_sets_forced_skill_context(tmp_path):
+    agent_loop = _AgentSkillContextLoop()
+    service = ChatService(agent_loop=agent_loop, workspace=tmp_path, db=None)
+
+    result = await service.send_message(
+        session_id="abc123",
+        message="write summary",
+        user_id="tester",
+        skill_names=["my-skill"],
+        skill_contents={"my-skill": "# My Skill\n\nUse this skill."},
+    )
+
+    assert result == "ok"
+    assert agent_loop.skill_contexts == [{
+        "skill_names": ["my-skill"],
+        "skill_contents": {"my-skill": "# My Skill\n\nUse this skill."},
+    }]
+    assert not hasattr(agent_loop, "_ava_forced_skill_names")
+    assert not hasattr(agent_loop, "_ava_forced_skill_contents")
 
 
 @pytest.mark.asyncio

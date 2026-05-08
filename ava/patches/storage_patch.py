@@ -356,16 +356,21 @@ def apply_storage_patch() -> str:
                 if logical_signature is not None and logical_signature in existing_logical_signatures:
                     continue
                 trace_id = msg.get("trace_id") or (current_trace_id if seq >= db_count else "")
+                mentioned_agent_ids = msg.get("mentioned_agent_ids", [])
+                if not isinstance(mentioned_agent_ids, list):
+                    mentioned_agent_ids = []
 
                 conn.execute(
                     """INSERT INTO session_messages
-                       (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (session_id, seq, conversation_id, trace_id, from_agent_id, mentioned_agent_ids, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         session_id,
                         seq,
                         active_conversation_id,
                         trace_id,
+                        msg.get("from_agent_id", ""),
+                        json.dumps(mentioned_agent_ids, ensure_ascii=False),
                         msg.get("role", ""),
                         content,
                         tool_calls_json,
@@ -421,6 +426,17 @@ def apply_storage_patch() -> str:
                 msg["reasoning_content"] = msg_row["reasoning_content"]
             if msg_row["trace_id"]:
                 msg["trace_id"] = msg_row["trace_id"]
+            if msg_row["from_agent_id"]:
+                msg["from_agent_id"] = msg_row["from_agent_id"]
+            if msg_row["mentioned_agent_ids"]:
+                try:
+                    mentioned_agent_ids = json.loads(msg_row["mentioned_agent_ids"])
+                except json.JSONDecodeError:
+                    mentioned_agent_ids = []
+                if isinstance(mentioned_agent_ids, list):
+                    msg["mentioned_agent_ids"] = [
+                        item for item in mentioned_agent_ids if isinstance(item, str)
+                    ]
             messages.append(msg)
 
         try:

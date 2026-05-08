@@ -1,4 +1,4 @@
-"""Local SQLite storage layer for nanobot."""
+"""Local SQLite storage layer for Ava."""
 
 from ava.storage.database import Database
 

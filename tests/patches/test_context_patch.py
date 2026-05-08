@@ -98,6 +98,36 @@ class TestContextPatch:
         assert "Personal Memory" in messages[0]["content"]
         assert "猫咪" in messages[0]["content"]
 
+    def test_explicit_skill_trigger_forwards_skill_names_and_content(self):
+        captured_kwargs = {}
+
+        def fake_build_messages(_self, _history, current_message, **kwargs):
+            captured_kwargs.update(kwargs)
+            return [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": current_message},
+            ]
+
+        ContextBuilder.build_messages = fake_build_messages
+
+        from ava.patches.context_patch import apply_context_patch
+        apply_context_patch()
+
+        mock_loop = MagicMock()
+        mock_loop.history_summarizer = None
+        mock_loop.history_compressor = None
+        mock_loop.categorized_memory = None
+        mock_loop.bg_tasks = None
+        mock_loop._ava_forced_skill_names = ["my-skill"]
+        mock_loop._ava_forced_skill_contents = {"my-skill": "# My Skill\n\nUse this skill."}
+
+        ctx = _make_mock_ctx(_agent_loop=mock_loop)
+        messages = ctx.build_messages([], "hi")
+
+        assert captured_kwargs["skill_names"] == ["my-skill"]
+        assert "Explicit Skill Trigger" in messages[0]["content"]
+        assert "# My Skill" in messages[0]["content"]
+
     def test_memory_deduplicated_against_existing_system_prompt(self):
         from ava.patches.context_patch import _deduplicate_memory
 

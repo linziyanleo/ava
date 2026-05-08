@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Any, Callable
 
 import jwt
 from fastapi import Depends, HTTPException, Request, Response, status, WebSocket, WebSocketException
@@ -16,6 +16,10 @@ _expire_minutes: int = 480
 _cookie_name: str = "ava_console_session"
 _cookie_secure: bool = False
 _cookie_samesite: str = "lax"
+_device_token_validator: Callable[[dict[str, Any]], bool] | None = None
+
+READ_ROLES = ("admin", "editor", "viewer", "read_only", "mock_tester")
+EDIT_ROLES = ("admin", "editor")
 
 
 def configure(
@@ -26,12 +30,18 @@ def configure(
     cookie_secure: bool = False,
     cookie_samesite: str = "lax",
 ) -> None:
-    global _secret_key, _expire_minutes, _cookie_name, _cookie_secure, _cookie_samesite
+    global _secret_key, _expire_minutes, _cookie_name, _cookie_secure, _cookie_samesite, _device_token_validator
     _secret_key = secret_key
     _expire_minutes = expire_minutes
     _cookie_name = cookie_name
     _cookie_secure = cookie_secure
     _cookie_samesite = cookie_samesite.lower()
+    _device_token_validator = None
+
+
+def set_device_token_validator(validator: Callable[[dict[str, Any]], bool] | None) -> None:
+    global _device_token_validator
+    _device_token_validator = validator
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
@@ -43,11 +53,15 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 def verify_token(token: str) -> dict:
     try:
-        return jwt.decode(token, _secret_key, algorithms=[_algorithm])
+        payload = jwt.decode(token, _secret_key, algorithms=[_algorithm])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    if payload.get("kind") == "device":
+        if _device_token_validator is None or not _device_token_validator(payload):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device token revoked")
+    return payload
 
 
 def session_cookie_name() -> str:
@@ -102,6 +116,9 @@ async def get_current_user(request: Request) -> UserInfo:
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     payload = verify_token(token)
+    if payload.get("kind") == "device":
+        request.state.device_id = payload.get("device_id")
+        request.state.device_capabilities = payload.get("capabilities", [])
     return _user_from_payload(payload)
 
 

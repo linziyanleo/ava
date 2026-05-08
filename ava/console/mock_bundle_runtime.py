@@ -57,6 +57,7 @@ class MockGatewayService:
             "uptime_seconds": 7322,
             "gateway_port": 18790,
             "console_port": self._console_port,
+            "memory_rss_bytes": 96 * 1024 * 1024,
             "supervised": True,
             "supervisor": "mock-runtime",
             "restart_pending": False,
@@ -107,6 +108,10 @@ class MockBackgroundTaskStore:
         task.setdefault("worktree_path", "")
         task.setdefault("origin_conversation_id", "")
         task.setdefault("origin_turn_seq", None)
+        task.setdefault("trace_id", "")
+        task.setdefault("chain_id", "")
+        task.setdefault("parent_task_ids", [])
+        task.setdefault("node_kind", "")
         return task
 
     @staticmethod
@@ -123,6 +128,8 @@ class MockBackgroundTaskStore:
         task_id: str | None = None,
         session_key: str | None = None,
         task_type: str | None = None,
+        trace_id: str | None = None,
+        chain_id: str | None = None,
         include_finished: bool = True,
     ) -> list[dict[str, Any]]:
         tasks: list[dict[str, Any]] = []
@@ -139,6 +146,10 @@ class MockBackgroundTaskStore:
             tasks = [task for task in tasks if task.get("origin_session_key") == session_key]
         if task_type:
             tasks = [task for task in tasks if task.get("task_type") == task_type]
+        if trace_id:
+            tasks = [task for task in tasks if task.get("trace_id") == trace_id]
+        if chain_id:
+            tasks = [task for task in tasks if task.get("chain_id") == chain_id]
         tasks.sort(key=lambda task: float(task.get("started_at") or 0), reverse=True)
         return tasks
 
@@ -147,6 +158,8 @@ class MockBackgroundTaskStore:
         task_id: str | None = None,
         session_key: str | None = None,
         task_type: str | None = None,
+        trace_id: str | None = None,
+        chain_id: str | None = None,
         include_finished: bool = True,
         verbose: bool = False,
     ) -> dict[str, Any]:
@@ -154,9 +167,11 @@ class MockBackgroundTaskStore:
             task_id=task_id,
             session_key=session_key,
             task_type=task_type,
+            trace_id=trace_id,
+            chain_id=chain_id,
             include_finished=include_finished,
         )
-        running = sum(1 for task in tasks if task.get("status") in {"queued", "running"})
+        running = sum(1 for task in tasks if task.get("status") in {"pending", "awaiting_deps", "queued", "running", "streaming"})
         return {
             "running": running,
             "total": len(tasks),
@@ -171,6 +186,8 @@ class MockBackgroundTaskStore:
         session_key: str | None = None,
         task_type: str | None = None,
         status: str | None = None,
+        trace_id: str | None = None,
+        chain_id: str | None = None,
     ) -> dict[str, Any]:
         tasks = list(self._history.values())
         if session_key:
@@ -179,6 +196,10 @@ class MockBackgroundTaskStore:
             tasks = [task for task in tasks if task.get("task_type") == task_type]
         if status:
             tasks = [task for task in tasks if task.get("status") == status]
+        if trace_id:
+            tasks = [task for task in tasks if task.get("trace_id") == trace_id]
+        if chain_id:
+            tasks = [task for task in tasks if task.get("chain_id") == chain_id]
         tasks.sort(key=lambda task: float(task.get("started_at") or 0), reverse=True)
         total = len(tasks)
         offset = max(page - 1, 0) * page_size
@@ -475,13 +496,15 @@ def _seed_mock_db(db: Database, *, console_port: int, media_dir: Path) -> None:
                 continue
             db.execute(
                 """INSERT INTO session_messages
-                   (session_id, seq, conversation_id, trace_id, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (session_id, seq, conversation_id, trace_id, from_agent_id, mentioned_agent_ids, role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_row["id"],
                     msg["seq"],
                     msg.get("conversation_id", ""),
                     msg.get("trace_id", ""),
+                    msg.get("from_agent_id", ""),
+                    json.dumps(msg.get("mentioned_agent_ids", []), ensure_ascii=False),
                     msg["role"],
                     _encode_message_content(msg.get("content", "")),
                     json.dumps(msg.get("tool_calls"), ensure_ascii=False) if msg.get("tool_calls") else None,

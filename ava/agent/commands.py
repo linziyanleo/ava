@@ -58,7 +58,7 @@ class CommandRegistry:
         return self._commands.get(cmd_name)
 
     def get_help_text(self, agent: "AgentLoop | None" = None) -> str:
-        lines = ["🐈 Nanobot commands:"]
+        lines = ["🐈 AVA agent commands:"]
         for cmd in sorted(self._commands.values(), key=lambda c: c.name):
             lines.append(f"/{cmd.name} — {cmd.description}")
         if agent:
@@ -140,7 +140,7 @@ def register_builtin_commands(registry: CommandRegistry, agent: AgentLoop) -> No
 
     async def _cmd_start(msg: InboundMessage, _agent: AgentLoop) -> str:
         return (
-            "👋 Hi! I'm nanobot.\n\n"
+            "👋 Hi! I'm AVA.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )
@@ -288,7 +288,7 @@ def register_builtin_commands(registry: CommandRegistry, agent: AgentLoop) -> No
         compression_label = "on" if _agent._compression_enabled else "off"
 
         return (
-            f"🤖 Nanobot Status\n"
+            f"🤖 AVA Agent Status\n"
             f"⏱ Uptime: {uptime_str}\n"
             f"💬 Session: {msg_count} messages (window: {_agent.memory_window})\n"
             f"💰 Session tokens: {s_total:,} ({s_calls} calls)\n"

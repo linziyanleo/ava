@@ -38,7 +38,7 @@ class MCPTestRequest(BaseModel):
 
 @router.get("/tools")
 async def list_tools(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """List all built-in tools."""
     from ava.console.app import get_services_for_user
@@ -47,7 +47,7 @@ async def list_tools(
 
 @router.get("/mcp/status")
 async def mcp_status(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """List configured MCP servers with redacted config and runtime status."""
     from ava.console.app import get_services_for_user
@@ -60,7 +60,7 @@ async def mcp_status(
 async def mcp_test(
     body: MCPTestRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
 ):
     """Run a short independent MCP probe for a configured server."""
     from ava.console.app import get_services
@@ -102,7 +102,7 @@ async def mcp_reconnect(
 
 @router.get("/list")
 async def list_skills(
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """List all skills (ava + agents + builtin) with enabled state."""
     from ava.console.app import get_services_for_user
@@ -112,7 +112,7 @@ async def list_skills(
 @router.get("/detail/{name}")
 async def get_skill(
     name: str,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Get skill details."""
     from ava.console.app import get_services_for_user
@@ -126,7 +126,7 @@ async def get_skill(
 async def toggle_skill(
     body: ToggleSkillRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
 ):
     """Enable or disable a skill."""
     from ava.console.app import get_services
@@ -149,7 +149,7 @@ async def toggle_skill(
 async def install_from_git(
     body: InstallGitRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
 ):
     """Install a skill from a Git repository."""
     from ava.console.app import get_services
@@ -174,7 +174,7 @@ async def install_from_git(
 async def install_from_path(
     body: InstallPathRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
 ):
     """Install a skill from a local path."""
     from ava.console.app import get_services
@@ -200,7 +200,7 @@ async def install_from_upload(
     request: Request,
     name: str = Form(...),
     files: list[UploadFile] = File(...),
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
 ):
     """Install a skill from uploaded files (native file picker / webkitdirectory)."""
     from ava.console.app import get_services

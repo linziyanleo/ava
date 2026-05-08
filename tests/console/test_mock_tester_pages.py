@@ -169,8 +169,7 @@ def test_mock_tester_can_manage_mock_chat_sessions_but_not_mutate_real_skill_reg
     assert deleted.status_code == 200
 
     cancel = client.post("/api/bg-tasks/mock-task-queue-1/cancel")
-    assert cancel.status_code == 200
-    assert "cancelled" in cancel.json()["message"].lower()
+    assert cancel.status_code == 403
 
     toggle = client.put(
         "/api/skills/toggle",

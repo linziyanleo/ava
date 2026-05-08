@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from datetime import datetime, timezone
 
-from ava.adapters.nanobot.discovery import resolve_nanobot_root
+from ava.agents import default_agent_adapters
+from ava.agents.adapter import AgentAdapter, AgentRuntimeContext
+from ava.agents.process_manager import AgentProcessManager, ProcessHandle
 
 
 class AgentRegistryService:
@@ -28,35 +28,40 @@ class AgentRegistryService:
         bg_store: Any | None = None,
         media_service: Any | None = None,
         db: Any | None = None,
+        process_manager: AgentProcessManager | None = None,
+        lifecycle_events: list[dict[str, Any]] | None = None,
+        adapters: Sequence[AgentAdapter] | None = None,
     ) -> None:
         self._agent_loop = agent_loop
         self._workspace = Path(workspace)
         self._bg_store = bg_store
         self._media_service = media_service
         self._db = db
+        self._process_manager = process_manager
+        self._lifecycle_events = lifecycle_events if lifecycle_events is not None else []
+        self._adapters = list(adapters) if adapters is not None else default_agent_adapters()
 
     def list_agents(self) -> dict[str, Any]:
         active_counts = self._active_task_counts()
-        agents = [
-            self._nanobot_agent(),
-            self._cli_agent(
-                name="claude_code",
-                display_name="Claude Code",
-                command="claude",
-                task_type="claude_code",
-                install_url="https://docs.anthropic.com/en/docs/claude-code",
-                active_tasks=active_counts.get("claude_code", 0),
-            ),
-            self._cli_agent(
-                name="codex",
-                display_name="Codex",
-                command="codex",
-                task_type="codex",
-                install_url="https://github.com/openai/codex",
-                active_tasks=active_counts.get("codex", 0),
-            ),
-            self._image_agent(active_tasks=active_counts.get("image_gen", 0)),
-        ]
+        context = self._adapter_context()
+        managed_handles = self._managed_handles()
+        agents = []
+        for adapter in self._adapters:
+            activity = (
+                self._recent_activity(
+                    adapter.task_type,
+                    artifact_type=getattr(adapter, "artifact_type", "text"),
+                )
+                if adapter.task_type
+                else {"events": [], "artifacts": []}
+            )
+            snapshot = adapter.build_snapshot(
+                context,
+                active_tasks=active_counts.get(adapter.task_type, 0) if adapter.task_type else 0,
+                activity=activity,
+            )
+            self._apply_lifecycle_snapshot(snapshot, adapter, managed_handles)
+            agents.append(snapshot)
         payload = {
             "agents": agents,
             "summary": {
@@ -68,8 +73,48 @@ class AgentRegistryService:
         self._persist_agents(agents)
         return payload
 
+    def start_agent(self, agent_name: str) -> dict[str, Any]:
+        adapter = self._require_adapter(agent_name)
+        manager = self._require_process_manager()
+        handle = manager.start(adapter, self._adapter_context(), agent_id=adapter.instance_id)
+        return self._handle_payload(adapter, handle, status="running")
+
+    def stop_agent(self, agent_name: str, *, force: bool = False) -> dict[str, Any]:
+        adapter = self._require_adapter(agent_name)
+        manager = self._require_process_manager()
+        manager.stop(adapter.instance_id, force=force)
+        health = manager.healthcheck(adapter.instance_id)
+        return {
+            "agent": adapter.name,
+            "agent_id": adapter.instance_id,
+            "running": health.running,
+            "pid": health.pid,
+            "returncode": health.returncode,
+            "detail": health.detail,
+        }
+
+    def restart_agent(self, agent_name: str, *, force: bool = False) -> dict[str, Any]:
+        adapter = self._require_adapter(agent_name)
+        manager = self._require_process_manager()
+        handle = manager.restart(adapter.instance_id, force=force)
+        return self._handle_payload(adapter, handle, status="running")
+
+    def healthcheck_agent(self, agent_name: str) -> dict[str, Any]:
+        adapter = self._require_adapter(agent_name)
+        manager = self._require_process_manager()
+        health = manager.healthcheck(adapter.instance_id)
+        return {
+            "agent": adapter.name,
+            "agent_id": adapter.instance_id,
+            "running": health.running,
+            "pid": health.pid,
+            "returncode": health.returncode,
+            "detail": health.detail,
+        }
+
     async def cancel_agent_tasks(self, agent_name: str) -> dict[str, Any]:
-        task_type = self._task_type_for_agent(agent_name)
+        adapter = self._find_adapter(agent_name)
+        task_type = adapter.task_type if adapter else ""
         if not task_type:
             return {
                 "agent": agent_name,
@@ -112,111 +157,91 @@ class AgentRegistryService:
             "message": f"Cancelled {cancelled} task(s).",
         }
 
-    def _nanobot_agent(self) -> dict[str, Any]:
-        path = ""
-        detail = ""
-        installed = False
-        try:
-            path = str(resolve_nanobot_root())
-            installed = True
-        except RuntimeError as exc:
-            detail = str(exc)
+    def _adapter_context(self) -> AgentRuntimeContext:
+        return AgentRuntimeContext(
+            agent_loop=self._agent_loop,
+            workspace=self._workspace,
+            bg_store=self._bg_store,
+            media_service=self._media_service,
+        )
 
-        running = self._agent_loop is not None
+    def _require_adapter(self, agent_name: str) -> AgentAdapter:
+        adapter = self._find_adapter(agent_name)
+        if adapter is None:
+            raise KeyError(f"Unknown agent: {agent_name}")
+        return adapter
+
+    def _require_process_manager(self) -> AgentProcessManager:
+        if self._process_manager is None:
+            raise RuntimeError("Agent process manager unavailable")
+        return self._process_manager
+
+    def _find_adapter(self, agent_name: str) -> AgentAdapter | None:
+        for adapter in self._adapters:
+            if adapter.matches(agent_name):
+                return adapter
+        return None
+
+    @staticmethod
+    def _handle_payload(adapter: AgentAdapter, handle: ProcessHandle, *, status: str) -> dict[str, Any]:
         return {
-            "name": "nanobot",
-            "instance_id": "nanobot:default",
-            "display_name": "Nanobot",
-            "kind": "managed",
-            "status": "running" if running else ("available" if installed else "unavailable"),
-            "installed": installed,
-            "path": path,
-            "version": self._safe_attr(self._agent_loop, "version") if running else "",
-            "detail": detail,
-            "install_url": "https://github.com/HKUDS/nanobot",
-            "active_tasks": 0,
-            "recent_events": [],
-            "recent_artifacts": [],
-            "capabilities": {
-                "supports_chat": True,
-                "supports_task": False,
-                "supports_cancel": running,
-                "supports_restart": running,
-                "supports_streaming": running,
-                "supports_artifacts": False,
-                "max_concurrent_tasks": 1,
-                "supported_artifact_types": ["text"],
-            },
+            "agent": adapter.name,
+            "agent_id": handle.agent_id,
+            "status": status,
+            "pid": handle.pid,
+            "started_at": handle.started_at,
+            "argv": handle.argv,
+            "cwd": handle.cwd,
         }
 
-    def _cli_agent(
+    def _managed_handles(self) -> dict[str, ProcessHandle]:
+        if self._process_manager is None:
+            return {}
+        return {handle.agent_id: handle for handle in self._process_manager.list_running()}
+
+    def _apply_lifecycle_snapshot(
         self,
-        *,
-        name: str,
-        display_name: str,
-        command: str,
-        task_type: str,
-        install_url: str,
-        active_tasks: int,
-    ) -> dict[str, Any]:
-        path = shutil.which(command) or ""
-        installed = bool(path)
-        activity = self._recent_activity(task_type)
-        return {
-            "name": name,
-            "instance_id": f"{name}:default",
-            "display_name": display_name,
-            "kind": "cli",
-            "status": "running" if active_tasks > 0 else ("available" if installed else "unavailable"),
-            "installed": installed,
-            "path": path,
-            "version": self._version(path) if path else "",
-            "detail": "" if installed else f"{command} not found in PATH",
-            "install_url": install_url,
-            "active_tasks": active_tasks,
-            "recent_events": activity["events"],
-            "recent_artifacts": activity["artifacts"],
-            "capabilities": {
-                "supports_chat": False,
-                "supports_task": installed,
-                "supports_cancel": active_tasks > 0,
-                "supports_restart": False,
-                "supports_streaming": False,
-                "supports_artifacts": True,
-                "max_concurrent_tasks": 1,
-                "supported_artifact_types": ["text", "diff", "log", "workspace"],
-            },
-        }
+        snapshot: dict[str, Any],
+        adapter: AgentAdapter,
+        managed_handles: dict[str, ProcessHandle],
+    ) -> None:
+        handle = managed_handles.get(adapter.instance_id)
+        if handle is not None:
+            snapshot["status"] = "running"
+            snapshot["installed"] = True
+            if not snapshot.get("path"):
+                snapshot["path"] = handle.argv[0] if handle.argv else ""
+            capabilities = snapshot.get("capabilities")
+            if isinstance(capabilities, dict):
+                capabilities["supports_restart"] = True
 
-    def _image_agent(self, *, active_tasks: int) -> dict[str, Any]:
-        registered = self._get_registered_tool("image_gen") is not None
-        installed = registered or self._media_service is not None
-        activity = self._recent_activity("image_gen")
-        return {
-            "name": "image_gen",
-            "instance_id": "image_gen:default",
-            "display_name": "Image Gen",
-            "kind": "provider",
-            "status": "running" if active_tasks > 0 else ("available" if installed else "unavailable"),
-            "installed": installed,
-            "path": "",
-            "version": "",
-            "detail": "" if installed else "image_gen provider not configured",
-            "install_url": "",
-            "active_tasks": active_tasks,
-            "recent_events": activity["events"],
-            "recent_artifacts": activity["artifacts"],
-            "capabilities": {
-                "supports_chat": False,
-                "supports_task": installed,
-                "supports_cancel": active_tasks > 0,
-                "supports_restart": False,
-                "supports_streaming": False,
-                "supports_artifacts": True,
-                "max_concurrent_tasks": 1,
-                "supported_artifact_types": ["image", "text", "log"],
-            },
-        }
+        lifecycle_events = self._lifecycle_events_for(adapter)
+        if lifecycle_events:
+            existing = snapshot.get("recent_events")
+            if not isinstance(existing, list):
+                existing = []
+            merged = lifecycle_events + existing
+            merged.sort(key=lambda item: float(item.get("timestamp") or 0), reverse=True)
+            snapshot["recent_events"] = merged[:3]
+
+    def _lifecycle_events_for(self, adapter: AgentAdapter, limit: int = 3) -> list[dict[str, Any]]:
+        agent_ids = {adapter.name, adapter.instance_id}
+        events: list[dict[str, Any]] = []
+        for event in reversed(self._lifecycle_events):
+            agent_id = str(event.get("agent_id") or "")
+            if agent_id not in agent_ids:
+                continue
+            returncode = event.get("returncode")
+            detail = f"returncode={returncode}" if returncode is not None else ""
+            events.append({
+                "task_id": agent_id,
+                "timestamp": event.get("timestamp"),
+                "event": event.get("event") or "",
+                "detail": detail,
+            })
+            if len(events) >= limit:
+                break
+        return events
 
     def _active_task_counts(self) -> dict[str, int]:
         getter = getattr(self._bg_store, "get_status", None)
@@ -240,7 +265,13 @@ class AgentRegistryService:
             counts[task_type] = counts.get(task_type, 0) + 1
         return counts
 
-    def _recent_activity(self, task_type: str, *, limit: int = 3) -> dict[str, list[dict[str, Any]]]:
+    def _recent_activity(
+        self,
+        task_type: str,
+        *,
+        artifact_type: str = "text",
+        limit: int = 3,
+    ) -> dict[str, list[dict[str, Any]]]:
         tasks = self._tasks_for_type(task_type, limit=limit)
         events: list[dict[str, Any]] = []
         artifacts: list[dict[str, Any]] = []
@@ -271,7 +302,7 @@ class AgentRegistryService:
             if result:
                 artifacts.append({
                     "task_id": task_id,
-                    "type": "image" if task_type == "image_gen" else "text",
+                    "type": artifact_type,
                     "preview": result[:240],
                 })
 
@@ -362,44 +393,3 @@ class AgentRegistryService:
             rows,
         )
         self._db.commit()
-
-    def _get_registered_tool(self, name: str) -> Any | None:
-        tools = getattr(self._agent_loop, "tools", None)
-        getter = getattr(tools, "get", None)
-        if not callable(getter):
-            return None
-        try:
-            return getter(name)
-        except Exception:
-            return None
-
-    @staticmethod
-    def _version(binary: str) -> str:
-        try:
-            completed = subprocess.run(
-                [binary, "--version"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-        except Exception:
-            return ""
-        output = (completed.stdout or completed.stderr or "").strip()
-        return output.splitlines()[0] if output else ""
-
-    @staticmethod
-    def _safe_attr(obj: Any, name: str) -> str:
-        value = getattr(obj, name, "")
-        return str(value) if value is not None else ""
-
-    @staticmethod
-    def _task_type_for_agent(agent_name: str) -> str:
-        return {
-            "codex": "codex",
-            "codex:default": "codex",
-            "claude_code": "claude_code",
-            "claude_code:default": "claude_code",
-            "image_gen": "image_gen",
-            "image_gen:default": "image_gen",
-        }.get(agent_name, "")

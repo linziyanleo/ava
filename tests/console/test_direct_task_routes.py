@@ -121,6 +121,8 @@ def test_submit_direct_task_route_creates_background_task(tmp_path, monkeypatch)
         "task_id": "direct_001",
         "status": "queued",
         "task_type": "codex",
+        "origin_conversation_id": "conv_1",
+        "origin_turn_seq": 2,
     }
     assert bg_store.calls[0]["origin_session_key"] == "console:abc123"
     assert bg_store.calls[0]["origin_conversation_id"] == "conv_1"
@@ -181,3 +183,70 @@ def test_submit_direct_task_route_rejects_viewer(tmp_path, monkeypatch):
     )
 
     assert response.status_code == 403
+
+
+def test_submit_image_gen_route_rejects_arbitrary_reference_path(tmp_path, monkeypatch):
+    bg_store = _FakeBgStore()
+    client = _create_client(tmp_path, monkeypatch, bg_store)
+    secret = tmp_path / "secret.png"
+    secret.write_bytes(b"png")
+
+    response = client.post(
+        "/api/console/direct-tasks",
+        headers=_headers("editor"),
+        json={
+            "task_type": "image_gen",
+            "prompt": "use this",
+            "session_key": "console:abc123",
+            "params": {"reference_image": str(secret)},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "previously uploaded image" in response.json()["detail"]
+    assert bg_store.calls == []
+
+
+def test_submit_image_gen_route_accepts_uploaded_reference_path(tmp_path, monkeypatch):
+    calls: list[dict] = []
+
+    class FakeImageGenTool:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def execute(self, *, prompt, reference_image=None, continue_after_completion=None):
+            calls.append({
+                "prompt": prompt,
+                "reference_image": reference_image,
+                "continue_after_completion": continue_after_completion,
+            })
+            return "Image generation task started (id: image_gen_route_001). Use /task or /bg-tasks to check progress."
+
+    monkeypatch.setattr("ava.console.services.direct_task_service.ImageGenTool", FakeImageGenTool)
+    bg_store = _FakeBgStore()
+    client = _create_client(tmp_path, monkeypatch, bg_store)
+
+    upload = client.post(
+        "/api/chat/uploads",
+        headers=_headers("editor"),
+        files=[("files", ("reference.png", b"png", "image/png"))],
+    )
+    assert upload.status_code == 200
+    upload_item = upload.json()["uploads"][0]
+
+    response = client.post(
+        "/api/console/direct-tasks",
+        headers=_headers("editor"),
+        json={
+            "task_type": "image_gen",
+            "prompt": "make it warmer",
+            "session_key": "console:abc123",
+            "params": {"reference_image": upload_item["path"]},
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["task_id"] == "image_gen_route_001"
+    assert calls[0]["prompt"] == "make it warmer"
+    assert calls[0]["reference_image"] == upload_item["media_path"]
+    assert calls[0]["continue_after_completion"] is None

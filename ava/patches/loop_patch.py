@@ -1343,6 +1343,26 @@ def apply_loop_patch() -> str:
     # ------------------------------------------------------------------
     original_save_turn = AgentLoop._save_turn
 
+    def _apply_chat_agent_metadata(self_loop, message: dict[str, Any]) -> None:
+        chat_ctx = getattr(self_loop, "_current_chat_agent_context", None)
+        if not isinstance(chat_ctx, dict) or not isinstance(message, dict):
+            return
+        role = message.get("role")
+        if role == "user":
+            message.setdefault("from_agent_id", chat_ctx.get("from_agent_id") or "user")
+            mentioned = chat_ctx.get("mentioned_agent_ids")
+            if isinstance(mentioned, list):
+                message.setdefault(
+                    "mentioned_agent_ids",
+                    [item for item in mentioned if isinstance(item, str)],
+                )
+        elif role == "assistant":
+            message.setdefault(
+                "from_agent_id",
+                chat_ctx.get("default_responder_agent_id") or "nanobot",
+            )
+            message.setdefault("mentioned_agent_ids", [])
+
     def fixed_save_turn(self_loop, session, messages, skip):
         corrected = getattr(self_loop, "_last_build_msg_count", None)
         if corrected is not None:
@@ -1365,9 +1385,12 @@ def apply_loop_patch() -> str:
                 )
                 if _image_placeholder_signature(candidate_content) > _image_placeholder_signature(existing_content):
                     session.messages[-1]["content"] = candidate_content
+                _apply_chat_agent_metadata(self_loop, session.messages[-1])
                 # Upstream may have already persisted the current user message
                 # before _run_agent_loop starts. Preserve that extra skip.
                 skip += 1
+        for message in messages[skip:]:
+            _apply_chat_agent_metadata(self_loop, message)
         original_save_turn(self_loop, session, messages, skip)
 
     fixed_save_turn._ava_loop_patched = True

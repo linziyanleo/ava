@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/config", tags=["config"])
 
 
 @router.get("/list")
-async def list_configs(user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def list_configs(user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
     from ava.console.app import get_services_for_user
     return get_services_for_user(user).config.list_configs()
 
@@ -20,7 +20,7 @@ async def list_configs(user: UserInfo = Depends(auth.require_role("admin", "edit
 @router.get("/{name:path}")
 async def read_config(
     name: str,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     from ava.console.app import get_services_for_user
 

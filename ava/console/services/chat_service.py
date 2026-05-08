@@ -23,6 +23,23 @@ _BG_TASK_ASSISTANT_RE = re.compile(
 _BG_TASK_CONTINUATION_RE = re.compile(
     r"^\[Background Task Completed — ([A-Z_]+)\]\nTask: ([^:\n]+):([A-Za-z0-9_-]+)\nDuration: (\d+)ms(?:\n\n([\s\S]*))?$"
 )
+_AGENT_MENTION_RE = re.compile(r"(?<!\w)@([A-Za-z][A-Za-z0-9_-]*)(?![\w-])")
+_AGENT_ALIASES = {
+    "nanobot": "nanobot",
+    "nanobot_default": "nanobot",
+    "codex": "codex",
+    "codex_default": "codex",
+    "claude": "claude_code",
+    "claude_code": "claude_code",
+    "claude-code": "claude_code",
+    "claude_code_default": "claude_code",
+    "image": "image_gen",
+    "image_gen": "image_gen",
+    "image-gen": "image_gen",
+    "image_gen_default": "image_gen",
+    "user": "user",
+}
+_DEFAULT_CONTEXT_MODEL_LIMIT = 200_000
 
 
 class ChatService:
@@ -85,6 +102,51 @@ class ChatService:
         return raw_content
 
     @staticmethod
+    def _normalize_agent_id(value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        cleaned = value.strip().lstrip("@")
+        if not cleaned:
+            return ""
+        alias_key = cleaned.replace(":", "_").lower()
+        return _AGENT_ALIASES.get(alias_key, _AGENT_ALIASES.get(cleaned.lower(), cleaned))
+
+    @classmethod
+    def _normalize_agent_ids(cls, values: Any, *, fallback: list[str] | None = None) -> list[str]:
+        if isinstance(values, str):
+            candidates: list[Any] = [values]
+        elif isinstance(values, list):
+            candidates = values
+        else:
+            candidates = []
+        normalized: list[str] = []
+        for value in candidates:
+            agent_id = cls._normalize_agent_id(value)
+            if agent_id and agent_id != "user" and agent_id not in normalized:
+                normalized.append(agent_id)
+        if normalized:
+            return normalized
+        return list(fallback or [])
+
+    @classmethod
+    def _parse_agent_mentions(cls, content: str) -> list[str]:
+        if not content:
+            return []
+        return cls._normalize_agent_ids([match.group(1) for match in _AGENT_MENTION_RE.finditer(content)])
+
+    @classmethod
+    def _decode_agent_list(cls, raw_value: Any) -> list[str]:
+        if isinstance(raw_value, list):
+            return cls._normalize_agent_ids(raw_value)
+        if not isinstance(raw_value, str) or not raw_value:
+            return []
+        try:
+            decoded = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+        return cls._normalize_agent_ids(decoded)
+
+    @staticmethod
     def _normalize_direct_response_content(response: Any) -> str:
         if response is None:
             return ""
@@ -134,7 +196,7 @@ class ChatService:
                 "assistant",
                 assistant_match[1],
                 assistant_match[2],
-                assistant_match[5].strip(),
+                (assistant_match[5] or "").strip(),
             )
         continuation_match = _BG_TASK_CONTINUATION_RE.match(content)
         if continuation_match:
@@ -208,13 +270,58 @@ class ChatService:
         return self._db.fetchall(
             """
             SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                   reasoning_content, timestamp, conversation_id, trace_id
+                   reasoning_content, timestamp, conversation_id, trace_id,
+                   from_agent_id, mentioned_agent_ids
               FROM session_messages
              WHERE session_id = ? AND conversation_id = ?
              ORDER BY seq, id
             """,
             (session_id, conversation_id),
         )
+
+    def _message_row_to_payload(self, row: Any, *, session_key: str = "") -> dict[str, Any]:
+        msg: dict[str, Any] = {"role": row["role"]}
+        msg["content"] = self._decode_message_content(row["content"])
+        if row["tool_calls"]:
+            try:
+                msg["tool_calls"] = json.loads(row["tool_calls"])
+            except json.JSONDecodeError:
+                pass
+        if row["tool_call_id"]:
+            msg["tool_call_id"] = row["tool_call_id"]
+        if row["name"]:
+            msg["name"] = row["name"]
+        if row["reasoning_content"]:
+            msg["reasoning_content"] = row["reasoning_content"]
+        if row["timestamp"]:
+            msg["timestamp"] = row["timestamp"]
+        trace_id = row["trace_id"] or ""
+        conversation_id = row["conversation_id"] or ""
+        from_agent_id = self._normalize_agent_id(row["from_agent_id"]) if "from_agent_id" in row.keys() else ""
+        if not from_agent_id:
+            if row["role"] == "user":
+                from_agent_id = "user"
+            elif row["role"] == "assistant":
+                from_agent_id = self._default_responder_agent_id()
+        mentioned_agent_ids = (
+            self._decode_agent_list(row["mentioned_agent_ids"])
+            if "mentioned_agent_ids" in row.keys()
+            else []
+        )
+        if from_agent_id:
+            msg["from_agent_id"] = from_agent_id
+        msg["mentioned_agent_ids"] = mentioned_agent_ids
+        msg["trace_id"] = trace_id
+        metadata: dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "trace_id": trace_id,
+            "from_agent_id": from_agent_id,
+            "mentioned_agent_ids": mentioned_agent_ids,
+        }
+        if session_key:
+            metadata["session_key"] = session_key
+        msg["metadata"] = metadata
+        return msg
 
     def _repair_conversation_artifacts(
         self,
@@ -424,13 +531,21 @@ class ChatService:
                         ts = json.loads(r["token_stats"])
                     except json.JSONDecodeError:
                         pass
+                default_responder_agent_id = self._default_responder_agent_id(meta)
+                participants = self._normalize_agent_ids(
+                    meta.get("participants"),
+                    fallback=[default_responder_agent_id],
+                )
                 active_conversation_id = self._resolve_active_conversation_id(r["id"], meta)
                 sessions.append({
                     "key": key,
+                    "title": meta.get("title") or "",
                     "scene": self._derive_scene(key),
                     "created_at": r["created_at"] or "",
                     "updated_at": r["updated_at"] or "",
                     "conversation_id": active_conversation_id,
+                    "participants": participants,
+                    "default_responder_agent_id": default_responder_agent_id,
                     "token_stats": self._resolve_session_token_stats(key, active_conversation_id, ts),
                     "message_count": r["msg_count"],
                 })
@@ -452,24 +567,36 @@ class ChatService:
                 "total_tokens": 0, "llm_calls": 0,
             }
             conversation_id = ""
+            title = ""
+            default_responder_agent_id = self._default_responder_agent_id()
+            participants = [default_responder_agent_id]
             msg_count = max(0, len(lines) - 1)
             if first_line:
                 try:
                     parsed = json.loads(first_line)
                     if parsed.get("_type") == "metadata":
                         key = parsed.get("key", key)
+                        title = parsed.get("title") or ""
                         created_at = parsed.get("created_at", "")
                         updated_at = parsed.get("updated_at", "")
                         token_stats = parsed.get("token_stats", token_stats)
                         conversation_id = parsed.get("conversation_id") or self._extract_conversation_id(parsed.get("metadata"))
+                        default_responder_agent_id = self._default_responder_agent_id(parsed.get("metadata"))
+                        participants = self._normalize_agent_ids(
+                            parsed.get("participants") or (parsed.get("metadata") or {}).get("participants"),
+                            fallback=[default_responder_agent_id],
+                        )
                 except json.JSONDecodeError:
                     pass
             sessions.append({
                 "key": key,
+                "title": title,
                 "scene": self._derive_scene(key),
                 "created_at": created_at,
                 "updated_at": updated_at,
                 "conversation_id": conversation_id,
+                "participants": participants,
+                "default_responder_agent_id": default_responder_agent_id,
                 "token_stats": token_stats,
                 "message_count": msg_count,
             })
@@ -598,7 +725,8 @@ class ChatService:
             msg_rows = self._db.fetchall(
                 """
                 SELECT id, seq, role, content, tool_calls, tool_call_id, name,
-                       reasoning_content, timestamp, conversation_id, trace_id
+                       reasoning_content, timestamp, conversation_id, trace_id,
+                       from_agent_id, mentioned_agent_ids
                   FROM session_messages
                  WHERE session_id = ? AND conversation_id = ?
                  ORDER BY seq, id
@@ -610,31 +738,7 @@ class ChatService:
                 resolved_conversation_id,
                 msg_rows,
             )
-            messages: list[dict] = []
-            for mr in msg_rows:
-                msg: dict[str, Any] = {"role": mr["role"]}
-                msg["content"] = self._decode_message_content(mr["content"])
-                if mr["tool_calls"]:
-                    try:
-                        msg["tool_calls"] = json.loads(mr["tool_calls"])
-                    except json.JSONDecodeError:
-                        pass
-                if mr["tool_call_id"]:
-                    msg["tool_call_id"] = mr["tool_call_id"]
-                if mr["name"]:
-                    msg["name"] = mr["name"]
-                if mr["reasoning_content"]:
-                    msg["reasoning_content"] = mr["reasoning_content"]
-                if mr["timestamp"]:
-                    msg["timestamp"] = mr["timestamp"]
-                trace_id = mr["trace_id"] or ""
-                msg["trace_id"] = trace_id
-                msg["metadata"] = {
-                    "conversation_id": mr["conversation_id"] or "",
-                    "trace_id": trace_id,
-                }
-                messages.append(msg)
-            return messages
+            return [self._message_row_to_payload(mr) for mr in msg_rows]
 
         safe_key = session_key.replace(":", "_")
         session_file = self._sessions_dir / f"{safe_key}.jsonl"
@@ -654,6 +758,34 @@ class ChatService:
             except json.JSONDecodeError:
                 continue
         return messages
+
+    def get_messages_by_trace_id(self, trace_id: str) -> list[dict]:
+        """Return all persisted messages bound to one trace_id across sessions."""
+        if not trace_id:
+            return []
+        if not self._use_db:
+            return []
+
+        rows = self._db.fetchall(
+            """
+            SELECT s.key AS session_key, m.id, m.seq, m.role, m.content,
+                   m.tool_calls, m.tool_call_id, m.name, m.reasoning_content,
+                   m.timestamp, m.conversation_id, m.trace_id,
+                   m.from_agent_id, m.mentioned_agent_ids
+              FROM session_messages m
+              JOIN sessions s ON s.id = m.session_id
+             WHERE m.trace_id = ?
+             ORDER BY CASE WHEN m.timestamp IS NULL OR m.timestamp = '' THEN 1 ELSE 0 END,
+                      m.timestamp ASC,
+                      m.seq ASC,
+                      m.id ASC
+            """,
+            (trace_id,),
+        )
+        return [
+            self._message_row_to_payload(row, session_key=row["session_key"] or "")
+            for row in rows
+        ]
 
     def get_context_preview(
         self,
@@ -680,12 +812,22 @@ class ChatService:
             reveal=reveal,
         )
 
-    def create_session(self, user_id: str, title: str = "") -> dict[str, str]:
+    def create_session(
+        self,
+        user_id: str,
+        title: str = "",
+        participants: list[str] | None = None,
+    ) -> dict[str, Any]:
         sid = uuid.uuid4().hex[:8]
         conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         session_title = title or f"Session {sid}"
         session_key = f"console:{sid}"
+        default_responder_agent_id = self._default_responder_agent_id()
+        normalized_participants = self._normalize_agent_ids(
+            participants,
+            fallback=[default_responder_agent_id],
+        )
 
         if self._use_db:
             meta = json.dumps(
@@ -693,6 +835,8 @@ class ChatService:
                     "title": session_title,
                     "user": user_id,
                     "conversation_id": conversation_id,
+                    "participants": normalized_participants,
+                    "default_responder_agent_id": default_responder_agent_id,
                 },
                 ensure_ascii=False,
             )
@@ -716,6 +860,8 @@ class ChatService:
                 "title": session_title,
                 "user": user_id,
                 "conversation_id": conversation_id,
+                "participants": normalized_participants,
+                "default_responder_agent_id": default_responder_agent_id,
                 "token_stats": {
                     "total_prompt_tokens": 0,
                     "total_completion_tokens": 0,
@@ -724,7 +870,188 @@ class ChatService:
                 },
             }, ensure_ascii=False)
             session_file.write_text(metadata_line + "\n", "utf-8")
-        return {"session_id": sid, "conversation_id": conversation_id}
+        return {
+            "session_id": sid,
+            "title": session_title,
+            "conversation_id": conversation_id,
+            "participants": normalized_participants,
+            "default_responder_agent_id": default_responder_agent_id,
+        }
+
+    def update_session(
+        self,
+        session_id: str,
+        *,
+        participants: list[str] | None = None,
+    ) -> dict[str, Any]:
+        session_key = f"console:{session_id}"
+        default_responder_agent_id = self._default_responder_agent_id()
+        normalized_participants = self._normalize_agent_ids(
+            participants,
+            fallback=[default_responder_agent_id],
+        )
+        if not self._use_db:
+            raise KeyError(session_id)
+
+        row = self._db.fetchone(
+            "SELECT metadata FROM sessions WHERE key = ?",
+            (session_key,),
+        )
+        if not row:
+            raise KeyError(session_id)
+        meta: dict[str, Any] = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                meta = {}
+        meta["participants"] = normalized_participants
+        meta["default_responder_agent_id"] = default_responder_agent_id
+        self._db.execute(
+            "UPDATE sessions SET metadata = ?, updated_at = ? WHERE key = ?",
+            (
+                json.dumps(meta, ensure_ascii=False),
+                datetime.now(timezone.utc).isoformat(),
+                session_key,
+            ),
+        )
+        self._db.commit()
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "participants": normalized_participants,
+            "default_responder_agent_id": default_responder_agent_id,
+        }
+
+    def record_console_message(
+        self,
+        session_id: str,
+        *,
+        role: str,
+        content: str,
+        from_agent_id: str = "",
+        mentioned_agent_ids: list[str] | None = None,
+        trace_id: str = "",
+    ) -> dict[str, Any]:
+        if not self._use_db:
+            raise RuntimeError("Console message recording requires SQLite storage")
+        session_key = f"console:{session_id}"
+        row = self._db.fetchone(
+            "SELECT id, metadata FROM sessions WHERE key = ?",
+            (session_key,),
+        )
+        if not row:
+            raise KeyError(session_id)
+
+        meta: dict[str, Any] = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                meta = {}
+        conversation_id = self._resolve_active_conversation_id(row["id"], meta)
+        seq_row = self._db.fetchone(
+            "SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM session_messages WHERE session_id = ? AND conversation_id = ?",
+            (row["id"], conversation_id),
+        )
+        seq = int(seq_row["seq"] if seq_row else 0)
+        turn_row = self._db.fetchone(
+            "SELECT COUNT(*) AS count FROM session_messages WHERE session_id = ? AND conversation_id = ? AND role = 'user'",
+            (row["id"], conversation_id),
+        )
+        turn_seq = int(turn_row["count"] if turn_row else 0)
+        now = datetime.now(timezone.utc).isoformat()
+        normalized_from_agent_id = self._normalize_agent_id(from_agent_id)
+        if not normalized_from_agent_id:
+            normalized_from_agent_id = "user" if role == "user" else self._default_responder_agent_id(meta)
+        normalized_mentions = self._normalize_agent_ids(mentioned_agent_ids)
+        self._db.execute(
+            """
+            INSERT INTO session_messages
+                (session_id, seq, conversation_id, trace_id, from_agent_id, mentioned_agent_ids,
+                 role, content, tool_calls, tool_call_id, name, reasoning_content, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                seq,
+                conversation_id,
+                trace_id,
+                normalized_from_agent_id,
+                json.dumps(normalized_mentions, ensure_ascii=False),
+                role,
+                content,
+                None,
+                None,
+                None,
+                None,
+                now,
+            ),
+        )
+        self._db.execute(
+            "UPDATE sessions SET updated_at = ? WHERE key = ?",
+            (now, session_key),
+        )
+        self._db.commit()
+        return {
+            "session_key": session_key,
+            "conversation_id": conversation_id,
+            "seq": seq,
+            "turn_seq": turn_seq if role == "user" else None,
+            "timestamp": now,
+        }
+
+    def next_console_turn_ref(self, session_id: str) -> dict[str, Any]:
+        session_key = f"console:{session_id}"
+        if not self._use_db:
+            return {
+                "session_key": session_key,
+                "conversation_id": "",
+                "turn_seq": None,
+            }
+
+        row = self._db.fetchone(
+            "SELECT id, metadata FROM sessions WHERE key = ?",
+            (session_key,),
+        )
+        if not row:
+            raise KeyError(session_id)
+
+        meta: dict[str, Any] = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                meta = {}
+        conversation_id = self._resolve_active_conversation_id(row["id"], meta)
+        turn_row = self._db.fetchone(
+            """
+            SELECT COUNT(*) AS count
+              FROM session_messages
+             WHERE session_id = ? AND conversation_id = ? AND role = 'user'
+            """,
+            (row["id"], conversation_id),
+        )
+        return {
+            "session_key": session_key,
+            "conversation_id": conversation_id,
+            "turn_seq": int(turn_row["count"] if turn_row else 0),
+        }
+
+    def get_session_default_responder_agent_id(self, session_id: str) -> str:
+        session_key = f"console:{session_id}"
+        if self._use_db:
+            row = self._db.fetchone(
+                "SELECT metadata FROM sessions WHERE key = ?",
+                (session_key,),
+            )
+            if row and row["metadata"]:
+                try:
+                    meta = json.loads(row["metadata"])
+                except json.JSONDecodeError:
+                    meta = {}
+                return self._default_responder_agent_id(meta)
+        return self._default_responder_agent_id()
 
     async def send_message(
         self,
@@ -735,8 +1062,31 @@ class ChatService:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[..., Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        skill_names: list[str] | None = None,
+        skill_contents: dict[str, str] | None = None,
     ) -> str:
         session_key = f"console:{session_id}"
+        mentioned_agent_ids = self._parse_agent_mentions(message)
+        if mentioned_agent_ids:
+            self._merge_session_participants(session_key, mentioned_agent_ids)
+        missing = object()
+        previous_agent_context = getattr(self._agent, "_current_chat_agent_context", missing)
+        previous_skill_names = getattr(self._agent, "_ava_forced_skill_names", missing)
+        previous_skill_contents = getattr(self._agent, "_ava_forced_skill_contents", missing)
+        if self._agent is not None:
+            setattr(
+                self._agent,
+                "_current_chat_agent_context",
+                {
+                    "from_agent_id": "user",
+                    "mentioned_agent_ids": mentioned_agent_ids,
+                    "default_responder_agent_id": self._default_responder_agent_id(),
+                },
+            )
+            if skill_names is not None:
+                setattr(self._agent, "_ava_forced_skill_names", list(skill_names))
+            if skill_contents is not None:
+                setattr(self._agent, "_ava_forced_skill_contents", dict(skill_contents))
         process_task = asyncio.create_task(
             self._agent.process_direct(
                 content=message,
@@ -757,6 +1107,28 @@ class ChatService:
         try:
             response = await process_task
         finally:
+            if self._agent is not None:
+                if previous_agent_context is missing:
+                    try:
+                        delattr(self._agent, "_current_chat_agent_context")
+                    except AttributeError:
+                        pass
+                else:
+                    setattr(self._agent, "_current_chat_agent_context", previous_agent_context)
+                if previous_skill_names is missing:
+                    try:
+                        delattr(self._agent, "_ava_forced_skill_names")
+                    except AttributeError:
+                        pass
+                else:
+                    setattr(self._agent, "_ava_forced_skill_names", previous_skill_names)
+                if previous_skill_contents is missing:
+                    try:
+                        delattr(self._agent, "_ava_forced_skill_contents")
+                    except AttributeError:
+                        pass
+                else:
+                    setattr(self._agent, "_ava_forced_skill_contents", previous_skill_contents)
             if tracked and isinstance(active_tasks, dict):
                 tasks = active_tasks.get(session_key, [])
                 if process_task in tasks:
@@ -764,6 +1136,72 @@ class ChatService:
                 if not tasks:
                     active_tasks.pop(session_key, None)
         return self._normalize_direct_response_content(response)
+
+    def _merge_session_participants(self, session_key: str, agent_ids: list[str]) -> None:
+        if not self._use_db or not agent_ids:
+            return
+        row = self._db.fetchone(
+            "SELECT metadata FROM sessions WHERE key = ?",
+            (session_key,),
+        )
+        if not row:
+            return
+        meta: dict[str, Any] = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                meta = {}
+        default_responder_agent_id = self._default_responder_agent_id(meta)
+        participants = self._normalize_agent_ids(
+            meta.get("participants"),
+            fallback=[default_responder_agent_id],
+        )
+        changed = False
+        for agent_id in agent_ids:
+            if agent_id not in participants:
+                participants.append(agent_id)
+                changed = True
+        if not changed:
+            return
+        meta["participants"] = participants
+        meta["default_responder_agent_id"] = default_responder_agent_id
+        self._db.execute(
+            "UPDATE sessions SET metadata = ?, updated_at = ? WHERE key = ?",
+            (
+                json.dumps(meta, ensure_ascii=False),
+                datetime.now(timezone.utc).isoformat(),
+                session_key,
+            ),
+        )
+        self._db.commit()
+
+    def _default_responder_agent_id(self, metadata: dict[str, Any] | None = None) -> str:
+        if isinstance(metadata, dict):
+            value = metadata.get("default_responder_agent_id") or metadata.get("defaultResponderAgentId")
+            normalized = self._normalize_agent_id(value)
+            if normalized and normalized != "user":
+                return normalized
+
+        for path in (
+            self._sessions_dir.parent / "console" / "console-config.json",
+            self._sessions_dir.parent / "config.json",
+        ):
+            if not path.exists():
+                continue
+            try:
+                parsed = json.loads(path.read_text("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            gateway = parsed.get("gateway") if isinstance(parsed.get("gateway"), dict) else {}
+            console = gateway.get("console") if isinstance(gateway.get("console"), dict) else {}
+            value = console.get("default_responder_agent_id") or console.get("defaultResponderAgentId")
+            normalized = self._normalize_agent_id(value)
+            if normalized and normalized != "user":
+                return normalized
+        return "nanobot"
 
     async def stop_session(self, session_id: str) -> dict[str, Any]:
         session_key = f"console:{session_id}"
@@ -849,6 +1287,176 @@ class ChatService:
             except json.JSONDecodeError:
                 continue
         return messages
+
+    @staticmethod
+    def _estimate_context_tokens(value: Any) -> int:
+        text = ChatService._message_text(value) if not isinstance(value, str) else value
+        if not text:
+            return 0
+        return max(1, (len(text) + 3) // 4)
+
+    def _context_model_limit(self) -> int:
+        config = getattr(self._agent, "config", None)
+        for name in ("model_context_limit", "context_limit", "max_context_tokens"):
+            value = getattr(config, name, None) if config is not None else None
+            if isinstance(value, int) and value > 0:
+                return value
+        return _DEFAULT_CONTEXT_MODEL_LIMIT
+
+    def _active_console_context_rows(self, session_id: str) -> tuple[str, int | None, str, list[dict[str, Any]]]:
+        session_key = f"console:{session_id}"
+        if not self._use_db:
+            rows = [
+                {
+                    "role": item.get("role", ""),
+                    "content": item.get("content", ""),
+                    "timestamp": item.get("timestamp", ""),
+                    "conversation_id": "",
+                }
+                for item in self.get_history(session_id)
+            ]
+            return session_key, None, "", rows
+
+        row = self._db.fetchone(
+            "SELECT id, metadata FROM sessions WHERE key = ?",
+            (session_key,),
+        )
+        if not row:
+            raise KeyError(session_id)
+        meta: dict[str, Any] = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                meta = {}
+        conversation_id = self._resolve_active_conversation_id(row["id"], meta)
+        rows = self._db.fetchall(
+            """SELECT role, content, timestamp, conversation_id
+                 FROM session_messages
+                WHERE session_id = ? AND conversation_id = ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != ''
+                ORDER BY seq, id""",
+            (row["id"], conversation_id),
+        )
+        return session_key, int(row["id"]), conversation_id, [dict(item) for item in rows]
+
+    def get_context_size(self, session_id: str) -> dict[str, Any]:
+        session_key, _numeric_session_id, conversation_id, rows = self._active_console_context_rows(session_id)
+        messages_tokens = sum(self._estimate_context_tokens(row.get("content")) for row in rows)
+        system_tokens = 0
+        recorded_prompt_tokens = 0
+        if self._use_db:
+            token_row = self._db.fetchone(
+                """SELECT COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                          COALESCE(MAX(system_prompt_preview), '') AS system_prompt_preview
+                     FROM token_usage
+                    WHERE session_key = ? AND conversation_id = ?""",
+                (session_key, conversation_id),
+            )
+            if token_row:
+                recorded_prompt_tokens = int(token_row["prompt_tokens"] or 0)
+                system_tokens = self._estimate_context_tokens(token_row["system_prompt_preview"] or "")
+
+        breakdown = {
+            "messages": messages_tokens,
+            "system": system_tokens,
+            "persona": 0,
+            "recorded_prompt": recorded_prompt_tokens,
+        }
+        used_tokens = max(recorded_prompt_tokens, messages_tokens + system_tokens)
+        return {
+            "used_tokens": used_tokens,
+            "model_limit": self._context_model_limit(),
+            "breakdown": breakdown,
+            "conversation_id": conversation_id,
+            "compression_preview": "",
+            "before_after_diff": None,
+        }
+
+    def compress_context(self, session_id: str, *, keep_recent: int = 6) -> dict[str, Any]:
+        session_key, numeric_session_id, conversation_id, rows = self._active_console_context_rows(session_id)
+        before = self.get_context_size(session_id)["used_tokens"]
+        keep_recent = max(2, keep_recent)
+        older = rows[:-keep_recent] if len(rows) > keep_recent else []
+        recent = rows[-keep_recent:] if older else rows
+        summary_lines = []
+        for row in older:
+            text = self._preview_text(row.get("content"))[:120]
+            if text:
+                summary_lines.append(f"- {row.get('role', 'message')}: {text}")
+        summary_text = "已压缩早期上下文：" + ("\n" + "\n".join(summary_lines) if summary_lines else "无早期消息需要压缩。")
+        after_messages = [{"role": "system", "content": summary_text}, *recent]
+        after_tokens = sum(self._estimate_context_tokens(item.get("content")) for item in after_messages)
+        before_after_diff = {
+            "before": rows,
+            "after": after_messages,
+            "summary_text": summary_text,
+            "kept_messages": recent,
+        }
+
+        if self._use_db and numeric_session_id is not None:
+            compressed_at = datetime.now(timezone.utc).isoformat()
+            self._db.execute(
+                """INSERT INTO session_compressions
+                   (session_id, compressed_at, before_tokens, after_tokens, summary_text, before_after_diff)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    numeric_session_id,
+                    compressed_at,
+                    before,
+                    after_tokens,
+                    summary_text,
+                    json.dumps(before_after_diff, ensure_ascii=False),
+                ),
+            )
+            self._db.commit()
+
+        return {
+            "ok": True,
+            "session_key": session_key,
+            "conversation_id": conversation_id,
+            "before_tokens": before,
+            "after_tokens": after_tokens,
+            "used_tokens": after_tokens,
+            "model_limit": self._context_model_limit(),
+            "breakdown": {
+                "messages": after_tokens,
+                "system": self._estimate_context_tokens(summary_text),
+                "persona": 0,
+                "recorded_prompt": 0,
+            },
+            "compression_preview": summary_text,
+            "before_after_diff": before_after_diff,
+            "history": self.list_context_compressions(session_id),
+        }
+
+    def list_context_compressions(self, session_id: str) -> list[dict[str, Any]]:
+        if not self._use_db:
+            return []
+        session_key = f"console:{session_id}"
+        row = self._db.fetchone("SELECT id FROM sessions WHERE key = ?", (session_key,))
+        if not row:
+            return []
+        rows = self._db.fetchall(
+            """SELECT compressed_at, before_tokens, after_tokens, summary_text, before_after_diff
+                 FROM session_compressions
+                WHERE session_id = ?
+                ORDER BY compressed_at DESC""",
+            (row["id"],),
+        )
+        result = []
+        for item in rows:
+            try:
+                diff = json.loads(item["before_after_diff"] or "{}")
+            except json.JSONDecodeError:
+                diff = {}
+            result.append({
+                "compressed_at": item["compressed_at"],
+                "before_tokens": item["before_tokens"],
+                "after_tokens": item["after_tokens"],
+                "summary_text": item["summary_text"],
+                "before_after_diff": diff,
+            })
+        return result
 
     def delete_session(self, session_id: str) -> bool:
         if self._use_db:

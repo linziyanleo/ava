@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from ava.agents.adapter import AgentRuntimeContext
+from ava.agents.process_manager import AgentProcessManager
 from ava.console.services.agent_registry_service import AgentRegistryService
 from ava.storage.database import Database
 
@@ -35,6 +40,73 @@ class _FakeBgStore:
         return f"Task {task_id} cancelled."
 
 
+class _DummyAdapter:
+    name = "dummy"
+    instance_id = "dummy:default"
+    display_name = "Dummy"
+    kind = "test"
+    task_type = "dummy"
+    artifact_type = "text"
+
+    def matches(self, agent_name: str) -> bool:
+        return agent_name in {self.name, self.instance_id}
+
+    def build_snapshot(self, _context, *, active_tasks: int, activity: dict[str, list[dict[str, Any]]]):
+        return {
+            "name": self.name,
+            "instance_id": self.instance_id,
+            "display_name": self.display_name,
+            "kind": self.kind,
+            "status": "running" if active_tasks else "available",
+            "installed": True,
+            "path": "/tmp/dummy",
+            "version": "dummy 1.0",
+            "detail": "",
+            "install_url": "",
+            "active_tasks": active_tasks,
+            "recent_events": activity["events"],
+            "recent_artifacts": activity["artifacts"],
+            "capabilities": {
+                "supports_chat": False,
+                "supports_task": True,
+                "supports_cancel": active_tasks > 0,
+                "supports_restart": False,
+                "supports_streaming": False,
+                "supports_artifacts": False,
+                "max_concurrent_tasks": 1,
+                "supported_artifact_types": ["text"],
+            },
+        }
+
+
+class _LifecycleAdapter(_DummyAdapter):
+    name = "managed"
+    instance_id = "managed:default"
+    display_name = "Managed"
+    task_type = "managed"
+
+    def __init__(self, code: str) -> None:
+        self._code = code
+
+    def get_binary_path(self, _context: AgentRuntimeContext) -> Path | None:
+        return Path(sys.executable)
+
+    def get_launch_args(self) -> list[str]:
+        return ["-c", self._code]
+
+    def get_env(self) -> dict[str, str]:
+        return {}
+
+    def get_config_schema(self) -> dict[str, Any]:
+        return {}
+
+    def get_health_check(self) -> dict[str, Any]:
+        return {"type": "process"}
+
+    def parse_status_output(self, raw: bytes) -> dict[str, Any]:
+        return {"raw": raw.decode("utf-8", errors="replace")}
+
+
 def _make_nanobot_checkout(root: Path) -> Path:
     (root / "nanobot" / "cli").mkdir(parents=True)
     (root / "nanobot" / "config").mkdir(parents=True)
@@ -48,7 +120,7 @@ def test_agent_registry_reports_runtime_and_cli_agents(tmp_path, monkeypatch):
     checkout = _make_nanobot_checkout(tmp_path / "nanobot")
     monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
     monkeypatch.setattr(
-        "ava.console.services.agent_registry_service.shutil.which",
+        "ava.agents.adapter.shutil.which",
         lambda name: f"/usr/local/bin/{name}" if name in {"codex", "claude"} else None,
     )
 
@@ -56,7 +128,7 @@ def test_agent_registry_reports_runtime_and_cli_agents(tmp_path, monkeypatch):
         binary = Path(args[0]).name
         return SimpleNamespace(stdout=f"{binary} 1.2.3\n", stderr="")
 
-    monkeypatch.setattr("ava.console.services.agent_registry_service.subprocess.run", fake_run)
+    monkeypatch.setattr("ava.agents.adapter.subprocess.run", fake_run)
 
     tools = SimpleNamespace(get=lambda name: object() if name == "image_gen" else None)
     service = AgentRegistryService(
@@ -82,6 +154,27 @@ def test_agent_registry_reports_runtime_and_cli_agents(tmp_path, monkeypatch):
     assert by_name["image_gen"]["status"] == "available"
 
 
+def test_agent_registry_accepts_external_adapter(tmp_path):
+    class DummyBgStore(_FakeBgStore):
+        def get_status(self, include_finished: bool = False, task_type: str | None = None):
+            tasks = [{"task_id": "dummy-1", "task_type": "dummy", "status": "running"}]
+            return {"tasks": tasks}
+
+    service = AgentRegistryService(
+        agent_loop=None,
+        workspace=tmp_path / "workspace",
+        bg_store=DummyBgStore(),
+        media_service=None,
+        adapters=[_DummyAdapter()],
+    )
+
+    payload = service.list_agents()
+
+    assert payload["summary"] == {"total": 1, "available": 1, "running": 1}
+    assert payload["agents"][0]["name"] == "dummy"
+    assert payload["agents"][0]["active_tasks"] == 1
+
+
 def test_agent_registry_does_not_treat_runtime_workspace_as_project_root(tmp_path, monkeypatch):
     checkout = tmp_path / "nanobot"
     calls: list[Path | None] = []
@@ -92,10 +185,10 @@ def test_agent_registry_does_not_treat_runtime_workspace_as_project_root(tmp_pat
         return checkout
 
     monkeypatch.setattr(
-        "ava.console.services.agent_registry_service.resolve_nanobot_root",
+        "ava.agents.nanobot.adapter.resolve_nanobot_root",
         fake_resolve_nanobot_root,
     )
-    monkeypatch.setattr("ava.console.services.agent_registry_service.shutil.which", lambda _name: None)
+    monkeypatch.setattr("ava.agents.adapter.shutil.which", lambda _name: None)
     service = AgentRegistryService(
         agent_loop=None,
         workspace=tmp_path / ".ava" / "workspace",
@@ -113,7 +206,7 @@ def test_agent_registry_does_not_treat_runtime_workspace_as_project_root(tmp_pat
 def test_agent_registry_persists_detection_to_db(tmp_path, monkeypatch):
     checkout = _make_nanobot_checkout(tmp_path / "nanobot")
     monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
-    monkeypatch.setattr("ava.console.services.agent_registry_service.shutil.which", lambda _name: None)
+    monkeypatch.setattr("ava.agents.adapter.shutil.which", lambda _name: None)
     db = Database(tmp_path / "ava.db")
 
     service = AgentRegistryService(
@@ -139,9 +232,9 @@ def test_agent_registry_reports_missing_cli(tmp_path, monkeypatch):
         raise RuntimeError("nanobot missing")
 
     monkeypatch.delenv("AVA_NANOBOT_ROOT", raising=False)
-    monkeypatch.setattr("ava.console.services.agent_registry_service.shutil.which", lambda _name: None)
+    monkeypatch.setattr("ava.agents.adapter.shutil.which", lambda _name: None)
     monkeypatch.setattr(
-        "ava.console.services.agent_registry_service.resolve_nanobot_root",
+        "ava.agents.nanobot.adapter.resolve_nanobot_root",
         missing_nanobot_root,
     )
 
@@ -162,7 +255,7 @@ def test_agent_registry_reports_missing_cli(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_registry_cancels_tasks_by_agent(tmp_path, monkeypatch):
-    monkeypatch.setattr("ava.console.services.agent_registry_service.shutil.which", lambda _name: None)
+    monkeypatch.setattr("ava.agents.adapter.shutil.which", lambda _name: None)
     bg_store = _FakeBgStore()
     service = AgentRegistryService(
         agent_loop=None,
@@ -175,3 +268,90 @@ async def test_agent_registry_cancels_tasks_by_agent(tmp_path, monkeypatch):
 
     assert result["cancelled"] == 1
     assert bg_store.cancelled == ["codex-1"]
+
+
+@pytest.mark.asyncio
+async def test_agent_registry_cancels_tasks_for_external_adapter(tmp_path):
+    class DummyBgStore(_FakeBgStore):
+        def get_status(self, include_finished: bool = False, task_type: str | None = None):
+            return {"tasks": [{"task_id": "dummy-1", "task_type": "dummy", "status": "running"}]}
+
+    bg_store = DummyBgStore()
+    service = AgentRegistryService(
+        agent_loop=None,
+        workspace=tmp_path / "workspace",
+        bg_store=bg_store,
+        media_service=None,
+        adapters=[_DummyAdapter()],
+    )
+
+    result = await service.cancel_agent_tasks("dummy")
+
+    assert result["cancelled"] == 1
+    assert bg_store.cancelled == ["dummy-1"]
+
+
+def test_agent_registry_process_lifecycle_start_stop_and_events(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, Any]] = []
+    manager = AgentProcessManager(grace_seconds=0.2, on_event=events.append)
+    service = AgentRegistryService(
+        agent_loop=None,
+        workspace=workspace,
+        process_manager=manager,
+        lifecycle_events=events,
+        adapters=[_LifecycleAdapter("import time; time.sleep(60)")],
+    )
+
+    try:
+        started = service.start_agent("managed")
+        assert started["agent"] == "managed"
+        assert started["agent_id"] == "managed:default"
+        assert manager.healthcheck("managed:default").running is True
+
+        payload = service.list_agents()
+        agent = payload["agents"][0]
+        assert agent["status"] == "running"
+        assert agent["capabilities"]["supports_restart"] is True
+        assert agent["recent_events"][0]["event"] == "started"
+
+        stopped = service.stop_agent("managed")
+        assert stopped["running"] is False
+
+        payload = service.list_agents()
+        assert payload["agents"][0]["recent_events"][0]["event"] == "stopped"
+    finally:
+        manager.stop_all()
+
+
+def test_agent_registry_surfaces_exited_process_for_frontend(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    events: list[dict[str, Any]] = []
+    manager = AgentProcessManager(grace_seconds=0.2, on_event=events.append)
+    service = AgentRegistryService(
+        agent_loop=None,
+        workspace=workspace,
+        process_manager=manager,
+        lifecycle_events=events,
+        adapters=[_LifecycleAdapter("import sys; sys.exit(7)")],
+    )
+
+    service.start_agent("managed")
+    try:
+        for _ in range(20):
+            status = service.healthcheck_agent("managed")
+            if not status["running"]:
+                break
+            time.sleep(0.05)
+
+        assert status["running"] is False
+        assert status["returncode"] == 7
+
+        payload = service.list_agents()
+        event = payload["agents"][0]["recent_events"][0]
+        assert event["event"] == "exited"
+        assert event["detail"] == "returncode=7"
+    finally:
+        manager.stop_all()

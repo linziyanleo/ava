@@ -4,18 +4,179 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from pathlib import Path
 
 from loguru import logger
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from nanobot.bus.events import OutboundMessage
 
+from ava.agents.nanobot.skill_matcher import natural_language_skill_matching, skill_match_narration
 from ava.console import auth
 from ava.console.middleware import get_client_ip
-from ava.console.models import ChatSessionCreateRequest, UserInfo
+from ava.console.models import ChatSessionCreateRequest, ChatSessionUpdateRequest, UserInfo
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+messages_router = APIRouter(prefix="/api", tags=["chat"])
 
 _EMPTY_LISTENER_CONTENTS = {"(empty)", "[empty message]"}
+_DIRECT_TASK_MENTION_RE = re.compile(
+    r"(^|\s)@(codex|claude_code|claude-code)(?=\s|$)",
+    re.IGNORECASE,
+)
+_DIRECT_TASK_AGENT_ALIASES = {
+    "codex": "codex",
+    "claude_code": "claude_code",
+    "claude-code": "claude_code",
+}
+_SKILL_TRIGGER_RE = re.compile(r"^@([A-Za-z0-9_-]+)(?:\s+([\s\S]*))?$")
+
+
+def _extract_direct_task_mention(content: str) -> tuple[str, str, list[str]] | None:
+    match = _DIRECT_TASK_MENTION_RE.search(content)
+    if not match:
+        return None
+    task_type = _DIRECT_TASK_AGENT_ALIASES[match.group(2).lower()]
+    prompt = re.sub(r"\s+", " ", content[: match.start()] + " " + content[match.end() :]).strip()
+    if not prompt:
+        return None
+    mentions = []
+    for item in _DIRECT_TASK_MENTION_RE.finditer(content):
+        agent_id = _DIRECT_TASK_AGENT_ALIASES[item.group(2).lower()]
+        if agent_id not in mentions:
+            mentions.append(agent_id)
+    return task_type, prompt, mentions
+
+
+def _parse_skill_trigger(content: str) -> tuple[str, str] | None:
+    match = _SKILL_TRIGGER_RE.match(content.strip())
+    if not match:
+        return None
+    skill_name = match.group(1).strip()
+    if not skill_name:
+        return None
+    if skill_name.lower() in _DIRECT_TASK_AGENT_ALIASES:
+        return None
+    return skill_name, (match.group(2) or "").strip()
+
+
+def _read_skill_content(skill: dict[str, object]) -> str:
+    raw_path = skill.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return ""
+    return Path(raw_path).read_text(encoding="utf-8")
+
+
+async def _route_skill_trigger(
+    *,
+    svc_chat,
+    skills_service,
+    session_id: str,
+    skill_name: str,
+    prompt: str,
+    user_id: str,
+    on_progress,
+    on_stream,
+    on_stream_end,
+) -> str:
+    skill = skills_service.get_skill(skill_name) if skills_service is not None else None
+    if not skill:
+        raise KeyError(skill_name)
+    skill_content = _read_skill_content(skill)
+    return await svc_chat.send_message(
+        session_id=session_id,
+        message=prompt or f"Run skill {skill_name}.",
+        user_id=user_id,
+        on_progress=on_progress,
+        on_stream=on_stream,
+        on_stream_end=on_stream_end,
+        skill_names=[skill_name],
+        skill_contents={skill_name: skill_content},
+    )
+
+
+def _natural_language_skill_matching_enabled(svc) -> bool:
+    config_service = getattr(svc, "config", None)
+    if config_service is None:
+        return True
+    try:
+        raw = config_service.read_config("console-config.json", mask=False)
+        payload = json.loads(raw.get("content") or "{}")
+    except Exception:
+        return True
+    skills_config = payload.get("skills") if isinstance(payload, dict) else None
+    if not isinstance(skills_config, dict):
+        return True
+    return skills_config.get("natural_language_matching", True) is not False
+
+
+def _register_skill_chain(
+    svc,
+    *,
+    session_key: str,
+    skill_name: str,
+    prompt: str,
+    matched_by: str,
+    skill_match_confidence: float,
+    origin_conversation_id: str = "",
+    origin_turn_seq: int | None = None,
+) -> tuple[str, str]:
+    store = getattr(svc, "workflow_store", None)
+    if store is None:
+        return "", ""
+    chain = store.register_chain(
+        title=f"Skill: {skill_name}",
+        metadata={
+            "session_key": session_key,
+            "skill_name": skill_name,
+            "matched_by": matched_by,
+            "skill_match_confidence": skill_match_confidence,
+            "origin_conversation_id": origin_conversation_id,
+            "origin_turn_seq": origin_turn_seq,
+        },
+    )
+    task_id = f"skill-{chain.chain_id[:8]}"
+    store.upsert_node(
+        chain_id=chain.chain_id,
+        task_id=task_id,
+        status="running",
+        node_kind="skill",
+        title=skill_name,
+        metadata={
+            "prompt": prompt,
+            "skill_name": skill_name,
+            "matched_by": matched_by,
+            "skill_match_confidence": skill_match_confidence,
+            "origin_conversation_id": origin_conversation_id,
+            "origin_turn_seq": origin_turn_seq,
+        },
+    )
+    return chain.chain_id, task_id
+
+
+def _update_skill_chain_status(svc, task_id: str, status: str) -> None:
+    store = getattr(svc, "workflow_store", None)
+    if store is not None and task_id:
+        store.update_node_status(task_id, status)
+
+
+def _build_direct_task_prompt(prompt: str, history: list[dict[str, object]]) -> str:
+    if not history:
+        return prompt
+    lines: list[str] = []
+    for item in history:
+        role = str(item.get("role") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if role and content:
+            lines.append(f"{role}: {content}")
+    if not lines:
+        return prompt
+    return (
+        "Conversation context:\n"
+        + "\n".join(lines)
+        + "\n\nCurrent @agent request:\n"
+        + prompt
+    )
 
 
 def _listener_message_to_payload(msg: OutboundMessage) -> dict[str, object]:
@@ -45,7 +206,7 @@ def _get_chat_service(user: UserInfo):
     return svc
 
 @router.get("/sessions")
-async def list_sessions(user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester"))):
+async def list_sessions(user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
     return _get_chat_service(user).list_sessions(user.username)
 
 @router.post("/sessions")
@@ -53,7 +214,26 @@ async def create_session(
     body: ChatSessionCreateRequest,
     user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
 ):
-    return _get_chat_service(user).create_session(user.username, body.title)
+    return _get_chat_service(user).create_session(
+        user.username,
+        body.title,
+        participants=body.participants,
+    )
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(
+    session_id: str,
+    body: ChatSessionUpdateRequest,
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+):
+    try:
+        return _get_chat_service(user).update_session(
+            session_id,
+            participants=body.participants,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.post("/sessions/{session_id}/stop")
@@ -91,9 +271,39 @@ async def delete_session(
 @router.get("/sessions/{session_id}/history")
 async def get_history(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     return _get_chat_service(user).get_history(session_id)
+
+
+@router.get("/sessions/{session_id}/context-size")
+async def get_context_size(
+    session_id: str,
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+):
+    try:
+        return _get_chat_service(user).get_context_size(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.post("/sessions/{session_id}/compress")
+async def compress_context(
+    session_id: str,
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+):
+    try:
+        return _get_chat_service(user).compress_context(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.get("/sessions/{session_id}/compressions")
+async def list_context_compressions(
+    session_id: str,
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+):
+    return _get_chat_service(user).list_context_compressions(session_id)
 
 
 @router.get("/sessions/{session_key:path}/context-preview")
@@ -101,7 +311,7 @@ async def get_context_preview(
     session_key: str,
     full: bool = Query(False, description="Return full content instead of truncated preview"),
     reveal: bool = Query(False, description="Disable redaction for preview text"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     try:
         return _get_chat_service(user).get_context_preview(
@@ -115,13 +325,20 @@ async def get_context_preview(
         raise HTTPException(status_code=503, detail=str(exc))
 
 @router.get("/messages")
+@messages_router.get("/messages")
 async def get_messages(
-    session_key: str = Query(..., description="Session key (e.g. telegram:12345)"),
+    session_key: str | None = Query(None, description="Session key (e.g. telegram:12345)"),
     conversation_id: str | None = Query(None, description="Conversation id within the session; omit to use active conversation"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    trace_id: str | None = Query(None, description="Trace id to locate messages across sessions"),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Full message history for any session, including tool_calls and reasoning."""
-    return _get_chat_service(user).get_messages(session_key, conversation_id=conversation_id)
+    svc = _get_chat_service(user)
+    if trace_id:
+        return svc.get_messages_by_trace_id(trace_id)
+    if not session_key:
+        raise HTTPException(status_code=400, detail="session_key or trace_id is required")
+    return svc.get_messages(session_key, conversation_id=conversation_id)
 
 
 @router.post("/uploads")
@@ -166,7 +383,7 @@ async def upload_chat_files(
 @router.get("/conversations")
 async def list_conversations(
     session_key: str = Query(..., description="Session key (e.g. telegram:12345)"),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
 ):
     """Conversation summaries for one session_key."""
     return _get_chat_service(user).list_conversations(session_key)
@@ -337,6 +554,219 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                         metadata=metadata,
                     ),
                 )
+
+            skill_trigger = _parse_skill_trigger(content) if not media else None
+            if skill_trigger:
+                skill_name, skill_prompt = skill_trigger
+                try:
+                    response = await _route_skill_trigger(
+                        svc_chat=svc_chat,
+                        skills_service=getattr(svc, "skills", None),
+                        session_id=session_id,
+                        skill_name=skill_name,
+                        prompt=skill_prompt,
+                        user_id=user.username,
+                        on_progress=on_progress,
+                        on_stream=on_stream,
+                        on_stream_end=on_stream_end,
+                    )
+                    await _dispatch_listener_event(response, event_type="complete")
+                except KeyError:
+                    error = f"未注册的 skill: {skill_name}"
+                    try:
+                        svc_chat.record_console_message(
+                            session_id,
+                            role="user",
+                            content=content,
+                            from_agent_id="user",
+                        )
+                        svc_chat.record_console_message(
+                            session_id,
+                            role="assistant",
+                            content=error,
+                            from_agent_id=svc_chat.get_session_default_responder_agent_id(session_id),
+                        )
+                    except Exception as exc:
+                        logger.debug("Failed to record missing skill response for {}: {}", session_id, exc)
+                    await _dispatch_listener_event(error, event_type="complete")
+                except Exception as exc:
+                    logger.warning("Explicit @skill dispatch failed for {}: {}", session_id, exc)
+                    await _dispatch_listener_event(f"Error: {str(exc)}", event_type="complete")
+                continue
+
+            direct_task = _extract_direct_task_mention(content) if not media else None
+            if direct_task is None and not media and not content.strip().startswith("/"):
+                default_responder = svc_chat.get_session_default_responder_agent_id(session_id)
+                if default_responder in {"codex", "claude_code"}:
+                    direct_task = (default_responder, content.strip(), [])
+            if direct_task:
+                task_type, prompt, mentioned_agent_ids = direct_task
+                record = svc_chat.record_console_message(
+                    session_id,
+                    role="user",
+                    content=content,
+                    from_agent_id="user",
+                    mentioned_agent_ids=mentioned_agent_ids,
+                )
+                try:
+                    from ava.console.services.direct_task_service import DirectTaskService
+
+                    agent_loop = getattr(svc_chat, "_agent", None)
+                    bg_store = getattr(agent_loop, "bg_tasks", None) if agent_loop else None
+                    if not agent_loop or not bg_store:
+                        raise RuntimeError("Background task runtime unavailable")
+                    sessions_dir = getattr(svc_chat, "_sessions_dir", None)
+                    workspace_root = sessions_dir.parent if sessions_dir else Path.cwd()
+                    result = await DirectTaskService(
+                        agent_loop=agent_loop,
+                        workspace=workspace_root,
+                        bg_store=bg_store,
+                        token_stats=svc.token_stats,
+                        media_service=svc.media,
+                        config_service=svc.config,
+                    ).submit(
+                        task_type=task_type,
+                        prompt=_build_direct_task_prompt(prompt, svc_chat.get_history(session_id)),
+                        session_key=session_key,
+                        conversation_id=record["conversation_id"],
+                        turn_seq=record["turn_seq"],
+                        params={"mode": "standard"},
+                    )
+                    task_id = str(result["task_id"])
+                    svc_chat.record_console_message(
+                        session_id,
+                        role="assistant",
+                        content=(
+                            f"[Background Task {task_id} QUEUED]\n"
+                            f"Type: {task_type} | Duration: 0ms\n\n"
+                            f"{prompt[:500]}"
+                        ),
+                        from_agent_id=task_type,
+                    )
+                    await websocket.send_json({
+                        "type": "direct_task",
+                        "task": {
+                            "type": "direct_task",
+                            "task_id": task_id,
+                            "task_type": result["task_type"],
+                            "session_key": session_key,
+                            "prompt_preview": prompt[:200],
+                            "status": result.get("status") or "queued",
+                            "started_at": None,
+                            "elapsed_ms": 0,
+                            "result_preview": "",
+                            "error_message": "",
+                            "origin_conversation_id": record["conversation_id"],
+                            "origin_turn_seq": record["turn_seq"],
+                            "trace_id": result.get("trace_id"),
+                        },
+                    })
+                    await _dispatch_listener_event("", event_type="complete")
+                except Exception as exc:
+                    logger.warning("Direct @agent dispatch failed for {}: {}", session_id, exc)
+                    svc_chat.record_console_message(
+                        session_id,
+                        role="assistant",
+                        content=f"Error: {str(exc)}",
+                        from_agent_id=task_type,
+                    )
+                    await _dispatch_listener_event(f"Error: {str(exc)}", event_type="complete")
+                continue
+
+            if not media and not content.strip().startswith(("@", "/")):
+                default_responder = svc_chat.get_session_default_responder_agent_id(session_id)
+                if default_responder == "nanobot":
+                    try:
+                        skill_match = natural_language_skill_matching(
+                            content,
+                            getattr(svc.skills, "list_skills")(),
+                            enabled=_natural_language_skill_matching_enabled(svc),
+                        )
+                    except Exception as exc:
+                        logger.debug("Natural language skill matching failed for {}: {}", session_id, exc)
+                        skill_match = None
+                    if skill_match:
+                        turn_ref = svc_chat.next_console_turn_ref(session_id)
+                        chain_id, task_id = _register_skill_chain(
+                            svc,
+                            session_key=session_key,
+                            skill_name=skill_match.skill_name,
+                            prompt=content,
+                            matched_by=skill_match.matched_by,
+                            skill_match_confidence=skill_match.confidence,
+                            origin_conversation_id=str(turn_ref["conversation_id"] or ""),
+                            origin_turn_seq=turn_ref["turn_seq"],
+                        )
+                        if chain_id and task_id:
+                            await websocket.send_json({
+                                "type": "direct_task",
+                                "task": {
+                                    "type": "direct_task",
+                                    "task_id": task_id,
+                                    "task_type": "skill",
+                                    "session_key": session_key,
+                                    "prompt_preview": content[:200],
+                                    "status": "running",
+                                    "started_at": None,
+                                    "elapsed_ms": 0,
+                                    "result_preview": "",
+                                    "error_message": "",
+                                    "origin_conversation_id": turn_ref["conversation_id"],
+                                    "origin_turn_seq": turn_ref["turn_seq"],
+                                    "trace_id": "",
+                                    "chain_id": chain_id,
+                                    "node_kind": "skill",
+                                    "skill_name": skill_match.skill_name,
+                                    "matched_by": "natural_language",
+                                },
+                            })
+                        await _dispatch_listener_event(
+                            skill_match_narration(skill_match, content),
+                            event_type="progress",
+                            tool_hint=True,
+                        )
+                        try:
+                            response = await _route_skill_trigger(
+                                svc_chat=svc_chat,
+                                skills_service=getattr(svc, "skills", None),
+                                session_id=session_id,
+                                skill_name=skill_match.skill_name,
+                                prompt=content,
+                                user_id=user.username,
+                                on_progress=on_progress,
+                                on_stream=on_stream,
+                                on_stream_end=on_stream_end,
+                            )
+                            _update_skill_chain_status(svc, task_id, "succeeded")
+                            if chain_id and task_id:
+                                await websocket.send_json({
+                                    "type": "direct_task",
+                                    "task": {
+                                        "type": "direct_task",
+                                        "task_id": task_id,
+                                        "task_type": "skill",
+                                        "session_key": session_key,
+                                        "prompt_preview": content[:200],
+                                        "status": "succeeded",
+                                        "started_at": None,
+                                        "elapsed_ms": 0,
+                                        "result_preview": response[:200],
+                                        "error_message": "",
+                                        "origin_conversation_id": turn_ref["conversation_id"],
+                                        "origin_turn_seq": turn_ref["turn_seq"],
+                                        "trace_id": "",
+                                        "chain_id": chain_id,
+                                        "node_kind": "skill",
+                                        "skill_name": skill_match.skill_name,
+                                        "matched_by": "natural_language",
+                                    },
+                                })
+                            await _dispatch_listener_event(response, event_type="complete")
+                        except Exception as exc:
+                            _update_skill_chain_status(svc, task_id, "failed")
+                            logger.warning("Natural language skill dispatch failed for {}: {}", session_id, exc)
+                            await _dispatch_listener_event(f"Error: {str(exc)}", event_type="complete")
+                        continue
 
             try:
                 response = await svc_chat.send_message(

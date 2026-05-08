@@ -155,8 +155,22 @@ def apply_context_patch() -> str:
             except Exception as exc:
                 logger.warning("HistoryCompressor failed, using summarized history: {}", exc)
 
+        forced_skill_names = getattr(loop, "_ava_forced_skill_names", None) if loop else None
+        if forced_skill_names and not kwargs.get("skill_names"):
+            kwargs["skill_names"] = list(forced_skill_names)
+
         # 3. 调用原始 build_messages
         messages = original_build(self, history, current_message, **kwargs)
+
+        forced_skill_contents = getattr(loop, "_ava_forced_skill_contents", None) if loop else None
+        if forced_skill_contents and messages and messages[0].get("role") == "system":
+            skill_blocks = [
+                f"## {name}\n\n{content}"
+                for name, content in forced_skill_contents.items()
+                if name and content
+            ]
+            if skill_blocks:
+                messages[0]["content"] += "\n\n# Explicit Skill Trigger\n\n" + "\n\n".join(skill_blocks)
 
         # 4. 注入分类记忆到系统提示词
         cat_mem = getattr(loop, "categorized_memory", None) if loop else None

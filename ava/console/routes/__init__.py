@@ -10,10 +10,12 @@ from ava.console.routes import (
     direct_task_routes,
     file_routes,
     gateway_routes,
+    lan_access_routes,
     media_routes,
     skills_routes,
     token_routes,
     user_routes,
+    workflow_routes,
 )
 
 __all__ = [
@@ -26,8 +28,10 @@ __all__ = [
     "direct_task_routes",
     "file_routes",
     "gateway_routes",
+    "lan_access_routes",
     "media_routes",
     "skills_routes",
     "token_routes",
     "user_routes",
+    "workflow_routes",
 ]
