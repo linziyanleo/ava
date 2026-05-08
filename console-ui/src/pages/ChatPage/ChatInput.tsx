@@ -1,10 +1,10 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { FileText, Plus, Send, X } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect, useMemo, type CSSProperties } from 'react'
+import { Bot, FileText, Plus, Puzzle, Send, X } from 'lucide-react'
 import { InputActionMenu } from './InputActionMenu'
 import type { ChatCommand } from './commands'
 import { findCommandsByPrefix } from './commands'
-import { ImageGenPanel } from './ImageGenPanel'
-import type { ChatComposePayload, DirectTaskSubmitParams, DirectTaskType } from './types'
+import type { ChatComposePayload, ChatFileUpload, DirectTaskSubmitParams, DirectTaskType } from './types'
+import { api } from '../../api/client'
 
 interface ChatInputProps {
   onSend: (payload: ChatComposePayload) => Promise<void> | void
@@ -21,14 +21,34 @@ interface PendingAttachment {
   isImage: boolean
 }
 
+interface SkillSummary {
+  name: string
+  source?: string
+  enabled?: boolean
+  description?: string
+}
+
 const MAX_HEIGHT = 200
 const MAX_ATTACHMENTS = 4
+const SKILL_TRIGGER_TEMPLATE = '@skill_name'
+const IMAGE_FILE_EXTENSION_RE = /\.(png|jpe?g|webp|gif|avif)$/i
+const AGENT_MENTIONS = [
+  { id: 'nanobot', label: 'Nanobot' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'claude_code', label: 'Claude Code' },
+]
+
+function filterSkillSuggestions(skills: SkillSummary[], query: string): SkillSummary[] {
+  return skills
+    .filter((skill) => skill.enabled !== false && skill.name.toLowerCase().startsWith(query.toLowerCase()))
+    .slice(0, 8)
+}
 
 function parseDirectTaskCommand(text: string): { taskType: DirectTaskType; prompt: string } | null {
-  const match = text.match(/^\/(codex|claude-code)(?:\s+([\s\S]*))?$/)
+  const match = text.match(/^\/(codex|claude-code|image-gen)(?:\s+([\s\S]*))?$/)
   if (!match) return null
   return {
-    taskType: match[1] === 'claude-code' ? 'claude_code' : 'codex',
+    taskType: match[1] === 'claude-code' ? 'claude_code' : match[1] === 'image-gen' ? 'image_gen' : 'codex',
     prompt: (match[2] || '').trim(),
   }
 }
@@ -70,6 +90,10 @@ function normalizeAttachmentFile(file: File, index: number, fallbackNamePrefix: 
   return new File([file], `${fallbackNamePrefix}-${Date.now()}-${index}.${extension}`, { type: file.type })
 }
 
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/') || IMAGE_FILE_EXTENSION_RE.test(file.name)
+}
+
 function formatFileSize(size: number): string {
   if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
   if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`
@@ -82,9 +106,16 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
   const [pasteError, setPasteError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [slashOpen, setSlashOpen] = useState(false)
-  const [imageGenOpen, setImageGenOpen] = useState(false)
+  const [skills, setSkills] = useState<SkillSummary[]>([])
   const [activeCommandIndex, setActiveCommandIndex] = useState(0)
+  const [activeAgentIndex, setActiveAgentIndex] = useState(0)
+  const [activeSkillIndex, setActiveSkillIndex] = useState(0)
+  const [agentSuggestDismissedFor, setAgentSuggestDismissedFor] = useState('')
+  const [skillSuggestDismissedFor, setSkillSuggestDismissedFor] = useState('')
+  const [keyboardInset, setKeyboardInset] = useState(0)
+  const [localSubmitting, setLocalSubmitting] = useState(false)
   const isComposingRef = useRef(false)
+  const localSubmittingRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const attachmentsRef = useRef<PendingAttachment[]>([])
@@ -95,6 +126,29 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
     [input, slashOpen],
   )
   const slashSuggestOpen = slashOpen && slashCommands.length > 0
+  const skillTriggerQuery = useMemo(() => {
+    const match = input.match(/^@([A-Za-z0-9_-]*)$/)
+    return match ? match[1] : null
+  }, [input])
+  const skillSuggestions = useMemo(
+    () => (skillTriggerQuery == null || slashSuggestOpen ? [] : filterSkillSuggestions(skills, skillTriggerQuery)),
+    [skills, skillTriggerQuery, slashSuggestOpen],
+  )
+  const skillSuggestOpen = skillSuggestions.length > 0 && skillSuggestDismissedFor !== input
+  const mentionQuery = useMemo(() => {
+    if (input.startsWith('@')) return null
+    const match = input.match(/(?:^|\s)@([A-Za-z0-9_-]*)$/)
+    return match ? match[1].toLowerCase() : null
+  }, [input])
+  const agentSuggestions = useMemo(() => {
+    if (mentionQuery == null || slashSuggestOpen) return []
+    return AGENT_MENTIONS.filter((agent) => (
+      agent.id.toLowerCase().startsWith(mentionQuery)
+      || agent.label.toLowerCase().replace(/\s+/g, '_').startsWith(mentionQuery)
+    ))
+  }, [mentionQuery, slashSuggestOpen])
+  const agentSuggestOpen = agentSuggestions.length > 0 && agentSuggestDismissedFor !== input
+  const busy = sendDisabled || localSubmitting
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current
@@ -107,6 +161,39 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
   useEffect(() => {
     adjustHeight()
   }, [input, adjustHeight])
+
+  useEffect(() => {
+    if (!isMobile || typeof window === 'undefined' || !window.visualViewport) {
+      setKeyboardInset(0)
+      return
+    }
+    const viewport = window.visualViewport
+    const updateKeyboardInset = () => {
+      const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      setKeyboardInset(Math.round(inset))
+    }
+    updateKeyboardInset()
+    viewport.addEventListener('resize', updateKeyboardInset)
+    viewport.addEventListener('scroll', updateKeyboardInset)
+    return () => {
+      viewport.removeEventListener('resize', updateKeyboardInset)
+      viewport.removeEventListener('scroll', updateKeyboardInset)
+    }
+  }, [isMobile])
+
+  useEffect(() => {
+    let disposed = false
+    api<{ skills: SkillSummary[] }>('/skills/list')
+      .then((response) => {
+        if (!disposed) setSkills(response.skills || [])
+      })
+      .catch(() => {
+        if (!disposed) setSkills([])
+      })
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -127,7 +214,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
   const closeActionMenus = useCallback(() => {
     setMenuOpen(false)
     setSlashOpen(false)
-    setImageGenOpen(false)
+    setSkillSuggestDismissedFor('')
     focusTextarea()
   }, [focusTextarea])
 
@@ -147,6 +234,29 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
     setActiveCommandIndex(0)
   }, [])
 
+  const insertAgentMention = useCallback((agentId: string) => {
+    setInput((current) => current.replace(/(^|\s)@[A-Za-z0-9_-]*$/, `$1@${agentId} `))
+    setActiveAgentIndex(0)
+    requestAnimationFrame(() => {
+      focusTextarea()
+      adjustHeight()
+    })
+  }, [adjustHeight, focusTextarea])
+
+  const insertSkillTrigger = useCallback((skillName: string) => {
+    setInput(`@${skillName} `)
+    setActiveSkillIndex(0)
+    setSkillSuggestDismissedFor('')
+    requestAnimationFrame(() => {
+      focusTextarea()
+      adjustHeight()
+    })
+  }, [adjustHeight, focusTextarea])
+
+  const onSkillTriggerSelect = useCallback((skillName: string) => {
+    insertSkillTrigger(skillName)
+  }, [insertSkillTrigger])
+
   const addAttachmentsFromFiles = useCallback((files: File[], fallbackNamePrefix: string) => {
     if (files.length === 0) return
 
@@ -160,7 +270,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
 
       const next = files.slice(0, remainingSlots).map((file, index) => {
         const normalized = normalizeAttachmentFile(file, index, fallbackNamePrefix)
-        const isImage = normalized.type.startsWith('image/')
+        const isImage = isImageFile(normalized)
         return {
           id: `${Date.now()}-${index}-${normalized.name}`,
           file: normalized,
@@ -176,6 +286,49 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
       return [...prev, ...next]
     })
   }, [])
+
+  const clearComposer = useCallback(() => {
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl)
+      }
+    }
+    setAttachments([])
+    setInput('')
+    setPasteError('')
+    setMenuOpen(false)
+    setSlashOpen(false)
+    setSkillSuggestDismissedFor('')
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.overflowY = 'hidden'
+      }
+    })
+  }, [])
+
+  const uploadImageGenReference = async (): Promise<string | null> => {
+    if (attachments.length === 0) return null
+    if (attachments.length > 1) {
+      throw new Error('/image-gen 目前只支持 1 个 reference image')
+    }
+    const attachment = attachments[0]
+    if (!attachment.isImage) {
+      throw new Error('/image-gen reference 必须是图片文件')
+    }
+    const formData = new FormData()
+    formData.append('files', attachment.file, attachment.file.name)
+    const response = await api<{ uploads: ChatFileUpload[] }>('/chat/uploads', {
+      method: 'POST',
+      body: formData,
+    })
+    const upload = response.uploads?.[0]
+    const referencePath = upload?.path || upload?.media_path
+    if (!referencePath) {
+      throw new Error('上传 reference image 后没有返回文件路径')
+    }
+    return referencePath
+  }
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     let pastedFiles = Array.from(e.clipboardData?.files || [])
@@ -193,7 +346,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
 
   const handleSend = async () => {
     const text = input.trim()
-    if ((!text && attachments.length === 0) || sendDisabled) return
+    if ((!text && attachments.length === 0) || sendDisabled || localSubmittingRef.current) return
     const directTask = parseDirectTaskCommand(text)
     if (directTask) {
       if (!directTask.prompt) {
@@ -201,61 +354,61 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
         return
       }
       if (attachments.length > 0) {
-        setPasteError('Direct task commands do not support attachments')
-        return
+        if (directTask.taskType !== 'image_gen') {
+          setPasteError('Direct task commands do not support attachments')
+          return
+        }
       }
+      localSubmittingRef.current = true
+      setLocalSubmitting(true)
       try {
+        const referenceImage = directTask.taskType === 'image_gen' ? await uploadImageGenReference() : null
         await onSubmitDirectTask({
           task_type: directTask.taskType,
           prompt: directTask.prompt,
-          params: { mode: 'standard' },
+          params: directTask.taskType === 'image_gen'
+            ? (referenceImage ? { reference_image: referenceImage } : {})
+            : { mode: 'standard' },
         })
-        setInput('')
-        setPasteError('')
-        setMenuOpen(false)
-        setSlashOpen(false)
+        clearComposer()
       } catch (err) {
         console.error('Failed to submit direct task:', err)
+        setPasteError(err instanceof Error ? err.message : 'Failed to submit direct task')
         return
+      } finally {
+        localSubmittingRef.current = false
+        setLocalSubmitting(false)
       }
       return
     }
+    localSubmittingRef.current = true
+    setLocalSubmitting(true)
     try {
       await onSend({
         text,
         attachments: attachments.map((item) => item.file),
       })
-      for (const attachment of attachments) {
-        if (attachment.previewUrl) {
-          URL.revokeObjectURL(attachment.previewUrl)
-        }
-      }
-      setAttachments([])
-      setInput('')
-      setPasteError('')
-      setMenuOpen(false)
-      setSlashOpen(false)
+      clearComposer()
     } catch (err) {
       console.error('Failed to send message:', err)
       return
+    } finally {
+      localSubmittingRef.current = false
+      setLocalSubmitting(false)
     }
-
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.overflowY = 'hidden'
-      }
-    })
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = e.target.value
     setInput(nextInput)
+    setAgentSuggestDismissedFor('')
+    setSkillSuggestDismissedFor('')
+    setActiveSkillIndex(0)
     updateSlashSuggest(nextInput)
   }
 
   const handleRunCommand = useCallback(async (command: ChatCommand) => {
-    if (sendDisabled && !command.runWhenBusy) {
+    if (busy && !command.runWhenBusy) {
       focusTextarea()
       return
     }
@@ -266,7 +419,6 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
           send: onSend,
           stopCurrentTurn: onStopCurrentTurn,
           submitDirectTask: onSubmitDirectTask,
-          openImageGenPanel: () => setImageGenOpen(true),
           setInput,
           closeMenu: closeActionMenus,
         })
@@ -286,7 +438,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
     } finally {
       focusTextarea()
     }
-  }, [closeActionMenus, focusTextarea, input, onSend, onStopCurrentTurn, onSubmitDirectTask, sendDisabled])
+  }, [busy, closeActionMenus, focusTextarea, input, onSend, onStopCurrentTurn, onSubmitDirectTask])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isComposingRef.current) return
@@ -327,13 +479,80 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
       }
     }
 
+    if (skillSuggestOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveSkillIndex((index) => (index + 1) % skillSuggestions.length)
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveSkillIndex((index) => (index - 1 + skillSuggestions.length) % skillSuggestions.length)
+        return
+      }
+
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        const skill = skillSuggestions[activeSkillIndex]
+        if (skill) {
+          onSkillTriggerSelect(skill.name)
+        }
+        return
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSkillSuggestDismissedFor(input)
+        setActiveSkillIndex(0)
+        focusTextarea()
+        return
+      }
+    }
+
+    if (agentSuggestOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActiveAgentIndex((index) => (index + 1) % agentSuggestions.length)
+        return
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setActiveAgentIndex((index) => (index - 1 + agentSuggestions.length) % agentSuggestions.length)
+        return
+      }
+
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        const agent = agentSuggestions[activeAgentIndex]
+        if (agent) {
+          insertAgentMention(agent.id)
+        }
+        return
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setAgentSuggestDismissedFor(input)
+        setActiveAgentIndex(0)
+        focusTextarea()
+        return
+      }
+    }
+
     if (e.key === 'Enter' && e.shiftKey) {
       return
     }
   }
 
+  const inputStyle = isMobile ? ({ '--keyboard-inset': `${keyboardInset}px` } as CSSProperties) : undefined
+
   return (
-    <div className={`p-4 border-t border-[var(--border)] ${isMobile ? 'pb-3' : 'pb-[calc(1rem+env(safe-area-inset-bottom,0px))]'}`}>
+    <div
+      style={inputStyle}
+      className={`border-t border-[var(--border)] p-4 ${isMobile ? 'mobile-keyboard-safe' : 'pb-[calc(1rem+env(safe-area-inset-bottom,0px))]'}`}
+    >
       {attachments.length > 0 && (
         <div className="mb-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-3">
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -395,32 +614,10 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
             isMobile={isMobile}
             anchorRef={menuButtonRef}
             variant="menu"
-            sendDisabled={sendDisabled}
+            sendDisabled={busy}
           />
         </div>
         <div className="relative flex-1">
-          <ImageGenPanel
-            open={imageGenOpen}
-            submitting={sendDisabled}
-            onClose={() => {
-              setImageGenOpen(false)
-              focusTextarea()
-            }}
-            onSubmit={async (prompt, params) => {
-              try {
-                await onSubmitDirectTask({
-                  task_type: 'image_gen',
-                  prompt,
-                  params,
-                })
-                setImageGenOpen(false)
-                setPasteError('')
-                focusTextarea()
-              } catch (err) {
-                console.error('Failed to submit image generation task:', err)
-              }
-            }}
-          />
           <textarea
             ref={textareaRef}
             value={input}
@@ -446,13 +643,62 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
             anchorRef={textareaRef}
             filterPrefix={input}
             variant="slash-suggest"
-            sendDisabled={sendDisabled}
+            sendDisabled={busy}
             activeIndex={activeCommandIndex}
           />
+          {skillSuggestOpen && (
+            <div
+              className="absolute bottom-full left-0 z-30 mb-2 w-full max-w-sm overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl"
+              aria-label={`Insert ${SKILL_TRIGGER_TEMPLATE} trigger`}
+            >
+              {skillSuggestions.map((skill, index) => (
+                <button
+                  key={`${skill.source || 'skill'}:${skill.name}`}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    onSkillTriggerSelect(skill.name)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                    index === activeSkillIndex
+                      ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                      : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                  }`}
+                >
+                  <Puzzle className="h-4 w-4" />
+                  <span className="truncate">{skill.name}</span>
+                  <span className="ml-auto shrink-0 font-mono text-xs text-[var(--text-secondary)]">@{skill.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {agentSuggestOpen && (
+            <div className="absolute bottom-full left-0 z-30 mb-2 w-full max-w-sm overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl">
+              {agentSuggestions.map((agent, index) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    insertAgentMention(agent.id)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${
+                    index === activeAgentIndex
+                      ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                      : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                  }`}
+                >
+                  <Bot className="h-4 w-4" />
+                  <span>{agent.label}</span>
+                  <span className="ml-auto font-mono text-xs text-[var(--text-secondary)]">@{agent.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <button
           onClick={() => { void handleSend() }}
-          disabled={(!input.trim() && attachments.length === 0) || sendDisabled}
+          disabled={(!input.trim() && attachments.length === 0) || busy}
           className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-40"
           title="Send (⌘+Enter)"
         >

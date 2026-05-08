@@ -32,6 +32,7 @@ interface GatewayStatusData {
   uptime_seconds: number | null
   gateway_port: number | null
   console_port: number | null
+  memory_rss_bytes: number | null
   supervised: boolean
   supervisor: string | null
   restart_pending: boolean
@@ -179,7 +180,7 @@ export default function DashboardPage() {
           value: 'Mock Config',
           sub: '仅编辑模拟配置文件',
           color: 'text-[var(--accent)]',
-          onClick: () => navigate('/config'),
+          onClick: () => navigate('/settings/system/console'),
         },
         {
           icon: Timer,
@@ -187,7 +188,7 @@ export default function DashboardPage() {
           value: 'Mock Cron',
           sub: '定时任务在模拟数据目录下',
           color: 'text-cyan-400',
-          onClick: () => navigate('/tasks'),
+          onClick: () => navigate('/?view=tasks&task_view=scheduled'),
         },
         {
           icon: Cpu,
@@ -195,7 +196,7 @@ export default function DashboardPage() {
           value: 'Mock Tasks',
           sub: '查看空/模拟安全的任务状态',
           color: 'text-blue-400',
-          onClick: () => navigate('/bg-tasks'),
+          onClick: () => navigate('/?view=tasks&task_view=history'),
         },
         {
           icon: Brain,
@@ -203,7 +204,7 @@ export default function DashboardPage() {
           value: 'Mock Memory',
           sub: '预览人设和记忆文档',
           color: 'text-amber-400',
-          onClick: () => navigate('/memory'),
+          onClick: () => navigate('/settings/agents-config/nanobot/memory'),
         },
         {
           icon: Image,
@@ -211,7 +212,7 @@ export default function DashboardPage() {
           value: 'Mock Media',
           sub: '图片库限定在模拟数据目录内',
           color: 'text-emerald-400',
-          onClick: () => navigate('/media'),
+          onClick: () => navigate('/?view=tasks&task_view=artifacts'),
         },
         {
           icon: UserCog,
@@ -219,7 +220,7 @@ export default function DashboardPage() {
           value: 'Mock Persona',
           sub: '在沙盒中编辑工作区身份文件',
           color: 'text-violet-400',
-          onClick: () => navigate('/persona'),
+          onClick: () => navigate('/settings/agents-config/nanobot/persona'),
         },
         {
           icon: Hammer,
@@ -227,7 +228,7 @@ export default function DashboardPage() {
           value: 'Mock Skills',
           sub: '查看工具注册表和模拟 TOOLS.md',
           color: 'text-fuchsia-400',
-          onClick: () => navigate('/skills'),
+          onClick: () => navigate('/settings/tools/skills'),
         },
         {
           icon: MessageSquare,
@@ -235,7 +236,7 @@ export default function DashboardPage() {
           value: 'Mock Chat',
           sub: '安全浏览预置的模拟对话',
           color: 'text-pink-400',
-          onClick: () => navigate('/chat'),
+          onClick: () => navigate('/'),
         },
         {
           icon: BarChart3,
@@ -243,7 +244,7 @@ export default function DashboardPage() {
           value: 'Mock Stats',
           sub: 'Token 图表来自模拟数据库',
           color: 'text-sky-400',
-          onClick: () => navigate('/tokens'),
+          onClick: () => navigate('/settings/statistics'),
         },
       ]
     : [
@@ -253,7 +254,7 @@ export default function DashboardPage() {
           value: '配置',
           sub: '编辑网关和控制台配置',
           color: 'text-[var(--accent)]',
-          onClick: () => navigate('/config'),
+          onClick: () => navigate('/settings/system/console'),
         },
         {
           icon: Brain,
@@ -261,7 +262,7 @@ export default function DashboardPage() {
           value: '记忆',
           sub: '浏览全局和个人记忆文件',
           color: 'text-amber-400',
-          onClick: () => navigate('/memory'),
+          onClick: () => navigate('/settings/agents-config/nanobot/memory'),
         },
         {
           icon: UserCog,
@@ -269,7 +270,7 @@ export default function DashboardPage() {
           value: '人设',
           sub: '查看核心 Agent 身份文件',
           color: 'text-emerald-400',
-          onClick: () => navigate('/persona'),
+          onClick: () => navigate('/settings/agents-config/nanobot/persona'),
         },
         {
           icon: MessageSquare,
@@ -277,7 +278,7 @@ export default function DashboardPage() {
           value: '聊天',
           sub: '打开实时 Agent 会话和调试流程',
           color: 'text-fuchsia-400',
-          onClick: () => navigate('/chat'),
+          onClick: () => navigate('/'),
         },
       ]
 
@@ -510,7 +511,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <button
-              onClick={() => navigate('/bg-tasks')}
+              onClick={() => navigate('/?view=tasks&task_view=history')}
               className="flex items-center gap-1 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
             >
               查看全部 <ChevronRight className="h-3 w-3" />
@@ -528,7 +529,7 @@ export default function DashboardPage() {
                 return (
                   <button
                     key={task.task_id}
-                    onClick={() => navigate('/bg-tasks')}
+                    onClick={() => navigate(`/?view=tasks&task_id=${encodeURIComponent(task.task_id)}`)}
                     className="flex w-full items-center gap-3 rounded-lg bg-[var(--bg-primary)] p-3 text-left transition-colors hover:bg-[var(--bg-tertiary)]"
                   >
                     <StatusIcon

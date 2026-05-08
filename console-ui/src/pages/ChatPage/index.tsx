@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, useCallback, type TouchEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, wsUrl } from '../../api/client'
 import { useAuth } from '../../stores/auth'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 import type { ChatComposePayload, ChatFileUpload, DirectTaskMessage, DirectTaskStatus, DirectTaskSubmitParams, DirectTaskType, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
-import { SCENE_ORDER } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
 import {
   appendInFlightAssistantChunk,
@@ -16,20 +15,36 @@ import {
   upsertInFlightTurn,
   type InFlightTurn,
 } from './inFlightTurn'
-import { SceneTabs } from './SceneTabs'
 import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
+import { ConversationConfigBar } from './ConversationConfigBar'
+import { TaskPreviewBar } from './TaskPreviewBar'
+import { TaskOverlay } from './TaskOverlay'
 
 const SESSION_LIST_POLL_MS = 30_000
 const DIRECT_TASK_POLL_MS = 2_000
 const MAX_RECONNECT_DELAY_MS = 15_000
 const SEND_WATCHDOG_MS = 120_000
-const FINAL_DIRECT_TASK_STATUSES = new Set<DirectTaskStatus>(['succeeded', 'failed', 'cancelled', 'interrupted'])
+const FINAL_DIRECT_TASK_STATUSES = new Set<DirectTaskStatus>(['succeeded', 'failed', 'cancelled', 'interrupted', 'skipped'])
+const AGENT_MENTION_RE = /(?:^|\s)@(nanobot|codex|claude_code|claude-code|image_gen|image-gen)(?=\s|$)/gi
+
+function extractAgentMentions(text: string): string[] {
+  const ids: string[] = []
+  for (const match of text.matchAll(AGENT_MENTION_RE)) {
+    const id = match[1].replace('-', '_').toLowerCase()
+    if (!ids.includes(id)) {
+      ids.push(id)
+    }
+  }
+  return ids
+}
 
 interface DirectTaskSubmitResponse {
   task_id: string
   status: DirectTaskStatus
   task_type: DirectTaskType
+  origin_conversation_id?: string
+  origin_turn_seq?: number | null
   trace_id?: string
 }
 
@@ -43,7 +58,30 @@ interface BackgroundTaskListItem {
   elapsed_ms: number
   result_preview?: string
   error_message?: string
+  origin_conversation_id?: string
+  origin_turn_seq?: number | null
   trace_id?: string
+  chain_id?: string
+  parent_task_ids?: string[]
+  node_kind?: string
+  skill_name?: string
+  matched_by?: 'natural_language' | 'explicit'
+}
+
+function sortDirectTasks(tasks: DirectTaskMessage[]) {
+  return [...tasks].sort((a, b) => {
+    const sessionDelta = a.session_key.localeCompare(b.session_key)
+    if (sessionDelta !== 0) return sessionDelta
+    const turnDelta = (a.origin_turn_seq ?? Number.MAX_SAFE_INTEGER) - (b.origin_turn_seq ?? Number.MAX_SAFE_INTEGER)
+    if (turnDelta !== 0) return turnDelta
+    const startedDelta = (a.started_at ?? Number.MAX_SAFE_INTEGER) - (b.started_at ?? Number.MAX_SAFE_INTEGER)
+    if (startedDelta !== 0) return startedDelta
+    return a.task_id.localeCompare(b.task_id)
+  })
+}
+
+function upsertDirectTask(prev: DirectTaskMessage[], task: DirectTaskMessage) {
+  return sortDirectTasks([task, ...prev.filter((item) => item.task_id !== task.task_id)]).slice(0, 100)
 }
 
 interface BackgroundTaskListResponse {
@@ -69,9 +107,14 @@ function disposeSocket(socket: WebSocket | null, onDispose?: () => void) {
 
 export default function ChatPage() {
   const [searchParams] = useSearchParams()
-  const deepLinkSessionKey = searchParams.get('session_key') || null
+  const navigate = useNavigate()
+  const deepLinkSessionKey = searchParams.get('session_key') || searchParams.get('session_id') || null
   const deepLinkConversationId = searchParams.get('conversation_id') || null
   const deepLinkTaskId = searchParams.get('task_id') || null
+  const deepLinkChainId = searchParams.get('chain_id') || null
+  const view = searchParams.get('view') || null
+  const taskView = searchParams.get('task_view') || null
+  const deepLinkTraceId = searchParams.get('trace_id') || null
   const deepLinkTurnSeq = useMemo(() => {
     const raw = searchParams.get('turn_seq')
     if (raw == null) return null
@@ -105,9 +148,11 @@ export default function ChatPage() {
   const observeReconnectAttempts = useRef(0)
   const observeSessionKey = useRef<string>('')
   const initializedRef = useRef(false)
+  const mobileSessionSwipeStart = useRef<{ x: number; y: number } | null>(null)
   const { isMobile } = useResponsiveMode()
-  const { isMockTester } = useAuth()
+  const { isMockTester, canEdit } = useAuth()
   const mockMode = isMockTester()
+  const canMutateChat = canEdit()
   const activeTransportRef = useRef<ActiveChatTransport>(activeTransport)
   activeTransportRef.current = activeTransport
   const consoleBusyRef = useRef(false)
@@ -291,6 +336,9 @@ export default function ChatPage() {
         }
       } else if (data.type === 'stream_end') {
         setInFlightTurn((prev) => (prev ? applyInFlightStreamEnd(prev, !!data.resuming) : prev))
+      } else if (data.type === 'direct_task' && data.task) {
+        const task = data.task as DirectTaskMessage
+        setDirectTasks((prev) => upsertDirectTask(prev, task))
       } else if (data.type === 'complete') {
         finalizeConsoleInFlight()
         void refreshSessionViewRef.current(sessionKey, {
@@ -490,28 +538,98 @@ export default function ChatPage() {
 
         const deepLinkSessionKeyVal = deepLinkSessionKeyRef.current
         const deepLinkConversationIdVal = deepLinkConversationIdRef.current
+        const deepLinkTraceIdVal = deepLinkTraceIdRef.current
+        const deepLinkTaskIdVal = deepLinkTaskIdRef.current
+        let traceSessionKey: string | null = null
+        let traceConversationId: string | null = null
+        let taskSessionKey: string | null = null
+        let taskConversationId: string | null = null
+        let taskDeepLinkItem: BackgroundTaskListItem | null = null
 
-        let targetSession = deepLinkSessionKeyVal
-          ? metas.find((m) => m.key === deepLinkSessionKeyVal) || null
+        if (deepLinkTraceIdVal) {
+          try {
+            const traceMessages = await api<RawMessage[]>(
+              `/chat/messages?trace_id=${encodeURIComponent(deepLinkTraceIdVal)}`,
+            )
+            const traceMeta = traceMessages.find((message) => {
+              const sessionKey = message.metadata?.session_key
+              const conversationId = message.metadata?.conversation_id
+              return typeof sessionKey === 'string' && typeof conversationId === 'string'
+            })?.metadata
+            if (traceMeta) {
+              traceSessionKey = traceMeta.session_key as string
+              traceConversationId = traceMeta.conversation_id as string
+            }
+          } catch (err) {
+            console.error('Failed to resolve trace deep link:', err)
+          }
+          if (!traceSessionKey) {
+            setDeepLinkNotice(`未找到 trace_id=${deepLinkTraceIdVal} 对应的消息`)
+          }
+        }
+
+        if (!traceSessionKey && deepLinkTaskIdVal) {
+          try {
+            const task = await api<BackgroundTaskListItem>(
+              `/bg-tasks/${encodeURIComponent(deepLinkTaskIdVal)}`,
+            )
+            if (task.task_id && task.origin_session_key) {
+              taskDeepLinkItem = task
+              taskSessionKey = task.origin_session_key
+              taskConversationId = task.origin_conversation_id || null
+            } else {
+              setDeepLinkNotice(`未找到 task_id=${deepLinkTaskIdVal} 对应的任务`)
+            }
+          } catch (err) {
+            console.error('Failed to resolve task deep link:', err)
+            setDeepLinkNotice(`未找到 task_id=${deepLinkTaskIdVal} 对应的任务`)
+          }
+        }
+
+        const resolvedDeepLinkSessionKey = traceSessionKey || taskSessionKey || deepLinkSessionKeyVal
+        const resolvedDeepLinkConversationId = traceConversationId || taskConversationId || deepLinkConversationIdVal
+
+        let targetSession = resolvedDeepLinkSessionKey
+          ? metas.find((m) => m.key === resolvedDeepLinkSessionKey) || null
           : null
 
         if (!targetSession) {
-          const firstScene = SCENE_ORDER.find((s) => metas.some((m) => m.scene === s)) || metas[0].scene
-          setActiveScene(firstScene)
-          targetSession = metas.find((m) => m.scene === firstScene) || null
+          targetSession = metas[0] || null
+          if (targetSession) setActiveScene(targetSession.scene)
         } else {
           setActiveScene(targetSession.scene)
-          if (deepLinkConversationIdVal == null) {
+          if (resolvedDeepLinkConversationId == null) {
             setDeepLinkNotice('该任务缺少 conversation 绑定，已打开对应 session')
           }
         }
 
         if (targetSession) {
           setActiveSession(targetSession.key)
+          if (taskDeepLinkItem) {
+            const taskMessage: DirectTaskMessage = {
+              type: 'direct_task',
+              task_id: taskDeepLinkItem.task_id,
+              task_type: taskDeepLinkItem.task_type as DirectTaskType,
+              session_key: taskDeepLinkItem.origin_session_key,
+              prompt_preview: taskDeepLinkItem.prompt_preview,
+              status: taskDeepLinkItem.status,
+              started_at: taskDeepLinkItem.started_at,
+              elapsed_ms: taskDeepLinkItem.elapsed_ms,
+              result_preview: taskDeepLinkItem.result_preview,
+              error_message: taskDeepLinkItem.error_message,
+              origin_conversation_id: taskDeepLinkItem.origin_conversation_id,
+              origin_turn_seq: taskDeepLinkItem.origin_turn_seq,
+              trace_id: taskDeepLinkItem.trace_id,
+              chain_id: taskDeepLinkItem.chain_id,
+              parent_task_ids: taskDeepLinkItem.parent_task_ids,
+              node_kind: taskDeepLinkItem.node_kind,
+            }
+            setDirectTasks((prev) => upsertDirectTask(prev, taskMessage))
+          }
           const sessionKey = targetSession.key
           void (async () => {
             const conversations = await loadConversationsRef.current(sessionKey)
-            const preferredConvId = deepLinkConversationIdVal
+            const preferredConvId = resolvedDeepLinkConversationId
               ?? targetSession!.conversation_id
             const conversationId = pickConversationId(targetSession, conversations, preferredConvId)
             await loadSessionMessagesWithMetaRef.current(sessionKey, targetSession, conversationId)
@@ -567,6 +685,7 @@ export default function ChatPage() {
     setMobileSessionOpen(false)
 
     const meta = sessions.find((s) => s.key === key)
+    setActiveScene(meta?.scene || 'console')
     void (async () => {
       const conversations = await loadConversationsRef.current(key)
       const conversationId = pickConversationId(meta || null, conversations, meta?.conversation_id ?? null)
@@ -582,50 +701,24 @@ export default function ChatPage() {
   const handleConversationSelect = (sessionKey: string, conversationId: string) => {
     const meta = sessions.find((s) => s.key === sessionKey) || null
     setActiveSession(sessionKey)
+    setActiveScene(meta?.scene || 'console')
     setMobileSessionOpen(false)
     setInFlightTurn(null)
     setSending(false)
     void loadSessionMessagesWithMeta(sessionKey, meta, conversationId)
   }
 
-  const handleSceneChange = (scene: SceneType) => {
-    setActiveScene(scene)
-    disconnectConsoleWs()
-    disconnectObserveWs()
-    setInFlightTurn(null)
-    setSending(false)
-
-    const sceneSessions = sessions.filter((s) => s.scene === scene)
-    if (sceneSessions.length > 0) {
-      const first = sceneSessions[0]
-      setActiveSession(first.key)
-      setActiveConversationId(null)
-      void (async () => {
-        const conversations = await loadConversationsRef.current(first.key)
-        const conversationId = pickConversationId(first, conversations, first.conversation_id)
-        await loadSessionMessagesWithMetaRef.current(first.key, first, conversationId)
-      })()
-      if (scene === 'console' && !mockMode) {
-        const sid = first.key.replace(/^console:/, '')
-        connectWs(sid)
-      }
-    } else {
-      setActiveSession('')
-      setActiveConversationId(null)
-      setCurrentMeta(null)
-      setTurns([])
-      setInFlightTurn(null)
-      setSending(false)
-      setActiveTransport('none')
-      setTransportStatus('idle')
-    }
-  }
-
   const handleCreateConsole = async () => {
     setError('')
     try {
       const title = `Chat ${sessions.filter((s) => s.scene === 'console').length + 1}`
-      const res = await api<{ session_id: string; conversation_id: string }>('/chat/sessions', {
+      const res = await api<{
+        session_id: string
+        title?: string
+        conversation_id: string
+        participants: string[]
+        default_responder_agent_id: string
+      }>('/chat/sessions', {
         method: 'POST',
         body: JSON.stringify({ title }),
       })
@@ -637,10 +730,13 @@ export default function ChatPage() {
       setActiveSession(newKey)
       setCurrentMeta({
         key: newKey,
+        title: res.title || title,
         scene: 'console',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         conversation_id: res.conversation_id,
+        participants: res.participants || ['nanobot'],
+        default_responder_agent_id: res.default_responder_agent_id || 'nanobot',
         token_stats: { total_prompt_tokens: 0, total_completion_tokens: 0, total_tokens: 0, llm_calls: 0 },
         message_count: 0,
       })
@@ -671,6 +767,32 @@ export default function ChatPage() {
       console.error('Failed to create session:', err)
     }
   }
+
+  const handleParticipantsChange = useCallback(async (participants: string[]) => {
+    if (!currentMeta?.key.startsWith('console:') || mockMode || !canMutateChat) return
+    const sid = currentMeta.key.replace(/^console:/, '')
+    const response = await api<{
+      participants: string[]
+      default_responder_agent_id: string
+    }>(`/chat/sessions/${encodeURIComponent(sid)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ participants }),
+    })
+    setCurrentMeta((prev) => prev && prev.key === currentMeta.key
+      ? {
+          ...prev,
+          participants: response.participants,
+          default_responder_agent_id: response.default_responder_agent_id,
+        }
+      : prev)
+    setSessions((prev) => prev.map((session) => session.key === currentMeta.key
+      ? {
+          ...session,
+          participants: response.participants,
+          default_responder_agent_id: response.default_responder_agent_id,
+        }
+      : session))
+  }, [canMutateChat, currentMeta?.key, mockMode])
 
   const handleDeleteSession = async (key: string) => {
     const meta = sessions.find((s) => s.key === key)
@@ -728,6 +850,10 @@ export default function ChatPage() {
   deepLinkSessionKeyRef.current = deepLinkSessionKey
   const deepLinkConversationIdRef = useRef(deepLinkConversationId)
   deepLinkConversationIdRef.current = deepLinkConversationId
+  const deepLinkTraceIdRef = useRef(deepLinkTraceId)
+  deepLinkTraceIdRef.current = deepLinkTraceId
+  const deepLinkTaskIdRef = useRef(deepLinkTaskId)
+  deepLinkTaskIdRef.current = deepLinkTaskId
 
   const loadSessionListRef = useRef(loadSessionList)
   loadSessionListRef.current = loadSessionList
@@ -781,7 +907,7 @@ export default function ChatPage() {
             shouldRefreshSession = true
           }
         }
-        setDirectTasks((prev) => prev.map((task) => {
+        setDirectTasks((prev) => sortDirectTasks(prev.map((task) => {
           if (task.session_key !== activeSession) return task
           const next = byId.get(task.task_id)
           if (!next) return task
@@ -794,8 +920,15 @@ export default function ChatPage() {
             result_preview: next.result_preview || task.result_preview,
             error_message: next.error_message || '',
             trace_id: next.trace_id || task.trace_id,
+            origin_conversation_id: next.origin_conversation_id || task.origin_conversation_id,
+            origin_turn_seq: next.origin_turn_seq ?? task.origin_turn_seq,
+            chain_id: next.chain_id || task.chain_id,
+            parent_task_ids: next.parent_task_ids || task.parent_task_ids,
+            node_kind: next.node_kind || task.node_kind,
+            skill_name: next.skill_name || task.skill_name,
+            matched_by: next.matched_by || task.matched_by,
           }
-        }))
+        })))
         if (shouldRefreshSession) {
           void refreshSessionViewRef.current(activeSession, {
             preferredConversationId: activeConversationIdRef.current,
@@ -848,6 +981,8 @@ export default function ChatPage() {
         role: 'user',
         content: optimisticContent,
         timestamp: new Date().toISOString(),
+        from_agent_id: 'user',
+        mentioned_agent_ids: extractAgentMentions(text),
       }
       setInFlightTurn(createInFlightTurn({
         transport: 'console',
@@ -859,6 +994,7 @@ export default function ChatPage() {
       wsRef.current.send(JSON.stringify({
         content: text,
         media: uploads.map((upload) => upload.media_path),
+        mentioned_agent_ids: extractAgentMentions(text),
       }))
       setSending(false)
       armSendWatchdog()
@@ -885,6 +1021,7 @@ export default function ChatPage() {
     setError('')
     setSending(true)
     try {
+      const nextTurnSeq = getNextTurnSeq(turnsRef.current)
       const response = await api<DirectTaskSubmitResponse>('/console/direct-tasks', {
         method: 'POST',
         body: JSON.stringify({
@@ -894,7 +1031,7 @@ export default function ChatPage() {
           params: params || {},
           session_key: activeSession,
           conversation_id: activeConversationId || '',
-          turn_seq: getNextTurnSeq(turnsRef.current),
+          turn_seq: nextTurnSeq,
         }),
       })
       const task: DirectTaskMessage = {
@@ -908,9 +1045,11 @@ export default function ChatPage() {
         elapsed_ms: 0,
         result_preview: '',
         error_message: '',
+        origin_conversation_id: response.origin_conversation_id ?? activeConversationId ?? '',
+        origin_turn_seq: response.origin_turn_seq ?? nextTurnSeq,
         trace_id: response.trace_id,
       }
-      setDirectTasks((prev) => [task, ...prev.filter((item) => item.task_id !== task.task_id)].slice(0, 20))
+      setDirectTasks((prev) => upsertDirectTask(prev, task))
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to submit direct task'
       setError(msg)
@@ -950,21 +1089,55 @@ export default function ChatPage() {
   }, [activeConversationId, activeSession, clearConsoleInFlight, currentMeta, mockMode])
 
   const isConsole = activeScene === 'console' && !mockMode
-  const filteredSessions = sessions.filter((s) => s.scene === activeScene)
+  const filteredSessions = sessions
   const selectedConversation = activeSession
     ? (conversationLists[activeSession] || []).find((item) => item.conversation_id === activeConversationId) || null
     : null
-  const isReadOnlyConversation = mockMode || !currentMeta || activeConversationId !== currentMeta.conversation_id
-  const activeDirectTasks = directTasks.filter((task) => task.session_key === activeSession)
+  const isReadOnlyConversation = mockMode || !canMutateChat || !currentMeta || activeConversationId !== currentMeta.conversation_id
+  const activeDirectTasks = directTasks.filter((task) => (
+    task.session_key === activeSession
+    && (!task.origin_conversation_id || !activeConversationId || task.origin_conversation_id === activeConversationId)
+  ))
+  const showTaskOverlay = view === 'tasks' || !!deepLinkTaskId || !!deepLinkChainId || !!taskView || !!deepLinkTraceId
+  const closeTaskOverlay = useCallback(() => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('view')
+    next.delete('task_id')
+    next.delete('chain_id')
+    next.delete('task_view')
+    next.delete('trace_id')
+    next.delete('turn_seq')
+    const query = next.toString()
+    navigate({ pathname: '/', search: query ? `?${query}` : '' })
+  }, [navigate, searchParams])
+  const handleMobileSessionSwipeStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (!isMobile || mobileSessionOpen || showTaskOverlay) return
+    const touch = event.touches[0]
+    mobileSessionSwipeStart.current = { x: touch.clientX, y: touch.clientY }
+  }, [isMobile, mobileSessionOpen, showTaskOverlay])
+  const handleMobileSessionSwipeEnd = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const start = mobileSessionSwipeStart.current
+    mobileSessionSwipeStart.current = null
+    if (!isMobile || !start || mobileSessionOpen || showTaskOverlay || filteredSessions.length < 2) return
+    const touch = event.changedTouches[0]
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+    const index = filteredSessions.findIndex((session) => session.key === activeSession)
+    if (index < 0) return
+    const nextIndex = dx < 0 ? Math.min(index + 1, filteredSessions.length - 1) : Math.max(index - 1, 0)
+    if (nextIndex !== index) {
+      handleSessionSelect(filteredSessions[nextIndex].key)
+    }
+  }, [activeSession, filteredSessions, handleSessionSelect, isMobile, mobileSessionOpen, showTaskOverlay])
 
   return (
-    <div className={isMobile ? '-m-4 -mb-20 h-[calc(100dvh-4rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden' : '-m-6 h-[calc(100vh)] flex flex-col overflow-hidden'}>
-      {/* Top scene tabs bar */}
-      <SceneTabs
-        sessions={sessions}
-        activeScene={activeScene}
-        onSceneChange={handleSceneChange}
-      />
+    <div className={isMobile ? 'mobile-chat-shell relative -m-4 -mb-20 flex flex-col overflow-hidden' : 'relative -m-6 h-[calc(100vh)] flex flex-col overflow-hidden'}>
+      {(mockMode || !canMutateChat) && (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
+          只读模式 · 申请权限
+        </div>
+      )}
 
       {/* Error banner */}
       {error && (
@@ -981,8 +1154,21 @@ export default function ChatPage() {
         </div>
       )}
 
+      <TaskPreviewBar mockMode={mockMode} />
+      <ConversationConfigBar
+        session={currentMeta}
+        activeScene={activeScene}
+        isReadOnly={mockMode || !canMutateChat}
+        isMobile={isMobile}
+        onParticipantsChange={handleParticipantsChange}
+      />
+
       {/* Main content: sidebar + message area */}
-      <div className="flex-1 flex min-h-0 min-w-0">
+      <div
+        className="flex-1 flex min-h-0 min-w-0"
+        onTouchStart={handleMobileSessionSwipeStart}
+        onTouchEnd={handleMobileSessionSwipeEnd}
+      >
         {/* Desktop: inline sidebar. Mobile: overlay drawer */}
         {isMobile ? (
           mobileSessionOpen && (
@@ -1000,6 +1186,7 @@ export default function ChatPage() {
                   activeConversationId={activeConversationId}
                   conversationLists={conversationLists}
                   isConsoleScene={isConsole}
+                  canManageSessions={canMutateChat}
                   onSessionSelect={handleSessionSelect}
                   onConversationSelect={handleConversationSelect}
                   onCreateConsole={handleCreateConsole}
@@ -1016,6 +1203,7 @@ export default function ChatPage() {
             activeConversationId={activeConversationId}
             conversationLists={conversationLists}
             isConsoleScene={isConsole}
+            canManageSessions={canMutateChat}
             onSessionSelect={handleSessionSelect}
             onConversationSelect={handleConversationSelect}
             onCreateConsole={handleCreateConsole}
@@ -1044,8 +1232,19 @@ export default function ChatPage() {
           onToggleSessionPanel={() => setMobileSessionOpen(v => !v)}
           targetTaskId={deepLinkTaskId}
           targetTurnSeq={deepLinkTurnSeq}
+          targetTraceId={deepLinkTraceId}
         />
       </div>
+      {showTaskOverlay && (
+        <TaskOverlay
+          taskId={deepLinkTaskId}
+          chainId={deepLinkChainId}
+          traceId={deepLinkTraceId}
+          taskView={taskView}
+          isMobile={isMobile}
+          onClose={closeTaskOverlay}
+        />
+      )}
     </div>
   )
 }

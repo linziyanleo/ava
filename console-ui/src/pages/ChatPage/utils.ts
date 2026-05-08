@@ -1,4 +1,5 @@
 import type { MessageContentBlock, SceneType, SessionMeta, RawMessage, TurnGroup } from './types'
+import { SCENE_LABELS } from './types'
 import { normalizeBackgroundTaskMessages } from './backgroundTask'
 
 export interface FileTreeNode {
@@ -21,6 +22,53 @@ export interface MessageFileRef {
 
 const IMAGE_PLACEHOLDER_RE = /\[image:\s*([^\]]+?)\]/gi
 const FILE_PLACEHOLDER_RE = /\[file:\s*([^\]]+?)\]/gi
+
+export const AGENT_LABELS: Record<string, string> = {
+  nanobot: 'Nanobot',
+  codex: 'Codex',
+  claude_code: 'Claude Code',
+  image_gen: 'Image Gen',
+}
+
+export function normalizeAgentId(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.trim().replace(/^@/, '').replace(/[-:]/g, '_').toLowerCase()
+}
+
+export function getAgentLabel(value: unknown): string {
+  const agentId = normalizeAgentId(value)
+  if (!agentId) return ''
+  if (AGENT_LABELS[agentId]) return AGENT_LABELS[agentId]
+  return agentId
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+export function getAgentInitial(value: unknown): string {
+  const label = getAgentLabel(value)
+  if (!label) return '?'
+  const words = label.split(/\s+/).filter(Boolean)
+  if (words.length > 1) return words.map((word) => word.charAt(0)).join('').slice(0, 2).toUpperCase()
+  return label.slice(0, 2).toUpperCase()
+}
+
+export function getSessionParticipants(session: SessionMeta): string[] {
+  const participants = Array.isArray(session.participants) ? session.participants.filter(Boolean) : []
+  if (participants.length > 0) return participants
+  return session.default_responder_agent_id ? [session.default_responder_agent_id] : ['nanobot']
+}
+
+export function getSessionTitle(session: SessionMeta): string {
+  const explicit = session.title?.trim()
+  if (explicit) return explicit
+  const sceneLabel = SCENE_LABELS[session.scene] || 'Chat'
+  const [, rawId = ''] = session.key.split(':', 2)
+  const shortId = rawId.length <= 8 ? rawId : rawId.slice(0, 4)
+  const suffix = shortId ? ` ${shortId}` : ''
+  return `${sceneLabel} Chat${suffix}`
+}
 
 export function parseScene(filename: string): SceneType {
   const name = filename.replace(/\.jsonl$/, '')
@@ -49,6 +97,8 @@ export function parseJsonl(content: string, filename: string): { meta: SessionMe
           created_at: data.created_at || '',
           updated_at: data.updated_at || '',
           conversation_id: data.conversation_id || '',
+          participants: Array.isArray(data.participants) ? data.participants : ['nanobot'],
+          default_responder_agent_id: data.default_responder_agent_id || 'nanobot',
           token_stats: data.token_stats || {
             total_prompt_tokens: 0,
             total_completion_tokens: 0,
@@ -74,6 +124,8 @@ export function parseJsonl(content: string, filename: string): { meta: SessionMe
       created_at: '',
       updated_at: '',
       conversation_id: '',
+      participants: ['nanobot'],
+      default_responder_agent_id: 'nanobot',
       token_stats: { total_prompt_tokens: 0, total_completion_tokens: 0, total_tokens: 0, llm_calls: 0 },
       message_count: 0,
     }

@@ -6,7 +6,6 @@ export interface ChatCommandRunContext {
   send: (payload: ChatComposePayload) => Promise<void> | void
   stopCurrentTurn: () => Promise<void> | void
   submitDirectTask: (params: DirectTaskSubmitParams) => Promise<void> | void
-  openImageGenPanel: () => void
   setInput: (text: string) => void
   closeMenu: () => void
 }
@@ -47,9 +46,9 @@ export const CHAT_COMMANDS: ChatCommand[] = [
   {
     id: '/image-gen',
     label: 'Image Gen',
-    description: 'Generate image with parameters',
+    description: 'Generate or edit an image from the prompt',
     icon: ImageIcon,
-    run: ({ openImageGenPanel }) => openImageGenPanel(),
+    populateOnly: true,
   },
 ]
 

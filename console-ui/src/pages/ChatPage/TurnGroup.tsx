@@ -18,6 +18,8 @@ interface TurnGroupProps {
   suppressLoadingIndicator?: boolean
   targetTaskId?: string | null
   targetTurnSeq?: number | null
+  targetTraceId?: string | null
+  suppressedTaskIds?: Set<string>
 }
 
 export function TurnGroupComponent({
@@ -29,9 +31,16 @@ export function TurnGroupComponent({
   suppressLoadingIndicator = false,
   targetTaskId,
   targetTurnSeq,
+  targetTraceId,
+  suppressedTaskIds,
 }: TurnGroupProps) {
   const turnSeq = turn.turnSeq
   const maxIteration = turn.toolCalls.reduce((max, tc) => Math.max(max, tc.iteration), -1)
+  const traceIds = [
+    turn.userMessage.trace_id,
+    ...turn.assistantSteps.map((msg) => msg.trace_id),
+    ...turn.toolCalls.map((tc) => tc.result?.trace_id),
+  ].filter((traceId): traceId is string => !!traceId)
 
   const finalAssistant = turn.assistantSteps.filter(
     (s) => s.role === 'assistant' && !s.tool_calls && s.content !== null,
@@ -42,16 +51,18 @@ export function TurnGroupComponent({
   )
 
   const isTargetTurn = targetTurnSeq != null && turnSeq === targetTurnSeq
+  const isTargetTrace = !!targetTraceId && traceIds.includes(targetTraceId)
   const [turnHighlighted, setTurnHighlighted] = useState(false)
-  const prevIsTargetTurnRef = useRef(isTargetTurn)
+  const prevTargetRef = useRef(isTargetTurn || isTargetTrace)
   useEffect(() => {
-    if (isTargetTurn && !prevIsTargetTurnRef.current) {
+    const isTarget = isTargetTurn || isTargetTrace
+    if (isTarget && !prevTargetRef.current) {
       setTurnHighlighted(true)
       const timer = setTimeout(() => setTurnHighlighted(false), 2000)
       return () => clearTimeout(timer)
     }
-    prevIsTargetTurnRef.current = isTargetTurn
-  }, [isTargetTurn])
+    prevTargetRef.current = isTarget
+  }, [isTargetTurn, isTargetTrace])
 
   return (
     <div
@@ -61,6 +72,7 @@ export function TurnGroupComponent({
       )}
       id={turnSeq != null ? `turn-seq-${turnSeq}` : index != null ? `turn-${index}` : undefined}
       data-turn-seq={turnSeq ?? undefined}
+      data-trace-id={isTargetTrace ? targetTraceId : traceIds[0]}
     >
       {/* User message */}
       {isBackgroundTaskMessage(turn.userMessage.content)
@@ -68,11 +80,13 @@ export function TurnGroupComponent({
             const rawContent = typeof turn.userMessage.content === 'string' ? turn.userMessage.content : ''
             const parsedTask = parseBackgroundTaskMessage(rawContent)
             const tid = parsedTask?.taskId
+            if (tid && suppressedTaskIds?.has(tid)) return null
             return (
               <BackgroundTaskResultBlock
                 content={rawContent}
                 timestamp={turn.userMessage.timestamp}
                 taskId={tid}
+                sessionKey={sessionKey}
                 highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
               />
             )
@@ -91,12 +105,14 @@ export function TurnGroupComponent({
           const rawContent = typeof msg.content === 'string' ? msg.content : ''
           const parsedTask = parseBackgroundTaskMessage(rawContent)
           const tid = parsedTask?.taskId
+          if (tid && suppressedTaskIds?.has(tid)) return null
           return (
             <BackgroundTaskResultBlock
               key={`intermediate-${i}`}
               content={rawContent}
               timestamp={msg.timestamp}
               taskId={tid}
+              sessionKey={sessionKey}
               highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
             />
           )
@@ -151,12 +167,14 @@ export function TurnGroupComponent({
                 const rawContent = typeof msg.content === 'string' ? msg.content : ''
                 const parsedTask = parseBackgroundTaskMessage(rawContent)
                 const tid = parsedTask?.taskId
+                if (tid && suppressedTaskIds?.has(tid)) return null
                 return (
                   <BackgroundTaskResultBlock
                     key={`final-${i}`}
                     content={rawContent}
                     timestamp={msg.timestamp}
                     taskId={tid}
+                    sessionKey={sessionKey}
                     highlighted={!!targetTaskId && !!tid && tid === targetTaskId}
                   />
                 )

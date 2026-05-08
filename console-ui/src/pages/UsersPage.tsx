@@ -274,6 +274,7 @@ export default function UsersPage() {
                 <option value="admin">管理员</option>
                 <option value="editor">可编辑</option>
                 <option value="viewer">可查看</option>
+                <option value="read_only">只读</option>
               </select>
             </div>
           </div>
@@ -334,10 +335,12 @@ export default function UsersPage() {
                       ? 'bg-[var(--danger)]/10 text-[var(--danger)]'
                       : u.role === 'editor'
                         ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
-                        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+                        : u.role === 'read_only'
+                          ? 'bg-slate-500/10 text-slate-400'
+                          : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                   }`}
                 >
-                  {u.role === 'admin' ? '管理员' : u.role === 'editor' ? '可编辑' : '可查看'}
+                  {u.role === 'admin' ? '管理员' : u.role === 'editor' ? '可编辑' : u.role === 'read_only' ? '只读' : '可查看'}
                 </span>
                 <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                   <button

@@ -429,11 +429,12 @@ function FullContentModal({
 interface ContextInspectorProps {
   open: boolean
   sessionKey: string | null
+  sessionLabel?: string
   disabled?: boolean
   onClose: () => void
 }
 
-export function ContextInspector({ open, sessionKey, disabled, onClose }: ContextInspectorProps) {
+export function ContextInspector({ open, sessionKey, sessionLabel, disabled, onClose }: ContextInspectorProps) {
   const [preview, setPreview] = useState<ContextPreview | null>(null)
   const [revealedPreview, setRevealedPreview] = useState<ContextPreview | null>(null)
   const [fullPreview, setFullPreview] = useState<ContextPreview | null>(null)
@@ -647,7 +648,7 @@ export function ContextInspector({ open, sessionKey, disabled, onClose }: Contex
                 <span>Context Inspector</span>
               </div>
               <div className="truncate text-xs text-[var(--text-secondary)]">
-                {sessionKey || 'No session selected'}
+                {sessionLabel || 'No session selected'}
               </div>
             </div>
             <div className="flex items-center gap-2">

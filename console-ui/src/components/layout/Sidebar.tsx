@@ -86,8 +86,8 @@ export default function Sidebar() {
           <>
             <Bot className="w-7 h-7 text-[var(--accent)] shrink-0" />
             <div className="min-w-0 flex-1">
-              <h1 className="text-base font-bold text-[var(--text-primary)] truncate">Nanobot 控制台</h1>
-              <p className="text-xs text-[var(--text-secondary)]">管理面板</p>
+              <h1 className="text-base font-bold text-[var(--text-primary)] truncate">AVA</h1>
+              <p className="text-xs text-[var(--text-secondary)]">Agent Control Plane</p>
               {user?.role === 'mock_tester' && (
                 <span className="inline-flex mt-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
                   MOCK SANDBOX
@@ -147,7 +147,7 @@ export default function Sidebar() {
             {isAdmin() && (
               <FixedTooltip label="用户管理">
                 <NavLink
-                  to="/users"
+                  to="/settings/users"
                   className={({ isActive }) =>
                     cn(
                       'flex justify-center p-2 rounded-lg transition-colors',
@@ -189,7 +189,7 @@ export default function Sidebar() {
             </div>
             {isAdmin() && (
               <NavLink
-                to="/users"
+                to="/settings/users"
                 title="用户管理"
                 className={({ isActive }) =>
                   cn(

@@ -17,5 +17,5 @@ export function buildTokenStatsNavUrl(options: TokenStatsNavOptions): string {
   if (options.spanId) params.set('span_id', options.spanId)
 
   const query = params.toString()
-  return query ? `/tokens?${query}` : '/tokens'
+  return query ? `/settings/statistics?${query}` : '/settings/statistics'
 }

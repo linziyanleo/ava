@@ -38,11 +38,25 @@ interface TimelineEvent {
   detail: string
 }
 
+type TaskStatus =
+  | 'pending'
+  | 'awaiting_deps'
+  | 'queued'
+  | 'running'
+  | 'streaming'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'skipped'
+
+type VisibleTaskStatus = Exclude<TaskStatus, 'interrupted'>
+
 interface TaskItem {
   task_id: string
   task_type: string
   origin_session_key: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+  status: TaskStatus
   prompt_preview: string
   started_at: number | null
   finished_at: number | null
@@ -67,6 +81,9 @@ interface TaskItem {
   origin_conversation_id?: string
   origin_turn_seq?: number | null
   trace_id?: string
+  chain_id?: string
+  parent_task_ids?: string[]
+  node_kind?: string
   parent_span_id?: string
   dispatch_span_id?: string
 }
@@ -125,16 +142,21 @@ const DEFAULT_TYPE_STYLE = {
   label: 'Unknown',
 }
 
-const STATUS_CONFIG: Record<
-  TaskItem['status'],
-  { icon: typeof Clock; color: string; bg: string; label: string }
-> = {
+const STATUS_CONFIG: Record<VisibleTaskStatus, { icon: typeof Clock; color: string; bg: string; label: string }> = {
+  pending: { icon: Loader2, color: 'text-gray-400', bg: 'bg-gray-400/10', label: '待解析' },
+  awaiting_deps: { icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10', label: '等待前置' },
   queued: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: '排队中' },
   running: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', label: '运行中' },
+  streaming: { icon: Loader2, color: 'text-sky-400', bg: 'bg-sky-500/10', label: '产出中' },
   succeeded: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: '成功' },
   failed: { icon: XOctagon, color: 'text-red-500', bg: 'bg-red-500/10', label: '失败' },
   cancelled: { icon: Ban, color: 'text-gray-400', bg: 'bg-gray-400/10', label: '已取消' },
-  interrupted: { icon: Ban, color: 'text-orange-400', bg: 'bg-orange-400/10', label: '已中断' },
+  skipped: { icon: Ban, color: 'text-gray-500', bg: 'bg-gray-500/10', label: '已跳过' },
+}
+
+function visibleStatus(status: TaskStatus): VisibleTaskStatus {
+  if (status === 'interrupted') return 'failed'
+  return status
 }
 
 function formatTime(ts: number | null): string {
@@ -205,11 +227,13 @@ function groupByWorkspace(tasks: TaskItem[]): WorkspaceGroup[] {
 // --- Components ---
 
 function StatusBadge({ status }: { status: TaskItem['status'] }) {
-  const cfg = STATUS_CONFIG[status]
+  const displayStatus = visibleStatus(status)
+  const cfg = STATUS_CONFIG[displayStatus]
   const Icon = cfg.icon
+  const isSpinning = displayStatus === 'pending' || displayStatus === 'running' || displayStatus === 'streaming'
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
-      <Icon className={`w-3 h-3 ${status === 'running' ? 'animate-spin' : ''}`} />
+      <Icon className={`w-3 h-3 ${isSpinning ? 'animate-spin' : ''}`} />
       {cfg.label}
     </span>
   )
@@ -248,6 +272,7 @@ function TodoProgressBar({ summary }: { summary: Record<string, number> }) {
 
 type TypeFilter = 'all' | 'claude_code' | 'codex' | 'coding' | 'image_gen'
 type StatusFilter = 'all' | 'running' | 'succeeded' | 'failed'
+const ACTIVE_STATUSES = new Set<TaskStatus>(['pending', 'awaiting_deps', 'queued', 'running', 'streaming'])
 
 function FilterBar({
   typeFilter,
@@ -393,7 +418,7 @@ function TaskCard({
   const [copiedPrompt, setCopiedPrompt] = useState(false)
   const [copiedTrace, setCopiedTrace] = useState(false)
   const [isHighlighted, setIsHighlighted] = useState(false)
-  const isActive = task.status === 'queued' || task.status === 'running'
+  const isActive = ACTIVE_STATUSES.has(task.status)
   const navigate = useNavigate()
 
   const prevHighlightedRef = useRef(highlighted)
@@ -828,10 +853,22 @@ function Pagination({
   )
 }
 
-export default function BgTasksPage() {
+export default function BgTasksPage({
+  embedded = false,
+  taskView = 'current',
+  traceId,
+  chainId,
+}: {
+  embedded?: boolean
+  taskView?: 'current' | 'history'
+  traceId?: string | null
+  chainId?: string | null
+} = {}) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const deepLinkTaskId = searchParams.get('task_id') || null
+  const deepLinkTraceId = traceId ?? searchParams.get('trace_id') ?? null
+  const deepLinkChainId = chainId ?? searchParams.get('chain_id') ?? null
 
   const [data, setData] = useState<TasksResponse | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
@@ -845,13 +882,17 @@ export default function BgTasksPage() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const historyFilterRef = useRef<string>('all:all')
 
-  const [showHistory, setShowHistory] = useState(true)
+  const [showHistory, setShowHistory] = useState(taskView === 'history')
   const [history, setHistory] = useState<HistoryResponse | null>(null)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyLoading, setHistoryLoading] = useState(false)
   const PAGE_SIZE = 15
   const { isMockTester } = useAuth()
   const mockMode = isMockTester()
+
+  useEffect(() => {
+    setShowHistory(taskView === 'history')
+  }, [taskView])
 
   // Module D: filter state
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
@@ -901,13 +942,18 @@ export default function BgTasksPage() {
 
   const fetchOnce = useCallback(async () => {
     try {
-      const res = await api<TasksResponse>('/bg-tasks?include_finished=false')
+      const params = new URLSearchParams({
+        include_finished: deepLinkTraceId || deepLinkChainId ? 'true' : 'false',
+      })
+      if (deepLinkTraceId) params.set('trace_id', deepLinkTraceId)
+      if (deepLinkChainId) params.set('chain_id', deepLinkChainId)
+      const res = await api<TasksResponse>(`/bg-tasks?${params.toString()}`)
       setData(res)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     }
-  }, [])
+  }, [deepLinkChainId, deepLinkTraceId])
 
   const fetchHistory = useCallback((
     page: number,
@@ -920,19 +966,21 @@ export default function BgTasksPage() {
     })
     if (taskType !== 'all') params.set('task_type', taskType)
     if (taskStatus !== 'all' && taskStatus !== 'running') params.set('status', taskStatus)
+    if (deepLinkTraceId) params.set('trace_id', deepLinkTraceId)
+    if (deepLinkChainId) params.set('chain_id', deepLinkChainId)
     return api<HistoryResponse>(`/bg-tasks/history?${params.toString()}`)
-  }, [PAGE_SIZE])
+  }, [PAGE_SIZE, deepLinkChainId, deepLinkTraceId])
 
   useEffect(() => {
     fetchOnce()
-    if (!mockMode) {
+    if (!mockMode && !deepLinkTraceId && !deepLinkChainId) {
       connectWs()
     }
     return () => {
       wsRef.current?.close()
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
     }
-  }, [fetchOnce, connectWs, mockMode])
+  }, [fetchOnce, connectWs, mockMode, deepLinkTraceId, deepLinkChainId])
 
   useEffect(() => {
     if (!showHistory) return
@@ -1045,7 +1093,7 @@ export default function BgTasksPage() {
     if (task.origin_turn_seq != null) {
       params.set('turn_seq', String(task.origin_turn_seq))
     }
-    navigate(`/chat?${params.toString()}`)
+    navigate(`/?${params.toString()}`)
   }, [navigate])
 
   const clearFilters = useCallback(() => {
@@ -1060,7 +1108,7 @@ export default function BgTasksPage() {
     }
     if (statusFilter !== 'all') {
       if (statusFilter === 'running') {
-        filtered = filtered.filter(t => t.status === 'queued' || t.status === 'running')
+        filtered = filtered.filter(t => ACTIVE_STATUSES.has(t.status))
       } else {
         filtered = filtered.filter(t => t.status === statusFilter)
       }
@@ -1071,18 +1119,33 @@ export default function BgTasksPage() {
   const allTasks = data?.tasks ?? []
   const filteredTasks = useMemo(() => applyFilters(allTasks), [allTasks, applyFilters])
 
-  const activeTasks = filteredTasks.filter(t => t.status === 'queued' || t.status === 'running')
-  const recentFinished = filteredTasks.filter(t => t.status !== 'queued' && t.status !== 'running')
+  const chainFilteredTasks = useMemo(
+    () => deepLinkChainId
+      ? filteredTasks.filter(t => t.chain_id === deepLinkChainId)
+      : filteredTasks,
+    [deepLinkChainId, filteredTasks],
+  )
+  const activeTasks = chainFilteredTasks.filter(t => ACTIVE_STATUSES.has(t.status))
+  const recentFinished = chainFilteredTasks.filter(t => !ACTIVE_STATUSES.has(t.status))
 
   // Module A: group active tasks by workspace
   const workspaceGroups = useMemo(() => groupByWorkspace(activeTasks), [activeTasks])
 
+  const displayHistoryTasks = useMemo(
+    () => {
+      const tasks = history?.tasks ?? []
+      return deepLinkChainId ? tasks.filter(t => t.chain_id === deepLinkChainId) : tasks
+    },
+    [deepLinkChainId, history?.tasks],
+  )
   const historyTotalPages = history ? Math.ceil(history.total / PAGE_SIZE) : 0
 
   const hasFilter = typeFilter !== 'all' || statusFilter !== 'all'
+  const showCurrentSections = taskView !== 'history'
+  const showHistorySection = taskView !== 'current'
 
   return (
-    <div className="h-[calc(100vh-3rem)] flex flex-col">
+    <div className={cn(embedded ? 'h-full' : 'h-[calc(100vh-3rem)]', 'flex flex-col')}>
       {deepLinkNotice && (
         <div className="mb-3 px-4 py-2 rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] text-xs flex items-center justify-between">
           <span>{deepLinkNotice}</span>
@@ -1091,7 +1154,7 @@ export default function BgTasksPage() {
       )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">后台任务</h1>
+          <h1 className={cn(embedded ? 'text-lg' : 'text-2xl', 'font-bold')}>后台任务</h1>
           {data && data.running > 0 && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400">
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -1155,7 +1218,7 @@ export default function BgTasksPage() {
             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
             加载中...
           </div>
-        ) : activeTasks.length === 0 && recentFinished.length === 0 && !showHistory && !hasFilter ? (
+        ) : showCurrentSections && activeTasks.length === 0 && recentFinished.length === 0 && !showHistory && !hasFilter ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Clock className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p>暂无活跃任务</p>
@@ -1170,7 +1233,7 @@ export default function BgTasksPage() {
         ) : (
           <>
             {/* Module A: workspace-grouped active tasks */}
-            {workspaceGroups.length > 0 && (
+            {showCurrentSections && workspaceGroups.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
@@ -1206,7 +1269,7 @@ export default function BgTasksPage() {
               </section>
             )}
 
-            {recentFinished.length > 0 && (
+            {showCurrentSections && recentFinished.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2">
                   最近完成 ({recentFinished.length})
@@ -1225,7 +1288,7 @@ export default function BgTasksPage() {
               </section>
             )}
 
-            {hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
+            {showCurrentSections && hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
               <div className="text-center py-12 text-[var(--text-secondary)]">
                 <p className="text-sm">无匹配任务</p>
                 <button onClick={clearFilters} className="mt-2 text-xs text-[var(--accent)] hover:underline">
@@ -1237,7 +1300,8 @@ export default function BgTasksPage() {
         )}
 
         {/* History section */}
-        <section className="border-t border-[var(--border)] pt-4">
+        {showHistorySection && (
+        <section className={cn(showCurrentSections && 'border-t border-[var(--border)] pt-4')}>
           <button
             onClick={() => setShowHistory(v => !v)}
             className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-3"
@@ -1255,10 +1319,10 @@ export default function BgTasksPage() {
                   <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1" />
                   加载中...
                 </div>
-              ) : history && history.tasks.length > 0 ? (
+              ) : history && displayHistoryTasks.length > 0 ? (
                 <>
                   <div className="space-y-2">
-                    {history.tasks.map(t => (
+                    {displayHistoryTasks.map(t => (
                       <TaskCard
                         key={t.task_id}
                         task={t}
@@ -1282,6 +1346,7 @@ export default function BgTasksPage() {
             </>
           )}
         </section>
+        )}
       </div>
     </div>
   )

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, MessageSquare, Trash2, Pencil, Check, X, CornerDownRight, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { SessionMeta, ConversationMeta } from './types'
-import { formatTokenCount } from './utils'
+import { formatTokenCount, getAgentInitial, getAgentLabel, getSessionParticipants, getSessionTitle } from './utils'
 
 function relativeTime(dateStr: string): string {
   const now = Date.now()
@@ -22,6 +22,7 @@ interface SessionSidebarProps {
   activeConversationId: string | null
   conversationLists: Record<string, ConversationMeta[]>
   isConsoleScene?: boolean
+  canManageSessions?: boolean
   onSessionSelect: (key: string) => void
   onConversationSelect: (sessionKey: string, conversationId: string) => void
   onCreateConsole: () => void
@@ -39,6 +40,7 @@ export function SessionSidebar({
   onCreateConsole,
   onDeleteSession,
   onRenameSession,
+  canManageSessions = true,
 }: SessionSidebarProps) {
   const [collapsed, setCollapsed] = useState(() => {
     const stored = localStorage.getItem('chat-sidebar-collapsed')
@@ -55,7 +57,7 @@ export function SessionSidebar({
   const startRename = (s: SessionMeta, e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingFilename(s.key)
-    setEditValue(s.key)
+    setEditValue(getSessionTitle(s))
   }
 
   const confirmRename = (key: string) => {
@@ -87,12 +89,14 @@ export function SessionSidebar({
       ) : (
         <>
           <div className="p-2 border-b border-[var(--border)] flex items-center gap-1">
-            <button
-              onClick={onCreateConsole}
-              className="flex items-center gap-2 flex-1 px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" /> New Chat
-            </button>
+            {canManageSessions && (
+              <button
+                onClick={onCreateConsole}
+                className="flex items-center gap-2 flex-1 px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
+              >
+                <Plus className="w-4 h-4" /> New Chat
+              </button>
+            )}
             <button
               onClick={() => setCollapsed(true)}
               className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors shrink-0"
@@ -103,19 +107,24 @@ export function SessionSidebar({
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-            {sessions.map((s) => (
+            {sessions.map((s) => {
+              const participants = getSessionParticipants(s)
+              const participantLabels = participants.map(getAgentLabel).filter(Boolean)
+              const primaryConversation = (conversationLists[s.key] || []).find((item) => item.is_active) || (conversationLists[s.key] || [])[0]
+              const preview = primaryConversation?.first_message_preview || (s.message_count > 0 ? `${s.message_count} messages` : 'New conversation')
+              return (
               <div key={s.key}>
                 <div
                   className={cn(
-                    'flex items-center justify-between group px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors',
+                    'flex items-start justify-between group px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors',
                     activeSession === s.key
                       ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]',
                   )}
                   onClick={() => onSessionSelect(s.key)}
                 >
-                  <div className="flex items-center gap-2 truncate min-w-0">
-                    <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <MessageSquare className="mt-0.5 w-3.5 h-3.5 shrink-0" />
                     {editingFilename === s.key ? (
                       <div className="flex items-center gap-1 min-w-0" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -136,8 +145,32 @@ export function SessionSidebar({
                         </button>
                       </div>
                     ) : (
-                      <div className="truncate">
-                        <div className="truncate text-sm">{s.key}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-[var(--text-primary)]">{getSessionTitle(s)}</div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <div className="flex shrink-0 -space-x-1">
+                            {participants.slice(0, 3).map((agentId) => (
+                              <span
+                                key={agentId}
+                                title={getAgentLabel(agentId)}
+                                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--bg-secondary)] bg-[var(--bg-tertiary)] text-[8px] font-semibold text-[var(--text-secondary)]"
+                              >
+                                {getAgentInitial(agentId)}
+                              </span>
+                            ))}
+                            {participants.length > 3 && (
+                              <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--bg-secondary)] bg-[var(--bg-tertiary)] text-[8px] font-semibold text-[var(--text-secondary)]">
+                                +{participants.length - 3}
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate text-[10px] text-[var(--text-secondary)]">
+                            {participantLabels.join(' / ')}
+                          </div>
+                        </div>
+                        <div className="mt-0.5 truncate text-[10px] text-[var(--text-secondary)] opacity-80">
+                          {preview}
+                        </div>
                         <div className="text-[10px] text-[var(--text-secondary)] opacity-70">
                           {s.message_count} msgs · {s.updated_at ? relativeTime(s.updated_at) : ''}
                         </div>
@@ -149,7 +182,7 @@ export function SessionSidebar({
                   </div>
                   {editingFilename !== s.key && confirmDelete !== s.key && (
                     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {onRenameSession && (
+                      {canManageSessions && onRenameSession && (
                         <button
                           onClick={(e) => startRename(s, e)}
                           className="p-1 text-[var(--text-secondary)] hover:text-[var(--accent)]"
@@ -157,12 +190,14 @@ export function SessionSidebar({
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmDelete(s.key) }}
-                        className="p-1 text-[var(--text-secondary)] hover:text-[var(--danger)]"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canManageSessions && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDelete(s.key) }}
+                          className="p-1 text-[var(--text-secondary)] hover:text-[var(--danger)]"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   )}
                   {confirmDelete === s.key && (
@@ -217,7 +252,8 @@ export function SessionSidebar({
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
             {sessions.length === 0 && (
               <p className="text-center text-xs text-[var(--text-secondary)] py-8">
                 No sessions

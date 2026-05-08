@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './stores/auth'
 import type { UserRole } from './stores/auth'
 import Layout from './components/layout/Layout'
@@ -8,15 +8,23 @@ import AgentDashboardPage from './pages/AgentDashboardPage'
 import DashboardPage from './pages/DashboardPage'
 import ConfigPage from './pages/ConfigPage'
 import MemoryPage from './pages/MemoryPage'
-import MediaPage from './pages/MediaPage'
 import PersonaPage from './pages/PersonaPage'
 import SkillsPage from './pages/SkillsPage'
 import ChatPage from './pages/ChatPage'
 import TokenStatsPage from './pages/TokenStatsPage'
 import UsersPage from './pages/UsersPage'
-import ScheduledTasksPage from './pages/ScheduledTasksPage'
-import BgTasksPage from './pages/BgTasksPage'
 import BrowserPage from './pages/BrowserPage'
+import LanAccessPage from './pages/LanAccessPage'
+import SettingsPage, { SettingsVersionPage } from './pages/SettingsPage'
+import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
+
+const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
+
+function LegacyRedirect() {
+  const location = useLocation()
+  const target = resolveLegacyRedirect(location.pathname, location.search) || { pathname: '/', search: '' }
+  return <Navigate to={target} replace />
+}
 
 function ProtectedRoute({
   children,
@@ -52,22 +60,31 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<DashboardPage />} />
-          <Route path="agents" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><AgentDashboardPage /></ProtectedRoute>} />
-          <Route path="config" element={<ConfigPage />} />
-          <Route path="memory" element={<MemoryPage />} />
-          <Route path="media" element={<MediaPage />} />
-          <Route path="persona" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><PersonaPage /></ProtectedRoute>} />
-          <Route path="skills" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><SkillsPage /></ProtectedRoute>} />
-          <Route path="chat" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><ChatPage /></ProtectedRoute>} />
-          <Route path="gateway" element={<Navigate to="/" replace />} />
-          <Route path="tasks" element={<ScheduledTasksPage />} />
-          <Route path="bg-tasks" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer', 'mock_tester']}><BgTasksPage /></ProtectedRoute>} />
-          <Route path="tokens" element={<TokenStatsPage />} />
-          <Route path="browser" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer']}><BrowserPage /></ProtectedRoute>} />
-          <Route path="users" element={<ProtectedRoute allowedRoles={['admin']}><UsersPage /></ProtectedRoute>} />
-          <Route path="files" element={<Navigate to="/memory" replace />} />
-          <Route path="audit" element={<Navigate to="/users" replace />} />
+          <Route index element={<ProtectedRoute allowedRoles={READ_ONLY_ROLES}><ChatPage /></ProtectedRoute>} />
+          <Route path="settings" element={<ProtectedRoute allowedRoles={READ_ONLY_ROLES}><SettingsPage /></ProtectedRoute>}>
+            <Route index element={<Navigate to="agents-config" replace />} />
+            <Route path="agents-config" element={<AgentDashboardPage />} />
+            <Route path="agents-config/:agentKind" element={<AgentDashboardPage />} />
+            <Route path="agents-config/nanobot/config" element={<ConfigPage mode="nanobot" />} />
+            <Route path="agents-config/codex/config" element={<ConfigPage mode="codex" />} />
+            <Route path="agents-config/claude-code/config" element={<ConfigPage mode="claude_code" />} />
+            <Route path="agents-config/nanobot/memory" element={<MemoryPage />} />
+            <Route path="agents-config/nanobot/persona" element={<PersonaPage />} />
+            <Route path="agents-config/image-gen/config" element={<ConfigPage mode="image_gen" />} />
+            <Route path="statistics" element={<TokenStatsPage />} />
+            <Route path="tools" element={<Navigate to="skills" replace />} />
+            <Route path="tools/skills" element={<SkillsPage />} />
+            <Route path="users" element={<ProtectedRoute allowedRoles={['admin']}><UsersPage /></ProtectedRoute>} />
+            <Route path="system" element={<Navigate to="gateway" replace />} />
+            <Route path="system/lan-access" element={<ProtectedRoute allowedRoles={['admin']}><LanAccessPage /></ProtectedRoute>} />
+            <Route path="system/gateway" element={<DashboardPage />} />
+            <Route path="system/browser" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer']}><BrowserPage /></ProtectedRoute>} />
+            <Route path="system/console" element={<ConfigPage mode="console" />} />
+            <Route path="system/version" element={<SettingsVersionPage />} />
+          </Route>
+          {legacyRedirectMatrix.map((rule) => (
+            <Route key={rule.from} path={rule.from.slice(1)} element={<LegacyRedirect />} />
+          ))}
         </Route>
       </Routes>
     </BrowserRouter>

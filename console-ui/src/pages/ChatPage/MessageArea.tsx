@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDown, Search, Menu, ExternalLink, FileText } from 'lucide-react'
+import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDownToLine, Search, Menu, ExternalLink, FileText } from 'lucide-react'
 import type { ChatComposePayload, DirectTaskMessage, DirectTaskSubmitParams, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
 import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
@@ -10,10 +10,55 @@ import { SearchModal } from './SearchModal'
 import { ContextInspector } from './ContextInspector'
 import { InFlightTurnBlock } from './InFlightTurnBlock'
 import { TaskStatusCard } from './TaskStatusCard'
+import { ChainBubble } from './ChainBubble'
+import { HudBar } from './HudBar'
 import type { InFlightTurn } from './inFlightTurn'
-import { formatTokenCount } from './utils'
+import { formatTokenCount, getAgentInitial, getAgentLabel, getSessionParticipants, getSessionTitle } from './utils'
 import { api } from '../../api/client';
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
+
+type TaskTimelineItem =
+  | { kind: 'chain'; chainId: string; tasks: DirectTaskMessage[] }
+  | { kind: 'task'; task: DirectTaskMessage }
+
+function taskSortKey(task: DirectTaskMessage) {
+  return task.started_at ?? Number.MAX_SAFE_INTEGER
+}
+
+function orderTaskList(tasks: DirectTaskMessage[]) {
+  return [...tasks].sort((a, b) => {
+    const turnDelta = (a.origin_turn_seq ?? Number.MAX_SAFE_INTEGER) - (b.origin_turn_seq ?? Number.MAX_SAFE_INTEGER)
+    if (turnDelta !== 0) return turnDelta
+    const startedDelta = taskSortKey(a) - taskSortKey(b)
+    if (startedDelta !== 0) return startedDelta
+    return a.task_id.localeCompare(b.task_id)
+  })
+}
+
+function buildTaskTimelineItems(tasks: DirectTaskMessage[]): TaskTimelineItem[] {
+  const byChain = new Map<string, DirectTaskMessage[]>()
+  const standalone: DirectTaskMessage[] = []
+  for (const task of orderTaskList(tasks)) {
+    if (task.chain_id) {
+      byChain.set(task.chain_id, [...(byChain.get(task.chain_id) || []), task])
+    } else {
+      standalone.push(task)
+    }
+  }
+
+  const items: Array<TaskTimelineItem & { order: number; tie: string }> = []
+  for (const [chainId, chainTasks] of byChain.entries()) {
+    const ordered = orderTaskList(chainTasks)
+    items.push({ kind: 'chain', chainId, tasks: ordered, order: Math.min(...ordered.map(taskSortKey)), tie: chainId })
+  }
+  for (const task of standalone) {
+    items.push({ kind: 'task', task, order: taskSortKey(task), tie: task.task_id })
+  }
+
+  return items
+    .sort((a, b) => (a.order - b.order) || a.tie.localeCompare(b.tie))
+    .map(({ order: _order, tie: _tie, ...item }) => item)
+}
 
 interface MessageAreaProps {
   session: SessionMeta | null
@@ -36,13 +81,15 @@ interface MessageAreaProps {
   onToggleSessionPanel?: () => void
   targetTaskId?: string | null
   targetTurnSeq?: number | null
+  targetTraceId?: string | null
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, directTasks, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onSubmitDirectTask, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq }: MessageAreaProps) {
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, directTasks, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onSubmitDirectTask, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq, targetTraceId }: MessageAreaProps) {
   const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isInitialScroll = useRef(true)
+  const scrollRafRef = useRef<number | null>(null)
   const [turnTokenStats, setTurnTokenStats] = useState<Map<number, TurnTokenStats>>(new Map());
   const [iterationStats, setIterationStats] = useState<Map<string, IterationTokenStats>>(new Map());
   const [refreshing, setRefreshing] = useState(false)
@@ -50,6 +97,11 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
   const [showScrollDown, setShowScrollDown] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [showInspector, setShowInspector] = useState(false)
+
+  const handleSkillSelect = useCallback((skillName: string) => {
+    if (sendDisabled || isReadOnly) return
+    void onSend({ text: `@${skillName}`, attachments: [] })
+  }, [isReadOnly, onSend, sendDisabled])
 
   useEffect(() => {
     if (!session?.key) {
@@ -91,8 +143,24 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
   useEffect(() => {
     const el = scrollContainerRef.current
     if (!el) return
-    el.addEventListener('scroll', checkScrollPosition)
-    return () => el.removeEventListener('scroll', checkScrollPosition)
+    const onScroll = () => {
+      if (scrollRafRef.current != null) return
+      scrollRafRef.current = window.requestAnimationFrame(() => {
+        scrollRafRef.current = null
+        checkScrollPosition()
+      })
+    }
+    const resizeObserver = new ResizeObserver(checkScrollPosition)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    resizeObserver.observe(el)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      resizeObserver.disconnect()
+      if (scrollRafRef.current != null) {
+        window.cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
+    }
   }, [checkScrollPosition])
 
   useEffect(() => {
@@ -123,7 +191,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   useEffect(() => {
     isInitialScroll.current = true
-  }, [session?.key])
+  }, [session?.key, conversationId])
 
   useEffect(() => {
     setShowInspector(false)
@@ -131,14 +199,23 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   const taskLocatedRef = useRef<string | null>(null)
 
-  // Deep-link: scroll to targetTaskId or targetTurnSeq after messages render.
+  // Deep-link: scroll to targetTraceId, targetTaskId, or targetTurnSeq after messages render.
   // Retries on each turns update so task result cards appearing later also get located.
   useEffect(() => {
     if (loading) return
-    if (!targetTaskId && targetTurnSeq == null) return
+    if (!targetTraceId && !targetTaskId && targetTurnSeq == null) return
 
     const scrollContainer = scrollContainerRef.current
     if (!scrollContainer) return
+
+    if (targetTraceId) {
+      const el = scrollContainer.querySelector(`[data-trace-id="${CSS.escape(targetTraceId)}"]`)
+      if (el && taskLocatedRef.current !== `trace:${targetTraceId}`) {
+        taskLocatedRef.current = `trace:${targetTraceId}`
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+    }
 
     if (targetTaskId) {
       const el = scrollContainer.querySelector(`[data-bg-task-id="${CSS.escape(targetTaskId)}"]`)
@@ -158,11 +235,42 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       }
     }
-  }, [loading, turns, targetTaskId, targetTurnSeq])
+  }, [loading, turns, targetTraceId, targetTaskId, targetTurnSeq])
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setShowScrollDown(false)
   }, [])
+
+  const { taskItemsByTurn, unanchoredTaskItems, suppressedTaskIds } = useMemo(() => {
+    const byTurn = new Map<number, DirectTaskMessage[]>()
+    const unanchored: DirectTaskMessage[] = []
+    const ids = new Set<string>()
+    for (const task of directTasks) {
+      ids.add(task.task_id)
+      if (typeof task.origin_turn_seq === 'number') {
+        byTurn.set(task.origin_turn_seq, [...(byTurn.get(task.origin_turn_seq) || []), task])
+      } else {
+        unanchored.push(task)
+      }
+    }
+    return {
+      taskItemsByTurn: new Map(Array.from(byTurn.entries()).map(([turnSeq, tasks]) => [turnSeq, buildTaskTimelineItems(tasks)])),
+      unanchoredTaskItems: buildTaskTimelineItems(unanchored),
+      suppressedTaskIds: ids,
+    }
+  }, [directTasks])
+
+  const renderTaskTimelineItems = useCallback((items: TaskTimelineItem[]) => (
+    items.map((item) => {
+      if (item.kind === 'chain') {
+        return <ChainBubble key={`chain-${item.chainId}`} chainId={item.chainId} tasks={item.tasks} />
+      }
+      return <TaskStatusCard key={`task-${item.task.task_id}`} task={item.task} />
+    })
+  ), [])
 
   if (!session) {
     return (
@@ -177,6 +285,9 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   let headerTotalTokens = session.token_stats.total_tokens
   let headerLlmCalls = session.token_stats.llm_calls
+  const headerParticipants = getSessionParticipants(session)
+  const headerParticipantLabels = headerParticipants.map(getAgentLabel).filter(Boolean)
+  const headerTitle = getSessionTitle(session)
   const visibleTurns = isConsole
     && inFlightTurn?.transport === 'console'
     && typeof inFlightTurn.turnSeq === 'number'
@@ -211,7 +322,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
                 <Menu className="w-4 h-4" />
               </button>
             )}
-            <span className="truncate">{session.key}</span>
+            <span className="truncate">{headerTitle}</span>
             <button
               onClick={() => {
                 navigator.clipboard.writeText(session.key)
@@ -225,12 +336,26 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
             </button>
           </h3>
           <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex shrink-0 -space-x-1">
+              {headerParticipants.slice(0, 4).map((agentId) => (
+                <span
+                  key={agentId}
+                  title={getAgentLabel(agentId)}
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--bg-primary)] bg-[var(--bg-tertiary)] text-[8px] font-semibold text-[var(--text-secondary)]"
+                >
+                  {getAgentInitial(agentId)}
+                </span>
+              ))}
+            </div>
+            <span className="max-w-[220px] truncate text-[10px] text-[var(--text-secondary)]">
+              {headerParticipantLabels.join(' / ')}
+            </span>
             <span className="text-[10px] text-[var(--text-secondary)]">
               {SCENE_LABELS[session.scene]}
             </span>
             {conversation && (
               <span className="text-[10px] text-[var(--text-secondary)] opacity-70">
-                {conversation.is_legacy ? 'Legacy' : conversation.conversation_id}
+                {conversation.is_legacy ? 'Legacy thread' : conversation.is_active ? 'Active thread' : 'Archived thread'}
               </span>
             )}
             <button
@@ -293,41 +418,50 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
         ) : (
           <>
             {visibleTurns.map((turn, i) => (
-              <TurnGroupComponent
-                key={turn.turnSeq != null ? `turn-${turn.turnSeq}` : `turn-synthetic-${i}`}
-                turn={turn}
-                index={i}
-                tokenStats={turn.turnSeq != null ? turnTokenStats.get(turn.turnSeq) : undefined}
-                iterationStats={iterationStats}
-                sessionKey={session?.key}
-                suppressLoadingIndicator={isConsole && i === visibleTurns.length - 1 && hasVisibleStreamingOutput}
-                targetTaskId={targetTaskId}
-                targetTurnSeq={targetTurnSeq}
-              />
+              <div key={turn.turnSeq != null ? `turn-${turn.turnSeq}` : `turn-synthetic-${i}`} className="space-y-3">
+                <TurnGroupComponent
+                  turn={turn}
+                  index={i}
+                  tokenStats={turn.turnSeq != null ? turnTokenStats.get(turn.turnSeq) : undefined}
+                  iterationStats={iterationStats}
+                  sessionKey={session?.key}
+                  suppressLoadingIndicator={isConsole && i === visibleTurns.length - 1 && hasVisibleStreamingOutput}
+                  targetTaskId={targetTaskId}
+                  targetTurnSeq={targetTurnSeq}
+                  targetTraceId={targetTraceId}
+                  suppressedTaskIds={suppressedTaskIds}
+                />
+                {turn.turnSeq != null && renderTaskTimelineItems(taskItemsByTurn.get(turn.turnSeq) || [])}
+              </div>
             ))}
             {inFlightTurn && (
               <InFlightTurnBlock turn={inFlightTurn} />
             )}
-            {directTasks.map((task) => (
-              <TaskStatusCard key={task.task_id} task={task} />
-            ))}
+            {renderTaskTimelineItems(unanchoredTaskItems)}
           </>
+        )}
+        {showScrollDown && (
+          <div className="sticky bottom-3 z-10 flex justify-center pointer-events-none">
+            <button
+              onClick={scrollToBottom}
+              className="pointer-events-auto inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] shadow-lg shadow-black/20 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              title="Scroll to bottom"
+              aria-label="Scroll to bottom"
+            >
+              <ArrowDownToLine className="h-4 w-4" />
+            </button>
+          </div>
         )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Scroll to bottom floating button */}
-      {showScrollDown && (
-        <div className={`absolute z-10 ${isMobile ? 'bottom-16 right-4' : 'bottom-20 right-8'}`}>
-          <button
-            onClick={scrollToBottom}
-            className="p-2.5 rounded-full bg-[var(--accent)] text-white shadow-lg hover:bg-[var(--accent-hover)] transition-colors"
-            title="Scroll to bottom"
-          >
-            <ArrowDown className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <HudBar
+        session={session}
+        directTasks={directTasks}
+        activeTransport={activeTransport}
+        isReadOnly={!!isReadOnly}
+        onSkillSelect={handleSkillSelect}
+      />
 
       {/* Input (console only) */}
       {isConsole && !isReadOnly && (
@@ -348,6 +482,7 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
       <ContextInspector
         open={showInspector}
         sessionKey={session?.key || null}
+        sessionLabel={session ? headerTitle : ''}
         disabled={!!isReadOnly}
         onClose={() => setShowInspector(false)}
       />

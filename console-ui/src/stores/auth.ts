@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { api, setOnUnauthorized } from '../api/client'
 
-export type UserRole = 'admin' | 'editor' | 'viewer' | 'mock_tester'
+export type UserRole = 'admin' | 'editor' | 'viewer' | 'read_only' | 'mock_tester'
 
 export interface User {
   username: string
@@ -54,6 +54,6 @@ export const useAuth = create<AuthState>((set, get) => {
   isMockTester: () => get().user?.role === 'mock_tester',
   canEdit: () => {
     const role = get().user?.role
-    return role === 'admin' || role === 'editor' || role === 'mock_tester'
+    return role === 'admin' || role === 'editor'
   },
 }})

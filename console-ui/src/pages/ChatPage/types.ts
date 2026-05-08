@@ -13,8 +13,18 @@ export interface ChatComposePayload {
   attachments: File[]
 }
 
-export type DirectTaskType = 'codex' | 'claude_code' | 'image_gen'
-export type DirectTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+export type DirectTaskType = 'codex' | 'claude_code' | 'image_gen' | 'skill'
+export type DirectTaskStatus =
+  | 'pending'
+  | 'awaiting_deps'
+  | 'queued'
+  | 'running'
+  | 'streaming'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'skipped'
 
 export interface DirectTaskSubmitParams {
   task_type: DirectTaskType
@@ -40,7 +50,17 @@ export interface DirectTaskMessage {
   elapsed_ms: number
   result_preview?: string
   error_message?: string
+  origin_conversation_id?: string
+  origin_turn_seq?: number | null
+  progress_percent?: number
+  artifact_preview?: string
+  artifact_uri?: string
   trace_id?: string
+  chain_id?: string
+  parent_task_ids?: string[]
+  node_kind?: string
+  skill_name?: string
+  matched_by?: 'natural_language' | 'explicit'
 }
 
 export interface ChatFileUpload {
@@ -56,10 +76,13 @@ export interface ChatFileUpload {
 
 export interface SessionMeta {
   key: string
+  title?: string
   scene: SceneType
   created_at: string
   updated_at: string
   conversation_id: string
+  participants: string[]
+  default_responder_agent_id: string
   token_stats: {
     total_prompt_tokens: number
     total_completion_tokens: number
@@ -96,6 +119,8 @@ export interface RawMessage {
   name?: string
   reasoning_content?: string
   trace_id?: string
+  from_agent_id?: string
+  mentioned_agent_ids?: string[]
   metadata?: Record<string, unknown>
 }
 

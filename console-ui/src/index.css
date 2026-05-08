@@ -21,6 +21,40 @@
   animation: slide-in-left 0.2s ease-out;
 }
 
+@keyframes task-overlay-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-task-overlay-in {
+  animation: task-overlay-in 0.22s ease-out;
+}
+
+.mobile-chat-shell {
+  height: calc(100dvh - 4rem - env(safe-area-inset-bottom, 0px));
+}
+
+.mobile-task-overlay-body {
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+.safe-area-inset-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.mobile-keyboard-safe {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px));
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .mobile-chat-shell {
+    height: calc(100dvh - 3.5rem - env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-task-overlay-body {
+    padding: 0.75rem;
+  }
+}
+
 :root {
   --bg-primary: #0f172a;
   --bg-secondary: #1e293b;

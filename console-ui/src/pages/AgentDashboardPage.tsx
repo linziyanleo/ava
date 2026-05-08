@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, CheckCircle2, ExternalLink, Image as ImageIcon, Loader2, MessageSquare, Play, Power, RefreshCw, Send, Terminal, X, XCircle, Zap } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Bot, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, MessageSquare, Play, Power, RefreshCw, Send, Settings, Terminal, X, XCircle, Zap } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { cn } from '../lib/utils'
 import { useAuth } from '../stores/auth'
@@ -91,6 +91,52 @@ const STATUS_STYLE: Record<AgentStatus, { label: string; icon: typeof CheckCircl
   running: { label: 'running', icon: Loader2, className: 'bg-blue-500/10 text-blue-400' },
   available: { label: 'available', icon: CheckCircle2, className: 'bg-emerald-500/10 text-emerald-400' },
   unavailable: { label: 'unavailable', icon: XCircle, className: 'bg-red-500/10 text-red-400' },
+}
+
+const ROUTE_AGENT_NAME: Record<string, AgentName> = {
+  nanobot: 'nanobot',
+  codex: 'codex',
+  'claude-code': 'claude_code',
+  claude_code: 'claude_code',
+  'image-gen': 'image_gen',
+  image_gen: 'image_gen',
+}
+
+const AGENT_DETAIL_META: Record<AgentName, {
+  configLabel: string
+  configPath: string
+  configRoute?: string
+  docs: string[]
+  persona: string
+}> = {
+  nanobot: {
+    configLabel: 'Nanobot config.json',
+    configPath: 'config.json',
+    configRoute: '/settings/agents-config/nanobot/config',
+    docs: ['AGENTS.md', 'MEMORY.md', 'USER.md'],
+    persona: 'Nanobot persona and memory are managed by the Nanobot-specific tabs.',
+  },
+  codex: {
+    configLabel: 'Codex config.toml',
+    configPath: 'console/agents/codex/config.toml',
+    configRoute: '/settings/agents-config/codex/config',
+    docs: ['AGENTS.md'],
+    persona: 'Codex reads repository instructions and workspace AGENTS.md.',
+  },
+  claude_code: {
+    configLabel: 'Claude Code settings.json',
+    configPath: 'console/agents/claude_code/settings.json',
+    configRoute: '/settings/agents-config/claude-code/config',
+    docs: ['CLAUDE.md'],
+    persona: 'Claude Code reads project CLAUDE.md and its local settings.',
+  },
+  image_gen: {
+    configLabel: 'Image generation config',
+    configPath: 'console/agents/image_gen/config.json',
+    configRoute: '/settings/agents-config/image-gen/config',
+    docs: ['Image prompt and media artifact records'],
+    persona: 'Image Gen is provider-backed and uses prompt plus optional reference image.',
+  },
 }
 
 function AgentCard({
@@ -210,7 +256,7 @@ function AgentCard({
         {agent.installed && (agent.capabilities.supports_chat || agent.capabilities.supports_task) && (
           <button
             type="button"
-            onClick={() => navigate('/chat')}
+            onClick={() => navigate('/')}
             className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
           >
             <MessageSquare className="h-4 w-4" />
@@ -230,7 +276,7 @@ function AgentCard({
         {agent.active_tasks > 0 && (
           <button
             type="button"
-            onClick={() => navigate('/bg-tasks')}
+            onClick={() => navigate('/?view=tasks&task_view=current')}
             className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
           >
             <ExternalLink className="h-4 w-4" />
@@ -269,6 +315,233 @@ function AgentCard({
         )}
       </div>
     </section>
+  )
+}
+
+function AgentDetail({
+  agent,
+  canRunTasks,
+  canRestart,
+  onCancelTasks,
+  onStartTask,
+  onRestart,
+}: {
+  agent: AgentInfo
+  canRunTasks: boolean
+  canRestart: boolean
+  onCancelTasks: (agent: AgentInfo) => void
+  onStartTask: (agent: AgentInfo) => void
+  onRestart: (agent: AgentInfo) => void
+}) {
+  const navigate = useNavigate()
+  const Icon = AGENT_ICON[agent.name] || Bot
+  const status = STATUS_STYLE[agent.status]
+  const StatusIcon = status.icon
+  const meta = AGENT_DETAIL_META[agent.name]
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+        <div className="flex flex-wrap items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--accent)]">
+            <Icon className="h-6 w-6" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold text-[var(--text-primary)]">{agent.display_name}</h1>
+              <span className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium', status.className)}>
+                <StatusIcon className={cn('h-3.5 w-3.5', agent.status === 'running' && 'animate-spin')} />
+                {status.label}
+              </span>
+            </div>
+            <p className="mt-1 break-all font-mono text-xs text-[var(--text-secondary)]">{agent.instance_id}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/settings/agents-config')}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          >
+            Overview
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Version</p>
+            <p className="mt-1 min-h-5 truncate font-mono text-sm text-[var(--text-primary)]">{agent.version || '-'}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Kind</p>
+            <p className="mt-1 font-mono text-sm text-[var(--text-primary)]">{agent.kind}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Active tasks</p>
+            <p className="mt-1 font-mono text-sm text-[var(--text-primary)]">{agent.active_tasks}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Startup</p>
+            <p className="mt-1 text-sm text-[var(--text-primary)]">{agent.status === 'running' ? 'current process' : '-'}</p>
+          </div>
+        </div>
+
+        {agent.path && (
+          <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Path</p>
+            <p className="mt-1 break-all font-mono text-xs text-[var(--text-primary)]">{agent.path}</p>
+          </div>
+        )}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Settings className="h-4 w-4 text-[var(--accent)]" />
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Configuration</h2>
+          </div>
+          <div className="grid gap-2 text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="text-[var(--text-secondary)]">Source</span>
+              <span className="font-medium text-[var(--text-primary)]">{meta.configLabel}</span>
+            </div>
+            <div className="grid gap-1">
+              <span className="text-[var(--text-secondary)]">Path</span>
+              <span className="break-all rounded-lg bg-[var(--bg-primary)] px-2 py-1 font-mono text-xs text-[var(--text-primary)]">{meta.configPath}</span>
+            </div>
+            {meta.configRoute ? (
+              <button
+                type="button"
+                onClick={() => navigate(meta.configRoute!)}
+                className="mt-2 inline-flex h-9 w-fit items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              >
+                <FileText className="h-4 w-4" />
+                Edit Config
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <FileText className="h-4 w-4 text-[var(--accent)]" />
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Docs & Instructions</h2>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {meta.docs.map((doc) => (
+              <span key={doc} className="rounded bg-[var(--bg-tertiary)] px-2 py-1 text-xs text-[var(--text-secondary)]">
+                {doc}
+              </span>
+            ))}
+          </div>
+          <p className="mt-3 text-sm text-[var(--text-secondary)]">{meta.persona}</p>
+          {agent.name === 'nanobot' && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/settings/agents-config/nanobot/memory')}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              >
+                Memory
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/settings/agents-config/nanobot/persona')}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              >
+                Persona
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+        <h2 className="mb-3 text-base font-semibold text-[var(--text-primary)]">Actions</h2>
+        <div className="flex flex-wrap gap-2">
+          {agent.installed && (agent.capabilities.supports_chat || agent.capabilities.supports_task) && (
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Chat
+            </button>
+          )}
+          {agent.installed && agent.capabilities.supports_task && canRunTasks && (
+            <button
+              type="button"
+              onClick={() => onStartTask(agent)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              <Play className="h-4 w-4" />
+              Run Task
+            </button>
+          )}
+          {agent.active_tasks > 0 && (
+            <button
+              type="button"
+              onClick={() => navigate('/?view=tasks&task_view=current')}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Tasks
+            </button>
+          )}
+          {agent.active_tasks > 0 && agent.capabilities.supports_cancel && (
+            <button
+              type="button"
+              onClick={() => onCancelTasks(agent)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-500/30 px-3 text-sm text-red-300 hover:bg-red-500/10"
+            >
+              Cancel
+            </button>
+          )}
+          {canRestart && agent.capabilities.supports_restart && (
+            <button
+              type="button"
+              onClick={() => onRestart(agent)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              <Power className="h-4 w-4" />
+              Restart
+            </button>
+          )}
+        </div>
+      </section>
+
+      {(agent.recent_events.length > 0 || agent.recent_artifacts.length > 0) && (
+        <section className="grid gap-4 xl:grid-cols-2">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+            <h2 className="mb-3 text-base font-semibold text-[var(--text-primary)]">Recent Events</h2>
+            <div className="space-y-2">
+              {agent.recent_events.length > 0 ? agent.recent_events.map((event) => (
+                <div key={`${event.task_id}-${event.event}-${event.timestamp}`} className="rounded-lg bg-[var(--bg-primary)] p-3 text-xs">
+                  <div className="flex items-center gap-2 text-[var(--text-primary)]">
+                    <span className="font-mono">{event.event}</span>
+                    <span className="truncate text-[var(--text-secondary)]">{event.task_id}</span>
+                  </div>
+                  {event.detail && <p className="mt-1 line-clamp-2 text-[var(--text-secondary)]">{event.detail}</p>}
+                </div>
+              )) : <p className="text-sm text-[var(--text-secondary)]">No recent events.</p>}
+            </div>
+          </div>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+            <h2 className="mb-3 text-base font-semibold text-[var(--text-primary)]">Artifacts</h2>
+            <div className="space-y-2">
+              {agent.recent_artifacts.length > 0 ? agent.recent_artifacts.map((artifact) => (
+                <div key={`${artifact.task_id}-${artifact.type}`} className="rounded-lg bg-[var(--bg-primary)] p-3 text-xs">
+                  <div className="flex items-center gap-2 text-[var(--text-primary)]">
+                    <span className="font-mono">{artifact.type}</span>
+                    <span className="truncate text-[var(--text-secondary)]">{artifact.task_id}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-3 text-[var(--text-secondary)]">{artifact.preview}</p>
+                </div>
+              )) : <p className="text-sm text-[var(--text-secondary)]">No recent artifacts.</p>}
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
   )
 }
 
@@ -372,6 +645,7 @@ function TaskModal({
 }
 
 export default function AgentDashboardPage() {
+  const { agentKind } = useParams()
   const [data, setData] = useState<AgentsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -479,12 +753,54 @@ export default function AgentDashboardPage() {
   }, [loadAgents])
 
   const agents = data?.agents ?? []
+  const detailAgentName = agentKind ? ROUTE_AGENT_NAME[agentKind] : undefined
+  const detailAgent = detailAgentName ? agents.find((agent) => agent.name === detailAgentName) : null
   const running = data?.summary.running ?? 0
   const available = data?.summary.available ?? 0
   const unavailable = useMemo(
     () => agents.filter((agent) => !agent.installed).length,
     [agents],
   )
+
+  if (detailAgentName) {
+    return (
+      <div>
+        {error && (
+          <div className="mb-4 rounded-lg bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</div>
+        )}
+        {message && (
+          <div className="mb-4 rounded-lg bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{message}</div>
+        )}
+        {loading && !data ? (
+          <div className="flex items-center justify-center py-16 text-[var(--text-secondary)]">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : detailAgent ? (
+          <AgentDetail
+            agent={detailAgent}
+            canRunTasks={canRunTasks}
+            canRestart={canRestart}
+            onCancelTasks={handleCancelTasks}
+            onStartTask={handleStartTask}
+            onRestart={handleRestart}
+          />
+        ) : (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-6 text-sm text-[var(--text-secondary)]">
+            Agent not found: {agentKind}
+          </div>
+        )}
+        {taskDraft && (
+          <TaskModal
+            draft={taskDraft}
+            submitting={submittingTask}
+            onChange={setTaskDraft}
+            onClose={() => setTaskDraft(null)}
+            onSubmit={handleSubmitTask}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div>

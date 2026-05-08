@@ -1,4 +1,4 @@
-import { Copy, Check, Brain, ChevronDown, ChevronRight, Info, Eye, Mic, FileText } from 'lucide-react';
+import { Copy, Check, Brain, ChevronDown, ChevronRight, Info, Eye, Mic, FileText, Bot, Terminal, Zap } from 'lucide-react';
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer';
@@ -133,6 +133,18 @@ interface MessageBubbleProps {
   markdownInstanceKey?: string | number;
 }
 
+const AGENT_DISPLAY: Record<string, { label: string; icon: typeof Bot }> = {
+  nanobot: { label: 'Nanobot', icon: Bot },
+  codex: { label: 'Codex', icon: Zap },
+  claude_code: { label: 'Claude Code', icon: Terminal },
+  image_gen: { label: 'Image Gen', icon: FileText },
+}
+
+function normalizeAgentId(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.replace(/^@/, '').replace(/:/g, '_')
+}
+
 export const MessageBubble = React.memo(function MessageBubble({
   message,
   isUser,
@@ -143,13 +155,18 @@ export const MessageBubble = React.memo(function MessageBubble({
   markdownInstanceKey,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
+  const [traceCopied, setTraceCopied] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [showTokenInfo, setShowTokenInfo] = useState(false);
   const [showMobileTokenInfo, setShowMobileTokenInfo] = useState(false);
+  const [showAgentMenu, setShowAgentMenu] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const mobilePopoverRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useResponsiveMode();
   const navigate = useNavigate();
+  const agentId = !isUser ? normalizeAgentId(message.from_agent_id || message.metadata?.from_agent_id || 'nanobot') : ''
+  const agent = agentId ? (AGENT_DISPLAY[agentId] || { label: agentId, icon: Bot }) : null
+  const AgentIcon = agent?.icon || Bot
   const { text: textWithoutAttachments, images, files } = extractMessageAttachments(message.content);
   const text = getContentText(message.content);
   const reasoning = message.reasoning_content;
@@ -178,8 +195,61 @@ export const MessageBubble = React.memo(function MessageBubble({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const handleCopyTraceLink = () => {
+    if (!message.trace_id) return
+    navigator.clipboard.writeText(`${window.location.origin}/?trace_id=${encodeURIComponent(message.trace_id)}`)
+    setTraceCopied(true)
+    setTimeout(() => setTraceCopied(false), 1500)
+  }
+
   return (
     <div className={cn('flex group', isUser ? 'justify-end' : 'justify-start')}>
+      {!isUser && agent && (
+        <div className="relative mr-2 mt-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowAgentMenu((open) => !open)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--accent)] hover:border-[var(--accent)]"
+            title={agent.label}
+          >
+            <AgentIcon className="h-4 w-4" />
+          </button>
+          {showAgentMenu && (
+            <div className="absolute left-0 top-9 z-20 w-40 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-xl">
+              <div className="border-b border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-primary)]">
+                {agent.label}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAgentMenu(false)
+                  navigate('/settings/agents-config')
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                查看状态
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(`@${agentId} `)
+                  setShowAgentMenu(false)
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                @Ta
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAgentMenu(false)}
+                className="block w-full px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                进入私聊
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <div className={cn('flex items-stretch', isUser ? 'max-w-[80%]' : 'max-w-[85%]')}>
       <div className="relative max-w-full min-w-0 flex-1">
         {/* Reasoning content (collapsible, shown above the main bubble for assistant) */}
@@ -273,6 +343,15 @@ export const MessageBubble = React.memo(function MessageBubble({
                 >
                   {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
                 </button>
+                {message.trace_id && (
+                  <button
+                    onClick={handleCopyTraceLink}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)]"
+                    title="Copy trace link"
+                  >
+                    {traceCopied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                )}
                 {tokenStats && !isUser && (
                   <div className="relative" ref={popoverRef}>
                     <button
@@ -344,5 +423,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   );
 }, (prev, next) => {
   return prev.message.content === next.message.content &&
+         prev.message.trace_id === next.message.trace_id &&
+         prev.message.from_agent_id === next.message.from_agent_id &&
          prev.tokenStats === next.tokenStats
 })
