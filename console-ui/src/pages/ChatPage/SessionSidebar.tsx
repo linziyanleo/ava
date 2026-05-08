@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Trash2, Pencil, Check, X, CornerDownRight, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Plus, MessageSquare, Trash2, Pencil, Check, X, CornerDownRight, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { SessionMeta, ConversationMeta } from './types'
 import { formatTokenCount, getAgentInitial, getAgentLabel, getSessionParticipants, getSessionTitle } from './utils'
@@ -49,10 +49,37 @@ export function SessionSidebar({
   const [editingFilename, setEditingFilename] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [focusSearchAfterExpand, setFocusSearchAfterExpand] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     localStorage.setItem('chat-sidebar-collapsed', String(collapsed))
   }, [collapsed])
+
+  useEffect(() => {
+    if (collapsed || !focusSearchAfterExpand) return
+    const frame = requestAnimationFrame(() => {
+      searchInputRef.current?.focus()
+      setFocusSearchAfterExpand(false)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [collapsed, focusSearchAfterExpand])
+
+  const getSessionPreview = (s: SessionMeta) => {
+    const primaryConversation = (conversationLists[s.key] || []).find((item) => item.is_active) || (conversationLists[s.key] || [])[0]
+    return primaryConversation?.first_message_preview || (s.message_count > 0 ? `${s.message_count} messages` : 'New conversation')
+  }
+
+  const visibleSessions = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return sessions
+    return sessions.filter((s) => {
+      const searchable = `${getSessionTitle(s)} ${getSessionPreview(s)}`.toLowerCase()
+      return searchable.includes(query)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationLists, search, sessions])
 
   const startRename = (s: SessionMeta, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -73,45 +100,78 @@ export function SessionSidebar({
     <div
       className={cn(
         'h-full shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border)] flex flex-col transition-all duration-300 overflow-hidden',
-        collapsed ? 'w-8' : 'w-full sm:w-64',
+        collapsed ? 'w-12' : 'w-full sm:w-64',
       )}
     >
       {collapsed ? (
-        <div className="flex flex-col items-center pt-2">
+        <div className="flex flex-col items-center gap-1 pt-2">
+          {canManageSessions && (
+            <button
+              onClick={onCreateConsole}
+              className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+              title="新建对话"
+              aria-label="新建对话"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setFocusSearchAfterExpand(true)
+              setCollapsed(false)
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+            title="搜索会话"
+            aria-label="搜索会话"
+          >
+            <Search className="h-4 w-4" />
+          </button>
           <button
             onClick={() => setCollapsed(false)}
-            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             title="展开侧边栏"
+            aria-label="展开侧边栏"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       ) : (
         <>
-          <div className="p-2 border-b border-[var(--border)] flex items-center gap-1">
-            {canManageSessions && (
+          <div className="border-b border-[var(--border)] p-2">
+            <div className="flex items-center gap-1">
+              {canManageSessions && (
+                <button
+                  onClick={onCreateConsole}
+                  className="flex items-center gap-2 flex-1 px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> New Chat
+                </button>
+              )}
               <button
-                onClick={onCreateConsole}
-                className="flex items-center gap-2 flex-1 px-3 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors"
+                onClick={() => setCollapsed(true)}
+                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors shrink-0"
+                title="折叠侧边栏"
               >
-                <Plus className="w-4 h-4" /> New Chat
+                <ChevronLeft className="w-4 h-4" />
               </button>
-            )}
-            <button
-              onClick={() => setCollapsed(true)}
-              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors shrink-0"
-              title="折叠侧边栏"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
+            </div>
+            <label className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[var(--text-secondary)]">
+              <Search className="h-3.5 w-3.5 shrink-0" />
+              <input
+                ref={searchInputRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索会话"
+                className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
+              />
+            </label>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-            {sessions.map((s) => {
+            {visibleSessions.map((s) => {
               const participants = getSessionParticipants(s)
               const participantLabels = participants.map(getAgentLabel).filter(Boolean)
-              const primaryConversation = (conversationLists[s.key] || []).find((item) => item.is_active) || (conversationLists[s.key] || [])[0]
-              const preview = primaryConversation?.first_message_preview || (s.message_count > 0 ? `${s.message_count} messages` : 'New conversation')
+              const preview = getSessionPreview(s)
               return (
               <div key={s.key}>
                 <div
@@ -257,6 +317,11 @@ export function SessionSidebar({
             {sessions.length === 0 && (
               <p className="text-center text-xs text-[var(--text-secondary)] py-8">
                 No sessions
+              </p>
+            )}
+            {sessions.length > 0 && visibleSessions.length === 0 && (
+              <p className="text-center text-xs text-[var(--text-secondary)] py-8">
+                无匹配会话
               </p>
             )}
           </div>
