@@ -42,7 +42,7 @@ export default function TaskFloater() {
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <BgTasksPage embedded taskView="current" taskId={selectedTaskId} />
+          <BgTasksPage embedded taskView="all" taskId={selectedTaskId} />
         </div>
       </aside>
     </div>,

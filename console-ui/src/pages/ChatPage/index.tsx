@@ -1103,7 +1103,7 @@ export default function ChatPage() {
     navigate(`/?view=tasks&task_id=${encodeURIComponent(taskId)}`)
   }, [navigate])
   const openMobileTaskList = useCallback(() => {
-    navigate('/?view=tasks&task_view=current')
+    navigate('/?view=tasks&task_view=all')
   }, [navigate])
   const closeTaskOverlay = useCallback(() => {
     const next = new URLSearchParams(searchParams)

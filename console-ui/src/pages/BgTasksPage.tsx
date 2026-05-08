@@ -101,6 +101,8 @@ interface HistoryResponse {
   page_size: number
 }
 
+export type BgTaskView = 'all' | 'current' | 'history'
+
 // --- Module B: Task type visual config ---
 
 const TASK_TYPE_STYLE: Record<string, {
@@ -855,13 +857,13 @@ function Pagination({
 
 export default function BgTasksPage({
   embedded = false,
-  taskView = 'current',
+  taskView = 'all',
   taskId,
   traceId,
   chainId,
 }: {
   embedded?: boolean
-  taskView?: 'current' | 'history'
+  taskView?: BgTaskView
   taskId?: string | null
   traceId?: string | null
   chainId?: string | null
@@ -894,7 +896,7 @@ export default function BgTasksPage({
   const canCancelTasks = canEdit()
 
   useEffect(() => {
-    setShowHistory(taskView === 'history')
+    setShowHistory(taskView !== 'current')
   }, [taskView])
 
   useEffect(() => {
@@ -955,7 +957,7 @@ export default function BgTasksPage({
   const fetchOnce = useCallback(async () => {
     try {
       const params = new URLSearchParams({
-        include_finished: deepLinkTraceId || deepLinkChainId ? 'true' : 'false',
+        include_finished: taskView === 'all' || deepLinkTraceId || deepLinkChainId ? 'true' : 'false',
       })
       if (deepLinkTraceId) params.set('trace_id', deepLinkTraceId)
       if (deepLinkChainId) params.set('chain_id', deepLinkChainId)
@@ -965,7 +967,7 @@ export default function BgTasksPage({
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     }
-  }, [deepLinkChainId, deepLinkTraceId])
+  }, [deepLinkChainId, deepLinkTraceId, taskView])
 
   const fetchHistory = useCallback((
     page: number,
@@ -1155,6 +1157,7 @@ export default function BgTasksPage({
   const hasFilter = typeFilter !== 'all' || statusFilter !== 'all'
   const showCurrentSections = taskView !== 'history'
   const showHistorySection = taskView !== 'current'
+  const showRecentFinishedSection = taskView === 'current'
 
   return (
     <div className={cn(embedded ? 'h-full' : 'h-[calc(100vh-3rem)]', 'flex flex-col')}>
@@ -1230,7 +1233,7 @@ export default function BgTasksPage({
             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
             加载中...
           </div>
-        ) : showCurrentSections && activeTasks.length === 0 && recentFinished.length === 0 && !showHistory && !hasFilter ? (
+        ) : showCurrentSections && activeTasks.length === 0 && (!showRecentFinishedSection || recentFinished.length === 0) && !showHistory && !hasFilter ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Clock className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p>暂无活跃任务</p>
@@ -1281,7 +1284,7 @@ export default function BgTasksPage({
               </section>
             )}
 
-            {showCurrentSections && recentFinished.length > 0 && (
+            {showCurrentSections && showRecentFinishedSection && recentFinished.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2">
                   最近完成 ({recentFinished.length})
@@ -1300,7 +1303,7 @@ export default function BgTasksPage({
               </section>
             )}
 
-            {showCurrentSections && hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
+            {showCurrentSections && !showHistorySection && hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
               <div className="text-center py-12 text-[var(--text-secondary)]">
                 <p className="text-sm">无匹配任务</p>
                 <button onClick={clearFilters} className="mt-2 text-xs text-[var(--accent)] hover:underline">

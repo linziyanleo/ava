@@ -1,14 +1,15 @@
 import { useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
-import BgTasksPage from '../BgTasksPage'
+import BgTasksPage, { type BgTaskView } from '../BgTasksPage'
 import MediaPage from '../MediaPage'
 import ScheduledTasksPage from '../ScheduledTasksPage'
 import { cn } from '../../lib/utils'
 
-export type TaskOverlaySection = 'current' | 'history' | 'scheduled' | 'artifacts'
+export type TaskOverlaySection = BgTaskView | 'scheduled' | 'artifacts'
 
 const SECTIONS: Array<{ id: TaskOverlaySection; label: string }> = [
+  { id: 'all', label: '全部' },
   { id: 'current', label: '当前进行中' },
   { id: 'history', label: '历史' },
   { id: 'scheduled', label: '定时任务' },
@@ -16,8 +17,8 @@ const SECTIONS: Array<{ id: TaskOverlaySection; label: string }> = [
 ]
 
 function normalizeSection(value: string | null): TaskOverlaySection {
-  if (value === 'history' || value === 'scheduled' || value === 'artifacts') return value
-  return 'current'
+  if (value === 'all' || value === 'current' || value === 'history' || value === 'scheduled' || value === 'artifacts') return value
+  return 'all'
 }
 
 function overlaySubtitle({
