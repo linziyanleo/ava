@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, Loader2, Timer } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { cn } from '../../lib/utils'
+import { useAuth } from '../../stores/auth'
 
 interface ActiveTask {
   task_id: string
@@ -16,6 +16,12 @@ interface ActiveTasksResponse {
   tasks: ActiveTask[]
 }
 
+interface TaskPreviewBarProps {
+  onOpenTask: (taskId: string) => void
+  onOpenList: () => void
+  density?: 'topbar' | 'inline'
+}
+
 const ACTIVE_STATUSES = new Set(['pending', 'awaiting_deps', 'queued', 'running', 'streaming'])
 
 function statusClass(status: string) {
@@ -26,15 +32,13 @@ function statusClass(status: string) {
   return 'border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
 }
 
-export function TaskPreviewBar({ mockMode }: { mockMode: boolean }) {
-  const navigate = useNavigate()
+export function TaskPreviewBar({ onOpenTask, onOpenList, density = 'inline' }: TaskPreviewBarProps) {
+  const { isMockTester } = useAuth()
+  const mockMode = isMockTester()
   const [tasks, setTasks] = useState<ActiveTask[]>([])
 
   useEffect(() => {
-    if (mockMode) {
-      setTasks([])
-      return
-    }
+    if (mockMode) return
 
     let disposed = false
     const loadTasks = () => {
@@ -56,12 +60,19 @@ export function TaskPreviewBar({ mockMode }: { mockMode: boolean }) {
   }, [mockMode])
 
   const activeTasks = useMemo(
-    () => tasks.filter((task) => ACTIVE_STATUSES.has(task.status)).slice(0, 8),
-    [tasks],
+    () => mockMode ? [] : tasks.filter((task) => ACTIVE_STATUSES.has(task.status)).slice(0, 8),
+    [mockMode, tasks],
   )
 
   return (
-    <div className="flex min-h-11 items-center gap-2 border-b border-[var(--border)] bg-[var(--bg-secondary)] px-3">
+    <div
+      className={cn(
+        'flex items-center gap-2 bg-[var(--bg-secondary)] px-3',
+        density === 'topbar'
+          ? 'h-14 min-w-0 border-x border-[var(--border)]'
+          : 'min-h-11 border-b border-[var(--border)]',
+      )}
+    >
       <div className="flex shrink-0 items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
         <Timer className="h-4 w-4" />
         Tasks
@@ -72,7 +83,7 @@ export function TaskPreviewBar({ mockMode }: { mockMode: boolean }) {
             <button
               key={task.task_id}
               type="button"
-              onClick={() => navigate(`/?view=tasks&task_id=${encodeURIComponent(task.task_id)}`)}
+              onClick={() => onOpenTask(task.task_id)}
               className={cn('inline-flex max-w-64 shrink-0 items-center gap-2 rounded-md border px-2.5 py-1 text-xs', statusClass(task.status))}
               title={task.prompt_preview || task.task_id}
             >
@@ -89,7 +100,7 @@ export function TaskPreviewBar({ mockMode }: { mockMode: boolean }) {
       </div>
       <button
         type="button"
-        onClick={() => navigate('/?view=tasks&task_view=current')}
+        onClick={onOpenList}
         className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 text-xs text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
       >
         <ExternalLink className="h-3.5 w-3.5" />

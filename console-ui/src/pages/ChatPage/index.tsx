@@ -18,7 +18,7 @@ import {
 import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
 import { ConversationConfigBar } from './ConversationConfigBar'
-import { TaskPreviewBar } from './TaskPreviewBar'
+import { TaskPreviewBar } from '../../components/tasks/TaskPreviewBar'
 import { TaskOverlay } from './TaskOverlay'
 
 const SESSION_LIST_POLL_MS = 30_000
@@ -1099,6 +1099,12 @@ export default function ChatPage() {
     && (!task.origin_conversation_id || !activeConversationId || task.origin_conversation_id === activeConversationId)
   ))
   const showTaskOverlay = view === 'tasks' || !!deepLinkTaskId || !!deepLinkChainId || !!taskView || !!deepLinkTraceId
+  const openMobileTask = useCallback((taskId: string) => {
+    navigate(`/?view=tasks&task_id=${encodeURIComponent(taskId)}`)
+  }, [navigate])
+  const openMobileTaskList = useCallback(() => {
+    navigate('/?view=tasks&task_view=current')
+  }, [navigate])
   const closeTaskOverlay = useCallback(() => {
     const next = new URLSearchParams(searchParams)
     next.delete('view')
@@ -1132,7 +1138,7 @@ export default function ChatPage() {
   }, [activeSession, filteredSessions, handleSessionSelect, isMobile, mobileSessionOpen, showTaskOverlay])
 
   return (
-    <div className={isMobile ? 'mobile-chat-shell relative -m-4 -mb-20 flex flex-col overflow-hidden' : 'relative -m-6 h-[calc(100vh)] flex flex-col overflow-hidden'}>
+    <div className={isMobile ? 'mobile-chat-shell relative -m-4 -mb-20 flex flex-col overflow-hidden' : 'relative -m-6 flex h-full flex-col overflow-hidden'}>
       {(mockMode || !canMutateChat) && (
         <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
           只读模式 · 申请权限
@@ -1154,7 +1160,13 @@ export default function ChatPage() {
         </div>
       )}
 
-      <TaskPreviewBar mockMode={mockMode} />
+      {isMobile && (
+        <TaskPreviewBar
+          density="inline"
+          onOpenTask={openMobileTask}
+          onOpenList={openMobileTaskList}
+        />
+      )}
       <ConversationConfigBar
         session={currentMeta}
         activeScene={activeScene}

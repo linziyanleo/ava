@@ -123,7 +123,7 @@ export function TaskOverlay({
         ) : section === 'artifacts' ? (
           <MediaPage />
         ) : (
-          <BgTasksPage embedded taskView={section} traceId={traceId} chainId={chainId} />
+          <BgTasksPage embedded taskView={section} taskId={taskId} traceId={traceId} chainId={chainId} />
         )}
       </div>
     </section>

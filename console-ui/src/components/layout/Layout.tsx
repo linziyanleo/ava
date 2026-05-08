@@ -4,7 +4,8 @@ import { cn } from '../../lib/utils'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 import { useAuth } from '../../stores/auth'
 import { filterNavItems } from './navItems'
-import Sidebar from './Sidebar'
+import TaskFloater from '../tasks/TaskFloater'
+import TopBar from './TopBar'
 
 function MobileBottomNav() {
   const location = useLocation()
@@ -75,16 +76,12 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 min-w-0 p-6">
-        {user?.role === 'mock_tester' && (
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
-            MOCK SANDBOX
-          </div>
-        )}
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <TopBar />
+      <main className="min-h-0 flex-1 overflow-y-auto p-6">
         <Outlet />
       </main>
+      <TaskFloater />
     </div>
   )
 }

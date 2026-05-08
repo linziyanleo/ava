@@ -114,7 +114,7 @@ export default function SettingsPage() {
   const inTools = location.pathname.startsWith('/settings/tools')
 
   return (
-    <div className="-m-4 -mb-20 flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--bg-primary)] md:-m-6 md:h-screen md:min-h-0 md:flex-row">
+    <div className="-m-4 -mb-20 flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--bg-primary)] md:-m-6 md:h-full md:min-h-0 md:flex-row">
       <aside className="w-full shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)] p-4 md:w-72 md:border-b-0 md:border-r">
         <div className="mb-4">
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h1>

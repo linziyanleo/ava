@@ -407,7 +407,7 @@ function TaskCard({
   onNavigateToChat,
 }: {
   task: TaskItem
-  onCancel: (id: string) => void
+  onCancel?: (id: string) => void
   highlighted?: boolean
   defaultExpanded?: boolean
   onNavigateToChat?: (task: TaskItem) => void
@@ -598,7 +598,7 @@ function TaskCard({
               <span className="hidden sm:inline">对话</span>
             </button>
           )}
-          {isActive && (
+          {isActive && onCancel && (
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -856,17 +856,19 @@ function Pagination({
 export default function BgTasksPage({
   embedded = false,
   taskView = 'current',
+  taskId,
   traceId,
   chainId,
 }: {
   embedded?: boolean
   taskView?: 'current' | 'history'
+  taskId?: string | null
   traceId?: string | null
   chainId?: string | null
 } = {}) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const deepLinkTaskId = searchParams.get('task_id') || null
+  const deepLinkTaskId = taskId ?? searchParams.get('task_id') ?? null
   const deepLinkTraceId = traceId ?? searchParams.get('trace_id') ?? null
   const deepLinkChainId = chainId ?? searchParams.get('chain_id') ?? null
 
@@ -887,12 +889,22 @@ export default function BgTasksPage({
   const [historyPage, setHistoryPage] = useState(1)
   const [historyLoading, setHistoryLoading] = useState(false)
   const PAGE_SIZE = 15
-  const { isMockTester } = useAuth()
+  const { canEdit, isMockTester } = useAuth()
   const mockMode = isMockTester()
+  const canCancelTasks = canEdit()
 
   useEffect(() => {
     setShowHistory(taskView === 'history')
   }, [taskView])
+
+  useEffect(() => {
+    const resetTimer = window.setTimeout(() => {
+      setFocusedTask(null)
+      setDeepLinkNotice(null)
+      deepLinkScrolledRef.current = null
+    }, 0)
+    return () => window.clearTimeout(resetTimer)
+  }, [deepLinkTaskId])
 
   // Module D: filter state
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
@@ -1200,7 +1212,7 @@ export default function BgTasksPage({
             </h2>
             <TaskCard
               task={focusedTask}
-              onCancel={handleCancel}
+              onCancel={canCancelTasks ? handleCancel : undefined}
               highlighted={deepLinkTaskId === focusedTask.task_id}
               defaultExpanded
               onNavigateToChat={handleNavigateToChat}
@@ -1255,7 +1267,7 @@ export default function BgTasksPage({
                               <TaskCard
                                 key={t.task_id}
                                 task={t}
-                                onCancel={handleCancel}
+                                onCancel={canCancelTasks ? handleCancel : undefined}
                                 highlighted={deepLinkTaskId === t.task_id}
                                 onNavigateToChat={handleNavigateToChat}
                               />
@@ -1279,7 +1291,7 @@ export default function BgTasksPage({
                     <TaskCard
                       key={t.task_id}
                       task={t}
-                      onCancel={handleCancel}
+                      onCancel={canCancelTasks ? handleCancel : undefined}
                       highlighted={deepLinkTaskId === t.task_id}
                       onNavigateToChat={handleNavigateToChat}
                     />
@@ -1326,7 +1338,7 @@ export default function BgTasksPage({
                       <TaskCard
                         key={t.task_id}
                         task={t}
-                        onCancel={handleCancel}
+                        onCancel={canCancelTasks ? handleCancel : undefined}
                         highlighted={deepLinkTaskId === t.task_id}
                         onNavigateToChat={handleNavigateToChat}
                       />
