@@ -1,0 +1,16 @@
+{
+  "name": "@ava/electron-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "node scripts/build.mjs",
+    "build:dry-run": "node scripts/build.mjs --dry-run"
+  },
+  "devDependencies": {
+    "@electron/packager": "latest",
+    "electron": "latest"
+  }
+}

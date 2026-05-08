@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="${AVA_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "${REPO_ROOT}"
+
+./scripts/start-ava.sh gateway &
+core_pid=$!
+
+shutdown() {
+  if kill -0 "${core_pid}" 2>/dev/null; then
+    kill -TERM "${core_pid}" 2>/dev/null || true
+  fi
+  wait "${core_pid}" 2>/dev/null || true
+  exit 0
+}
+
+trap shutdown INT TERM
+wait "${core_pid}"
