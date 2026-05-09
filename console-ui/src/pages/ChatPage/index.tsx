@@ -19,7 +19,7 @@ import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
 import { ConversationConfigBar } from './ConversationConfigBar'
 import { TaskPreviewBar } from '../../components/tasks/TaskPreviewBar'
-import { TaskOverlay } from './TaskOverlay'
+import { useTaskFloater } from '../../stores/taskFloater'
 
 const SESSION_LIST_POLL_MS = 30_000
 const DIRECT_TASK_POLL_MS = 2_000
@@ -108,6 +108,7 @@ function disposeSocket(socket: WebSocket | null, onDispose?: () => void) {
 export default function ChatPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const deepLinkSessionKey = searchParams.get('session_key') || searchParams.get('session_id') || null
   const deepLinkConversationId = searchParams.get('conversation_id') || null
   const deepLinkTaskId = searchParams.get('task_id') || null
@@ -1098,33 +1099,57 @@ export default function ChatPage() {
     task.session_key === activeSession
     && (!task.origin_conversation_id || !activeConversationId || task.origin_conversation_id === activeConversationId)
   ))
-  const showTaskOverlay = view === 'tasks' || !!deepLinkTaskId || !!deepLinkChainId || !!taskView || !!deepLinkTraceId
-  const openMobileTask = useCallback((taskId: string) => {
-    navigate(`/?view=tasks&task_id=${encodeURIComponent(taskId)}`)
-  }, [navigate])
-  const openMobileTaskList = useCallback(() => {
-    navigate('/?view=tasks&task_view=all')
-  }, [navigate])
-  const closeTaskOverlay = useCallback(() => {
+  const taskFloaterRouteActive = view === 'tasks' || !!taskView || !!deepLinkChainId || (!!deepLinkTaskId && !deepLinkSessionKey && !deepLinkConversationId)
+
+  useEffect(() => {
+    if (!taskFloaterRouteActive) return
+
+    const bgView = taskView === 'current' || taskView === 'history' || taskView === 'all' ? taskView : 'all'
+    openTaskFloater({
+      panel: taskView === 'scheduled' ? 'scheduled' : taskView === 'artifacts' ? 'artifacts' : 'background',
+      bgView,
+      taskId: deepLinkTaskId,
+      chainId: deepLinkChainId,
+      traceId: deepLinkTraceId,
+    })
+
     const next = new URLSearchParams(searchParams)
     next.delete('view')
-    next.delete('task_id')
-    next.delete('chain_id')
     next.delete('task_view')
-    next.delete('trace_id')
-    next.delete('turn_seq')
+    next.delete('chain_id')
+    if (view === 'tasks' || !deepLinkSessionKey) next.delete('task_id')
+    if (view === 'tasks' || taskView || deepLinkChainId) next.delete('trace_id')
     const query = next.toString()
-    navigate({ pathname: '/', search: query ? `?${query}` : '' })
-  }, [navigate, searchParams])
+    navigate({ pathname: '/', search: query ? `?${query}` : '' }, { replace: true })
+  }, [
+    deepLinkChainId,
+    deepLinkConversationId,
+    deepLinkSessionKey,
+    deepLinkTaskId,
+    deepLinkTraceId,
+    navigate,
+    openTaskFloater,
+    searchParams,
+    taskFloaterRouteActive,
+    taskView,
+    view,
+  ])
+
+  const openMobileTask = useCallback((taskId: string) => {
+    openTaskFloater({ panel: 'background', bgView: 'all', taskId })
+  }, [openTaskFloater])
+  const openMobileTaskList = useCallback(() => {
+    openTaskFloater({ panel: 'background', bgView: 'all' })
+  }, [openTaskFloater])
   const handleMobileSessionSwipeStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
-    if (!isMobile || mobileSessionOpen || showTaskOverlay) return
+    if (!isMobile || mobileSessionOpen) return
     const touch = event.touches[0]
     mobileSessionSwipeStart.current = { x: touch.clientX, y: touch.clientY }
-  }, [isMobile, mobileSessionOpen, showTaskOverlay])
+  }, [isMobile, mobileSessionOpen])
   const handleMobileSessionSwipeEnd = useCallback((event: TouchEvent<HTMLDivElement>) => {
     const start = mobileSessionSwipeStart.current
     mobileSessionSwipeStart.current = null
-    if (!isMobile || !start || mobileSessionOpen || showTaskOverlay || filteredSessions.length < 2) return
+    if (!isMobile || !start || mobileSessionOpen || filteredSessions.length < 2) return
     const touch = event.changedTouches[0]
     const dx = touch.clientX - start.x
     const dy = touch.clientY - start.y
@@ -1135,7 +1160,7 @@ export default function ChatPage() {
     if (nextIndex !== index) {
       handleSessionSelect(filteredSessions[nextIndex].key)
     }
-  }, [activeSession, filteredSessions, handleSessionSelect, isMobile, mobileSessionOpen, showTaskOverlay])
+  }, [activeSession, filteredSessions, handleSessionSelect, isMobile, mobileSessionOpen])
 
   return (
     <div className={isMobile ? 'mobile-chat-shell relative -m-4 -mb-20 flex flex-col overflow-hidden' : 'relative -m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col overflow-hidden'}>
@@ -1247,16 +1272,6 @@ export default function ChatPage() {
           targetTraceId={deepLinkTraceId}
         />
       </div>
-      {showTaskOverlay && (
-        <TaskOverlay
-          taskId={deepLinkTaskId}
-          chainId={deepLinkChainId}
-          traceId={deepLinkTraceId}
-          taskView={taskView}
-          isMobile={isMobile}
-          onClose={closeTaskOverlay}
-        />
-      )}
     </div>
   )
 }

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { ExternalLink, GitBranch } from 'lucide-react'
 import { api } from '../../api/client'
 import { cn } from '../../lib/utils'
+import { useTaskFloater } from '../../stores/taskFloater'
 import type { DirectTaskMessage, DirectTaskStatus } from './types'
 import type { WorkflowChain } from '../../stores/useWorkflowStore'
 import {
@@ -43,7 +43,7 @@ export function ChainBubble({
   chainId: string
   tasks: DirectTaskMessage[]
 }) {
-  const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const [busyAction, setBusyAction] = useState<'cancel' | 'retry' | ''>('')
   const [actionError, setActionError] = useState('')
   const orderedTasks = useMemo(() => orderTasks(tasks), [tasks])
@@ -62,7 +62,7 @@ export function ChainBubble({
     setActionError('')
     try {
       await api<WorkflowChain>(`/workflows/${encodeURIComponent(chainId)}/cancel`, { method: 'POST' })
-      navigate(`/?view=tasks&chain_id=${encodeURIComponent(chainId)}`)
+      openTaskFloater({ panel: 'background', bgView: 'all', chainId })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to cancel chain')
     } finally {
@@ -75,11 +75,7 @@ export function ChainBubble({
     setActionError('')
     try {
       const next = await api<WorkflowChain>(`/workflows/${encodeURIComponent(chainId)}/retry`, { method: 'POST' })
-      const params = new URLSearchParams()
-      params.set('view', 'tasks')
-      params.set('chain_id', next.chain_id)
-      if (next.trace_id || traceId) params.set('trace_id', next.trace_id || traceId)
-      navigate({ pathname: '/', search: `?${params.toString()}` })
+      openTaskFloater({ panel: 'background', bgView: 'all', chainId: next.chain_id, traceId: next.trace_id || traceId })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to retry chain')
     } finally {
@@ -118,7 +114,7 @@ export function ChainBubble({
         </div>
         <button
           type="button"
-          onClick={() => navigate(`/?view=tasks&chain_id=${encodeURIComponent(chainId)}`)}
+          onClick={() => openTaskFloater({ panel: 'background', bgView: 'all', chainId })}
           className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
           title="Open chain tasks"
         >
@@ -191,7 +187,7 @@ export function ChainBubble({
                       {task.artifact_uri && (
                         <button
                           type="button"
-                          onClick={() => navigate(`/?view=tasks&task_view=artifacts&task_id=${encodeURIComponent(task.task_id)}`)}
+                          onClick={() => openTaskFloater({ panel: 'artifacts', taskId: task.task_id })}
                           className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)]"
                         >
                           Open Artifact

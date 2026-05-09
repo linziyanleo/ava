@@ -25,6 +25,7 @@ import { api } from '../api/client'
 import { useResponsiveMode } from '../hooks/useResponsiveMode'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useAuth } from '../stores/auth'
+import { useTaskFloater } from '../stores/taskFloater'
 
 interface GatewayStatusData {
   running: boolean
@@ -91,6 +92,7 @@ export default function DashboardPage() {
   const [gwMessage, setGwMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [activeTasks, setActiveTasks] = useState<ActiveTasksResponse | null>(null)
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const { isMobile } = useResponsiveMode()
   const { currentVersion, updateAvailable, dismiss, refresh } = useVersionCheck()
   const { user, isAdmin, isMockTester } = useAuth()
@@ -188,7 +190,7 @@ export default function DashboardPage() {
           value: 'Mock Cron',
           sub: '定时任务在模拟数据目录下',
           color: 'text-cyan-400',
-          onClick: () => navigate('/?view=tasks&task_view=scheduled'),
+          onClick: () => openTaskFloater({ panel: 'scheduled' }),
         },
         {
           icon: Cpu,
@@ -196,7 +198,7 @@ export default function DashboardPage() {
           value: 'Mock Tasks',
           sub: '查看空/模拟安全的任务状态',
           color: 'text-blue-400',
-          onClick: () => navigate('/?view=tasks&task_view=history'),
+          onClick: () => openTaskFloater({ panel: 'background', bgView: 'history' }),
         },
         {
           icon: Brain,
@@ -212,7 +214,7 @@ export default function DashboardPage() {
           value: 'Mock Media',
           sub: '图片库限定在模拟数据目录内',
           color: 'text-emerald-400',
-          onClick: () => navigate('/?view=tasks&task_view=artifacts'),
+          onClick: () => openTaskFloater({ panel: 'artifacts' }),
         },
         {
           icon: UserCog,
@@ -511,7 +513,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <button
-              onClick={() => navigate('/?view=tasks&task_view=history')}
+              onClick={() => openTaskFloater({ panel: 'background', bgView: 'history' })}
               className="flex items-center gap-1 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
             >
               查看全部 <ChevronRight className="h-3 w-3" />
@@ -529,7 +531,7 @@ export default function DashboardPage() {
                 return (
                   <button
                     key={task.task_id}
-                    onClick={() => navigate(`/?view=tasks&task_id=${encodeURIComponent(task.task_id)}`)}
+                    onClick={() => openTaskFloater({ panel: 'background', bgView: 'all', taskId: task.task_id })}
                     className="flex w-full items-center gap-3 rounded-lg bg-[var(--bg-primary)] p-3 text-left transition-colors hover:bg-[var(--bg-tertiary)]"
                   >
                     <StatusIcon

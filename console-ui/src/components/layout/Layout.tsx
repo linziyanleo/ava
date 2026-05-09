@@ -70,6 +70,7 @@ export default function Layout() {
           )}
           <Outlet />
         </main>
+        <TaskFloater />
         <MobileBottomNav />
       </div>
     )

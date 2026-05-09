@@ -16,3 +16,4 @@ bridge/node_modules/
 .playwright-mcp/
 .codex-tmp/
 .superpowers/
+.worktrees/

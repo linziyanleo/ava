@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { cn } from '../lib/utils'
 import { useAuth } from '../stores/auth'
+import { useTaskFloater } from '../stores/taskFloater'
 
 type AgentStatus = 'running' | 'available' | 'unavailable'
 type AgentName = 'nanobot' | 'claude_code' | 'codex' | 'image_gen'
@@ -155,6 +156,7 @@ function AgentCard({
   onRestart: (agent: AgentInfo) => void
 }) {
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const Icon = AGENT_ICON[agent.name] || Bot
   const status = STATUS_STYLE[agent.status]
   const StatusIcon = status.icon
@@ -276,7 +278,7 @@ function AgentCard({
         {agent.active_tasks > 0 && (
           <button
             type="button"
-            onClick={() => navigate('/?view=tasks&task_view=current')}
+            onClick={() => openTaskFloater({ panel: 'background', bgView: 'current' })}
             className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
           >
             <ExternalLink className="h-4 w-4" />
@@ -334,6 +336,7 @@ function AgentDetail({
   onRestart: (agent: AgentInfo) => void
 }) {
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const Icon = AGENT_ICON[agent.name] || Bot
   const status = STATUS_STYLE[agent.status]
   const StatusIcon = status.icon
@@ -480,7 +483,7 @@ function AgentDetail({
           {agent.active_tasks > 0 && (
             <button
               type="button"
-              onClick={() => navigate('/?view=tasks&task_view=current')}
+              onClick={() => openTaskFloater({ panel: 'background', bgView: 'current' })}
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
             >
               <ExternalLink className="h-4 w-4" />

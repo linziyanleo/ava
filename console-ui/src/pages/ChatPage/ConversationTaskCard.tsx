@@ -4,6 +4,7 @@ import { Ban, Check, CheckCircle2, Clock, Copy, ExternalLink, Image as ImageIcon
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
 import { cn } from '../../lib/utils'
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
+import { useTaskFloater } from '../../stores/taskFloater'
 import type { DirectTaskMessage, DirectTaskStatus, DirectTaskType } from './types'
 import { displayImagePath, extractImagePaths, formatTimestamp, imageUrl } from './utils'
 import { ImageCarousel } from './ImageCarousel'
@@ -90,6 +91,7 @@ export function ConversationTaskCard({
   showTraceActions = variant !== 'chain',
 }: ConversationTaskCardProps) {
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const [traceCopied, setTraceCopied] = useState(false)
   const [expanded, setExpanded] = useState(() => details?.defaultExpanded ?? false)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
@@ -117,7 +119,7 @@ export function ConversationTaskCard({
   useEffect(() => clearLongPressTimer, [])
 
   const handleOpenTask = () => {
-    navigate(`/?view=tasks&task_id=${encodeURIComponent(task.task_id)}`)
+    openTaskFloater({ panel: 'background', bgView: 'all', taskId: task.task_id })
   }
 
   const handleOpenTrace = () => {

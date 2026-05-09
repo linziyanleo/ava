@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import { Save, RefreshCw, Timer, Heart } from 'lucide-react'
 import { api } from '../api/client'
 import { useAuth } from '../stores/auth'
+import { cn } from '../lib/utils'
 import type { ConfigData, NanobotConfig, CronStore } from './ConfigPage/types'
 import { CronJobsEditor } from './ConfigPage/CronJobsEditor'
 import { HeartbeatEditor } from './ConfigPage/HeartbeatEditor'
 
 type Tab = 'cron' | 'heartbeat'
 
-export default function ScheduledTasksPage() {
+export default function ScheduledTasksPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [tab, setTab] = useState<Tab>('cron')
   const [cronStore, setCronStore] = useState<CronStore | null>(null)
   const [parsed, setParsed] = useState<NanobotConfig | null>(null)
@@ -97,9 +98,9 @@ export default function ScheduledTasksPage() {
   const hasContent = tab === 'cron' ? !!cronStore : !!parsed
 
   return (
-    <div className="h-[calc(100vh-3rem)] flex flex-col">
+    <div className={cn(embedded ? 'h-full' : 'h-[calc(100vh-3rem)]', 'flex min-h-0 flex-col')}>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">定时任务</h1>
+        <h1 className={cn(embedded ? 'text-lg' : 'text-2xl', 'font-bold')}>定时任务</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={handleReload}

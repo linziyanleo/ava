@@ -5,6 +5,7 @@ import { api } from '../../api/client'
 import type { ActiveChatTransport, DirectTaskMessage, SessionMeta } from './types'
 import { formatTokenCount } from './utils'
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
+import { useTaskFloater } from '../../stores/taskFloater'
 import { useWorkflowStore } from '../../stores/useWorkflowStore'
 
 interface SkillSummary {
@@ -48,6 +49,7 @@ export function HudBar({
   onSkillSelect?: (skillName: string) => void
 }) {
   const navigate = useNavigate()
+  const { open: openTaskFloater } = useTaskFloater()
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [memoryBytes, setMemoryBytes] = useState<number | null>(null)
@@ -130,7 +132,7 @@ export function HudBar({
         label: 'Artifacts',
         value: String(artifactCount),
         icon: Box,
-        onClick: () => navigate('/?view=tasks&task_view=artifacts'),
+        onClick: () => openTaskFloater({ panel: 'artifacts' }),
       },
       memoryBytes !== null
         ? {
@@ -143,7 +145,7 @@ export function HudBar({
         : null,
     ]
     return next.filter((widget): widget is HudWidget => widget !== null)
-  }, [artifactCount, memoryBytes, navigate, session, skills?.length])
+  }, [artifactCount, memoryBytes, navigate, openTaskFloater, session, skills?.length])
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2">
