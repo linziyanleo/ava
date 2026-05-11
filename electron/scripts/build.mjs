@@ -59,6 +59,8 @@ if (!skipConsoleBuild) {
   run('npm', ['run', 'build'], { cwd: path.join(repoRoot, 'console-ui') });
 }
 
+run('bash', ['scripts/fetch-cloudflared.sh', 'darwin-arm64']);
+
 run(
   'pnpm',
   [

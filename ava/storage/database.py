@@ -14,7 +14,7 @@ from loguru import logger
 class Database:
     """Thread-safe SQLite database with WAL mode, schema management, and JSONL migration."""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -498,6 +498,11 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT UNIQUE NOT NULL,
@@ -653,4 +658,43 @@ CREATE TABLE IF NOT EXISTS skill_config (
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_skill_source ON skill_config(source);
+
+CREATE TABLE IF NOT EXISTS lan_devices (
+    device_id TEXT PRIMARY KEY,
+    token_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'read_only',
+    capabilities TEXT NOT NULL DEFAULT '["read"]',
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    last_ip TEXT DEFAULT '',
+    user_agent TEXT DEFAULT '',
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lan_devices_token ON lan_devices(device_id, token_id);
+CREATE INDEX IF NOT EXISTS idx_lan_devices_revoked ON lan_devices(revoked_at);
+
+CREATE TABLE IF NOT EXISTS lan_device_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    device_id TEXT DEFAULT '',
+    event TEXT NOT NULL,
+    ip TEXT DEFAULT '',
+    user_agent TEXT DEFAULT '',
+    detail TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_lan_device_events_device ON lan_device_events(device_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_lan_device_events_event ON lan_device_events(event, timestamp);
+
+CREATE TABLE IF NOT EXISTS lan_pair_throttle (
+    scope TEXT NOT NULL,
+    key TEXT NOT NULL,
+    first_failed_at TEXT NOT NULL,
+    last_failed_at TEXT NOT NULL,
+    failure_count INTEGER NOT NULL,
+    locked_until TEXT,
+    PRIMARY KEY (scope, key)
+);
+CREATE INDEX IF NOT EXISTS idx_lan_pair_throttle_locked ON lan_pair_throttle(locked_until);
 """
