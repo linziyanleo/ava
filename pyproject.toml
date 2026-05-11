@@ -57,6 +57,8 @@ dependencies = [
     "bcrypt>=4.3.0,<5.0.0",
     "python-multipart>=0.0.20,<1.0.0",
     "google-genai>=1.66.0,<2.0.0",
+    "zeroconf>=0.135,<1.0.0",
+    "cryptography>=44,<46",
 ]
 
 [project.optional-dependencies]
