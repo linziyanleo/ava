@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ExternalLink, GitBranch } from 'lucide-react'
+import { List, type RowComponentProps } from 'react-window'
 import { api } from '../../api/client'
 import { cn } from '../../lib/utils'
 import { useTaskFloater } from '../../stores/taskFloater'
@@ -83,6 +84,65 @@ export function ChainBubble({
     }
   }
 
+  const renderTaskNode = (task: DirectTaskMessage, index: number) => {
+    const statusConfig = TASK_STATUS_CONFIG[visibleTaskStatus(task.status)]
+    return (
+      <div
+        key={task.task_id}
+        className="relative flex gap-2 pb-3 last:pb-0 sm:gap-3"
+      >
+        {index < orderedTasks.length - 1 && (
+          <div className={cn('absolute left-[13px] top-9 h-[calc(100%-2.25rem)] border-l', statusConfig.line)} />
+        )}
+        <div className="min-w-0 flex-1">
+          <ConversationTaskCard
+            task={task}
+            variant="chain"
+            actions={(
+              <>
+                {ACTIVE_TASK_STATUSES.has(task.status) && (
+                  <button
+                    type="button"
+                    onClick={handleCancelChain}
+                    disabled={busyAction !== ''}
+                    className="text-[10px] text-red-300 hover:text-red-200 disabled:opacity-50"
+                  >
+                    Cancel Chain
+                  </button>
+                )}
+                {RETRYABLE_TASK_STATUSES.has(task.status) && (
+                  <button
+                    type="button"
+                    onClick={handleRetryChain}
+                    disabled={busyAction !== ''}
+                    className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] disabled:opacity-50"
+                  >
+                    Retry Chain
+                  </button>
+                )}
+                {task.artifact_uri && (
+                  <button
+                    type="button"
+                    onClick={() => openTaskFloater({ panel: 'artifacts', taskId: task.task_id })}
+                    className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                  >
+                    Open Artifact
+                  </button>
+                )}
+              </>
+            )}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  const VirtualTaskRow = ({ index, style }: RowComponentProps) => (
+    <div style={style} className="px-1">
+      {renderTaskNode(orderedTasks[index], index)}
+    </div>
+  )
+
   return (
     <div
       data-chain-id={chainId}
@@ -147,59 +207,18 @@ export function ChainBubble({
           {actionError}
         </div>
       )}
-      <div className={cn('space-y-0 px-2 py-2 sm:px-3', virtualizedTaskWindow && 'max-h-[520px] overflow-y-auto')}>
-        {orderedTasks.map((task, index) => {
-          const statusConfig = TASK_STATUS_CONFIG[visibleTaskStatus(task.status)]
-          return (
-            <div
-              key={task.task_id}
-              className={cn('relative flex gap-2 pb-3 last:pb-0 sm:gap-3', virtualizedTaskWindow && '[content-visibility:auto] [contain-intrinsic-size:112px]')}
-            >
-              {index < orderedTasks.length - 1 && (
-                <div className={cn('absolute left-[13px] top-9 h-[calc(100%-2.25rem)] border-l', statusConfig.line)} />
-              )}
-              <div className="min-w-0 flex-1">
-                <ConversationTaskCard
-                  task={task}
-                  variant="chain"
-                  actions={(
-                    <>
-                      {ACTIVE_TASK_STATUSES.has(task.status) && (
-                        <button
-                          type="button"
-                          onClick={handleCancelChain}
-                          disabled={busyAction !== ''}
-                          className="text-[10px] text-red-300 hover:text-red-200 disabled:opacity-50"
-                        >
-                          Cancel Chain
-                        </button>
-                      )}
-                      {RETRYABLE_TASK_STATUSES.has(task.status) && (
-                        <button
-                          type="button"
-                          onClick={handleRetryChain}
-                          disabled={busyAction !== ''}
-                          className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] disabled:opacity-50"
-                        >
-                          Retry Chain
-                        </button>
-                      )}
-                      {task.artifact_uri && (
-                        <button
-                          type="button"
-                          onClick={() => openTaskFloater({ panel: 'artifacts', taskId: task.task_id })}
-                          className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)]"
-                        >
-                          Open Artifact
-                        </button>
-                      )}
-                    </>
-                  )}
-                />
-              </div>
-            </div>
-          )
-        })}
+      <div className="space-y-0 px-2 py-2 sm:px-3">
+        {virtualizedTaskWindow ? (
+          <List
+            className="w-full"
+            defaultHeight={Math.min(520, orderedTasks.length * 132)}
+            rowComponent={VirtualTaskRow}
+            rowCount={orderedTasks.length}
+            rowHeight={132}
+            rowProps={{}}
+            style={{ height: Math.min(520, orderedTasks.length * 132), width: '100%' }}
+          />
+        ) : orderedTasks.map(renderTaskNode)}
       </div>
     </div>
   )

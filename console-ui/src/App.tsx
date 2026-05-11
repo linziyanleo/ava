@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './stores/auth'
 import type { UserRole } from './stores/auth'
@@ -19,6 +19,7 @@ import SettingsPage, { SettingsVersionPage } from './pages/SettingsPage'
 import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
 
 const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
+const MobilePairPage = lazy(() => import('./pages/MobilePairPage'))
 
 function LegacyRedirect() {
   const location = useLocation()
@@ -52,6 +53,14 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={user && !loading ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route
+          path="/lan/pair"
+          element={
+            <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+              <MobilePairPage />
+            </Suspense>
+          }
+        />
         <Route
           path="/"
           element={

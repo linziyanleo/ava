@@ -7,6 +7,7 @@ import { formatTokenCount } from './utils'
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 import { useTaskFloater } from '../../stores/taskFloater'
 import { useWorkflowStore } from '../../stores/useWorkflowStore'
+import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 
 interface SkillSummary {
   name: string
@@ -50,6 +51,7 @@ export function HudBar({
 }) {
   const navigate = useNavigate()
   const { open: openTaskFloater } = useTaskFloater()
+  const { isMobile } = useResponsiveMode()
   const [skills, setSkills] = useState<SkillSummary[] | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [memoryBytes, setMemoryBytes] = useState<number | null>(null)
@@ -149,7 +151,7 @@ export function HudBar({
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2">
-      <div className="flex gap-2 overflow-x-auto scrollbar-none">
+      <div className="flex snap-x gap-2 overflow-x-auto scrollbar-none">
         {widgets.map((widget) => {
           const Icon = widget.icon
           return (
@@ -157,7 +159,7 @@ export function HudBar({
               key={widget.id}
               type="button"
               onClick={widget.onClick}
-              className={chipClass()}
+              className={`${chipClass()} snap-start`}
             >
               <Icon className="h-3.5 w-3.5" />
               {widget.label} {widget.value}
@@ -165,7 +167,7 @@ export function HudBar({
           )
         })}
       </div>
-      {skillsOpen && skills && (
+      {skillsOpen && skills && !isMobile && (
         <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg-primary)] p-2 shadow-lg">
           <div className="grid min-w-80 grid-cols-1 gap-2 sm:grid-cols-2">
             {skills.map((skill) => (
@@ -174,6 +176,32 @@ export function HudBar({
                 type="button"
                 onClick={() => insertSkillTrigger(skill.name)}
                 className="rounded-md border border-[var(--border)] px-2 py-1.5 text-left text-xs hover:border-[var(--accent)]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium text-[var(--text-primary)]">{skill.name}</span>
+                  <span className="shrink-0 text-[10px] uppercase text-[var(--text-tertiary)]">
+                    {skill.enabled === false ? 'off' : 'on'}
+                  </span>
+                </div>
+                <div className="truncate text-[var(--text-tertiary)]">{skill.description || skill.source || 'skill'}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {skillsOpen && skills && isMobile && (
+        <div className="fixed inset-x-0 bottom-0 z-50 max-h-[70vh] overflow-y-auto border-t border-[var(--border)] bg-[var(--bg-primary)] p-3 shadow-2xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-[var(--text-primary)]">Skills</div>
+            <button type="button" onClick={() => setSkillsOpen(false)} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">Close</button>
+          </div>
+          <div className="grid gap-2">
+            {skills.map((skill) => (
+              <button
+                key={`${skill.source || 'skill'}:${skill.name}`}
+                type="button"
+                onClick={() => insertSkillTrigger(skill.name)}
+                className="rounded-md border border-[var(--border)] px-3 py-2 text-left text-xs hover:border-[var(--accent)]"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-medium text-[var(--text-primary)]">{skill.name}</span>

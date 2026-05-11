@@ -564,8 +564,8 @@ function TaskModal({
   const isImageTask = draft.agent.name === 'image_gen'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <section className="w-full max-w-xl rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4">
+      <section className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-4 shadow-xl">
         <div className="mb-4 flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-[var(--text-primary)]">Run {draft.agent.display_name} Task</h2>
