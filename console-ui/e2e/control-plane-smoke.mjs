@@ -64,13 +64,18 @@ function lanStatus() {
         device_id: 'phone-1',
         name: 'Smoke phone',
         role: 'read_only',
-        capabilities: ['chat.read'],
+        capabilities: ['read'],
         created_at: now,
         last_seen_at: now,
         last_ip: '192.168.1.50',
+        user_agent: 'mobile',
+        expires_at: now,
         revoked_at: null,
       },
     ],
+    mdns: { running: true, name: 'Ava Console', service_type: '_ava._tcp.local.', error: '' },
+    tunnel: { running: false, public_url: '', binary_path: '', pid: null, error: '' },
+    https: { enabled: false, ca_certificate_path: '', certificate_path: '', key_path: '' },
   }
 }
 
@@ -145,6 +150,8 @@ async function installApiMocks(page) {
       return json(route, {
         pin: '123456',
         expires_at: now,
+        pairing_url: 'http://192.168.1.20:8765/lan/pair?pin=123456',
+        qr_payload: 'http://192.168.1.20:8765/lan/pair?pin=123456',
       })
     }
     if (path.startsWith('/lan-access/devices/')) return json(route, { ok: true })
