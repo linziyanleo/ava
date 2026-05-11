@@ -35,7 +35,7 @@ def _registry_service_for_user(user: UserInfo) -> AgentRegistryService:
 
 @router.get("/agents")
 async def list_agents(
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     return _registry_service_for_user(user).list_agents()
 
@@ -43,7 +43,7 @@ async def list_agents(
 @router.get("/agents/{agent_name}/version")
 async def get_agent_version(
     agent_name: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     payload = _registry_service_for_user(user).list_agents()
     for agent in payload["agents"]:
@@ -62,7 +62,7 @@ async def get_agent_version(
 @router.post("/agents/{agent_name}/process/start")
 async def start_agent_process(
     agent_name: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_role("admin")),
 ):
     try:
         return _registry_service_for_user(user).start_agent(agent_name)
@@ -76,7 +76,7 @@ async def start_agent_process(
 async def stop_agent_process(
     agent_name: str,
     force: bool = False,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_role("admin")),
 ):
     try:
         return _registry_service_for_user(user).stop_agent(agent_name, force=force)
@@ -90,7 +90,7 @@ async def stop_agent_process(
 async def restart_agent_process(
     agent_name: str,
     force: bool = False,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_role("admin")),
 ):
     try:
         return _registry_service_for_user(user).restart_agent(agent_name, force=force)
@@ -103,7 +103,7 @@ async def restart_agent_process(
 @router.get("/agents/{agent_name}/process/health")
 async def healthcheck_agent_process(
     agent_name: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     try:
         return _registry_service_for_user(user).healthcheck_agent(agent_name)
@@ -116,14 +116,14 @@ async def healthcheck_agent_process(
 @router.post("/agents/{agent_name}/tasks/cancel")
 async def cancel_agent_tasks(
     agent_name: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     return await _registry_service_for_user(user).cancel_agent_tasks(agent_name)
 
 
 @router.get("/core/version")
 async def get_core_version(
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     return {
         "name": "ava-core",

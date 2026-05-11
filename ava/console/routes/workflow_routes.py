@@ -65,7 +65,7 @@ async def list_workflows(
     trace_id: str | None = None,
     status: str | None = None,
     limit: int = 50,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     store = _workflow_store(user)
     chains = store.list_chains(trace_id=trace_id, status=status, limit=limit)
@@ -75,7 +75,7 @@ async def list_workflows(
 @router.post("/workflows")
 async def create_workflow(
     payload: dict[str, Any],
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _workflow_store(user)
     chain = store.register_chain(
@@ -90,7 +90,7 @@ async def create_workflow(
 @router.get("/workflows/{chain_id}")
 async def get_workflow(
     chain_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     store = _workflow_store(user)
     chain = store.get_chain(chain_id)
@@ -106,7 +106,7 @@ async def get_workflow(
 async def upsert_workflow_node(
     chain_id: str,
     payload: dict[str, Any],
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _workflow_store(user)
     task_id = str(payload.get("task_id") or "")
@@ -130,7 +130,7 @@ async def upsert_workflow_node(
 @router.post("/workflows/{chain_id}/advance")
 async def advance_workflow(
     chain_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _workflow_store(user)
     chain = store.advance_linear_chain(chain_id)
@@ -142,7 +142,7 @@ async def advance_workflow(
 @router.post("/workflows/{chain_id}/cancel")
 async def cancel_workflow(
     chain_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _workflow_store(user)
     chain = store.cancel_chain(chain_id)
@@ -154,7 +154,7 @@ async def cancel_workflow(
 @router.post("/workflows/{chain_id}/retry")
 async def retry_workflow(
     chain_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _workflow_store(user)
     chain = store.retry_chain(chain_id)
@@ -170,7 +170,7 @@ async def list_artifacts(
     trace_id: str | None = None,
     artifact_type: str | None = None,
     limit: int = 100,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     store = _artifact_store(user)
     artifacts = store.list_artifacts(
@@ -186,7 +186,7 @@ async def list_artifacts(
 @router.post("/artifacts")
 async def create_artifact(
     payload: dict[str, Any],
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     store = _artifact_store(user)
     task_id = str(payload.get("task_id") or "")

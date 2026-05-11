@@ -24,7 +24,7 @@ async def list_records(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     from ava.console.app import get_services_for_user
     return get_services_for_user(user).media.query(page=page, size=size, search=search)
@@ -68,7 +68,7 @@ async def get_file(
 async def delete_record(
     record_id: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "mock_tester")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "mock_tester"), device_capabilities=("operate",))),
 ):
     """Delete a media record and its associated image files."""
     from ava.console.app import get_services_for_user

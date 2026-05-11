@@ -119,7 +119,7 @@ def test_agent_route_lists_agents_for_viewer(tmp_path, monkeypatch):
     assert viewer_cancel.status_code == 403
 
 
-def test_agent_process_lifecycle_routes_require_editor_and_proxy_service(tmp_path, monkeypatch):
+def test_agent_process_lifecycle_routes_require_admin_and_proxy_service(tmp_path, monkeypatch):
     monkeypatch.setattr("ava.console.app.prepare_console_ui_dist", lambda: None)
     checkout = _make_nanobot_checkout(tmp_path / "nanobot")
     monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
@@ -170,9 +170,12 @@ def test_agent_process_lifecycle_routes_require_editor_and_proxy_service(tmp_pat
     viewer_start = client.post("/api/agents/codex/process/start", headers=_headers("viewer"))
     assert viewer_start.status_code == 403
 
-    start = client.post("/api/agents/codex/process/start", headers=_headers("editor"))
-    stop = client.post("/api/agents/codex/process/stop?force=true", headers=_headers("editor"))
-    restart = client.post("/api/agents/codex/process/restart?force=true", headers=_headers("editor"))
+    editor_start = client.post("/api/agents/codex/process/start", headers=_headers("editor"))
+    assert editor_start.status_code == 403
+
+    start = client.post("/api/agents/codex/process/start", headers=_headers("admin"))
+    stop = client.post("/api/agents/codex/process/stop?force=true", headers=_headers("admin"))
+    restart = client.post("/api/agents/codex/process/restart?force=true", headers=_headers("admin"))
     health = client.get("/api/agents/codex/process/health", headers=_headers("viewer"))
 
     assert start.status_code == 200

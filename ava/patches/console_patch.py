@@ -91,6 +91,15 @@ def _install_sigusr1_handler() -> None:
         logger.info("SIGUSR1 handler not installed ({}): {}", type(exc).__name__, exc)
 
 
+def _request_console_reload() -> dict[str, Any]:
+    server = _console_state.get("server")
+    if server is None:
+        return {"reloaded": False, "fallback": "server_not_running", "pid": os.getpid()}
+    _console_state["restart_pending"] = True
+    server.should_exit = True
+    return {"reloaded": True, "pid": os.getpid()}
+
+
 async def _run_console_loop(build_server: Callable[[], Any]) -> None:
     """Serve the Console until cancelled; rebuild on SIGUSR1 restart."""
     import asyncio
@@ -229,24 +238,33 @@ def apply_console_patch() -> str:
                         )
                         logger.info("Console starting in standalone mode (HTTP proxy)")
 
+                    from ava.console.app import get_services
+
+                    get_services().network.set_reload_callback(_request_console_reload)
+
                     def _build_server():
+                        network = get_services().network
+                        certfile, keyfile = network.ssl_paths()
                         uvicorn_config = uvicorn.Config(
                             console_app,
-                            host=console_host,
+                            host=network.current_host(),
                             port=console_port,
                             log_level="warning",
+                            ssl_certfile=certfile,
+                            ssl_keyfile=keyfile,
                         )
                         return uvicorn.Server(uvicorn_config)
 
                     console_task = asyncio.create_task(_run_console_loop(_build_server))
                     _install_sigusr1_handler()
+                    network_status = get_services().network.status()
                     _write_console_meta(
-                        console_host,
+                        network_status.host,
                         console_port,
                         getattr(getattr(cfg, "gateway", None), "port", None),
                     )
                     logger.info(
-                        "Web Console starting at http://{}:{}/", console_host, console_port
+                        "Web Console starting at http://{}:{}/", network_status.host, console_port
                     )
                     print(
                         f"☕ Web Console → http://localhost:{console_port}/"

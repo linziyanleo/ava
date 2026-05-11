@@ -114,6 +114,7 @@ def test_lan_pairing_issues_read_only_device_token_and_revoke_invalidates_it(tmp
         headers={"User-Agent": "mobile-test"},
     )
     assert pair_response.status_code == 200
+    assert "Max-Age=2592000" in pair_response.headers["set-cookie"]
     paired = pair_response.json()
     device = paired["device"]
     assert device["role"] == "read_only"
@@ -153,3 +154,56 @@ def test_lan_access_service_pin_is_single_use(tmp_path):
         assert "expired" in str(exc)
     else:
         raise AssertionError("pairing PIN should be single-use")
+
+
+def test_lan_access_service_updates_capabilities_renews_and_cleans_expired_devices(tmp_path):
+    db = Database(tmp_path / "ava.db")
+    service = LanAccessService(tmp_path, console_port=6688, db=db)
+    service.set_enabled(True)
+    pin = service.create_pairing_pin()["pin"]
+    paired = service.pair_device(pin=pin, device_name="phone")
+    device_id = paired["device"]["device_id"]
+
+    updated = service.bump_capabilities(device_id, ["read", "operate"], actor="admin")
+    assert updated["capabilities"] == ["read", "operate"]
+
+    renewed = service.renew_device(device_id)
+    assert renewed["expires_at"] >= updated["expires_at"]
+
+    db.execute("UPDATE lan_devices SET expires_at = ? WHERE device_id = ?", ("2000-01-01T00:00:00+00:00", device_id))
+    db.commit()
+    row = db.fetchone("SELECT token_id FROM lan_devices WHERE device_id = ?", (device_id,))
+    assert service.cleanup_expired_devices() == 1
+    assert service.validate_device_token({
+        "device_id": device_id,
+        "token_id": row["token_id"],
+    }) is False
+
+
+def test_lan_access_disabled_rejects_device_tokens_without_device_migration(tmp_path):
+    db = Database(tmp_path / "ava.db")
+    console_dir = tmp_path / "console"
+    console_dir.mkdir()
+    (console_dir / "lan-access.json").write_text(
+        """
+        {
+          "enabled": false,
+          "pairing": null,
+          "devices": [{
+            "device_id": "phone",
+            "token_id": "token",
+            "name": "Phone",
+            "role": "read_only",
+            "capabilities": ["read"],
+            "created_at": "2026-05-11T00:00:00+00:00",
+            "last_seen_at": "2026-05-11T00:00:00+00:00",
+            "expires_at": "2026-06-11T00:00:00+00:00"
+          }]
+        }
+        """,
+        encoding="utf-8",
+    )
+    service = LanAccessService(tmp_path, console_port=6688, db=db)
+
+    assert service.validate_device_token({"device_id": "phone", "token_id": "token"}) is False
+    assert db.fetchone("SELECT name FROM schema_migrations WHERE name = ?", ("lan_devices_from_json_v1",)) is None

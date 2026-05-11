@@ -30,11 +30,16 @@ from ava.console.services.chat_service import ChatService
 from ava.console.services.config_service import ConfigService
 from ava.console.services.file_service import FileService
 from ava.console.services.gateway_service import GatewayService
+from ava.console.services.console_network_service import ConsoleNetworkService
 from ava.console.services.lan_access_service import LanAccessService
+from ava.console.services.lan_https_service import LanHttpsService
+from ava.console.services.lan_mdns_service import LanMdnsService
 from ava.console.services.media_service import MediaService
+from ava.console.services.pair_throttle_service import PairThrottleService
 from ava.console.services.skills_service import SkillsService
 from ava.console.services.token_stats_service import TokenStatsCollector
 from ava.console.services.trace_spans_service import TraceSpanStore
+from ava.console.services.tunnel_service import TunnelService
 from ava.console.services.user_service import UserService
 from ava.agent.workflow_store import ArtifactStore, WorkflowStore
 from ava.agents.process_manager import AgentProcessManager
@@ -48,6 +53,11 @@ class Services:
     files: FileService
     gateway: GatewayService | MockGatewayService
     lan_access: LanAccessService
+    mdns: LanMdnsService
+    tunnel: TunnelService
+    lan_https: LanHttpsService
+    pair_throttle: PairThrottleService
+    network: ConsoleNetworkService
     media: MediaService
     skills: SkillsService
     chat: ChatService | None = None
@@ -207,6 +217,8 @@ def create_console_app(
     ensure_local_accounts(users, console_dir)
     mock_runtime = prepare_mock_runtime(console_dir, console_cfg.port)
     from ava.storage import Database
+    if db is None:
+        db = Database(nanobot_dir / "nanobot.db")
     mock_db = Database(mock_runtime.db_path)
     trace_spans = TraceSpanStore(db) if db is not None else None
     workflow_store = WorkflowStore(db) if db is not None else None
@@ -218,6 +230,21 @@ def create_console_app(
     mock_artifact_store = ArtifactStore(mock_db) if mock_db is not None else None
     agent_lifecycle_events: list[dict[str, Any]] = []
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
+    repo_root = Path(__file__).resolve().parents[2]
+    lan_access = LanAccessService(nanobot_dir, console_port=console_cfg.port, db=db)
+    lan_https = LanHttpsService(nanobot_dir)
+    tunnel = TunnelService(repo_root=repo_root, console_port=console_cfg.port)
+    mdns = LanMdnsService(port=console_cfg.port)
+    pair_throttle = PairThrottleService(db)
+    network = ConsoleNetworkService(
+        nanobot_dir=nanobot_dir,
+        port=console_cfg.port,
+        lan_access=lan_access,
+        lan_https=lan_https,
+        tunnel=tunnel,
+    )
+    if lan_access.read_state().get("enabled"):
+        lan_access.cleanup_expired_devices()
 
     real_services = Services(
         users=users,
@@ -229,8 +256,18 @@ def create_console_app(
             gateway_port=config.gateway.port,
             console_port=console_cfg.port,
         ),
-        lan_access=LanAccessService(nanobot_dir, console_port=console_cfg.port),
-        media=MediaService(db=db),
+        lan_access=lan_access,
+        mdns=mdns,
+        tunnel=tunnel,
+        lan_https=lan_https,
+        pair_throttle=pair_throttle,
+        network=network,
+        media=MediaService(
+            media_dir=console_dir / "media",
+            screenshot_dir=console_dir / "screenshots",
+            chat_upload_dir=console_dir / "chat-uploads",
+            db=db,
+        ),
         skills=SkillsService(
             workspace,
             skill_dir,
@@ -251,6 +288,17 @@ def create_console_app(
         trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
     mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
     mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
+    mock_lan_access = LanAccessService(mock_runtime.root, console_port=console_cfg.port, db=mock_db)
+    mock_lan_https = LanHttpsService(mock_runtime.root)
+    mock_tunnel = TunnelService(repo_root=repo_root, console_port=console_cfg.port)
+    mock_mdns = LanMdnsService(port=console_cfg.port)
+    mock_network = ConsoleNetworkService(
+        nanobot_dir=mock_runtime.root,
+        port=console_cfg.port,
+        lan_access=mock_lan_access,
+        lan_https=mock_lan_https,
+        tunnel=mock_tunnel,
+    )
 
     real_services.mock = Services(
         users=users,
@@ -258,7 +306,12 @@ def create_console_app(
         config=ConfigService(mock_runtime.root),
         files=FileService(mock_runtime.workspace, mock_runtime.root),
         gateway=MockGatewayService(console_cfg.port),
-        lan_access=LanAccessService(mock_runtime.root, console_port=console_cfg.port),
+        lan_access=mock_lan_access,
+        mdns=mock_mdns,
+        tunnel=mock_tunnel,
+        lan_https=mock_lan_https,
+        pair_throttle=PairThrottleService(mock_db),
+        network=mock_network,
         media=MediaService(
             media_dir=mock_runtime.media_dir,
             screenshot_dir=mock_runtime.media_dir.parent / "screenshots",
@@ -390,6 +443,20 @@ def create_console_app_standalone(
     mock_artifact_store = ArtifactStore(mock_db)
     agent_lifecycle_events: list[dict[str, Any]] = []
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
+    repo_root = Path(__file__).resolve().parents[2]
+    lan_access = LanAccessService(nanobot_dir, console_port=console_port, db=db)
+    lan_https = LanHttpsService(nanobot_dir)
+    tunnel = TunnelService(repo_root=repo_root, console_port=console_port)
+    mdns = LanMdnsService(port=console_port)
+    network = ConsoleNetworkService(
+        nanobot_dir=nanobot_dir,
+        port=console_port,
+        lan_access=lan_access,
+        lan_https=lan_https,
+        tunnel=tunnel,
+    )
+    if lan_access.read_state().get("enabled"):
+        lan_access.cleanup_expired_devices()
 
     token_stats = None
     if token_stats_dir:
@@ -404,8 +471,18 @@ def create_console_app_standalone(
             gateway_port=gateway_port,
             console_port=console_port,
         ),
-        lan_access=LanAccessService(nanobot_dir, console_port=console_port),
-        media=MediaService(db=db),
+        lan_access=lan_access,
+        mdns=mdns,
+        tunnel=tunnel,
+        lan_https=lan_https,
+        pair_throttle=PairThrottleService(db),
+        network=network,
+        media=MediaService(
+            media_dir=console_dir / "media",
+            screenshot_dir=console_dir / "screenshots",
+            chat_upload_dir=console_dir / "chat-uploads",
+            db=db,
+        ),
         skills=SkillsService(
             workspace,
             skill_dir,
@@ -425,6 +502,17 @@ def create_console_app_standalone(
     trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
     mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
     mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
+    mock_lan_access = LanAccessService(mock_runtime.root, console_port=console_port, db=mock_db)
+    mock_lan_https = LanHttpsService(mock_runtime.root)
+    mock_tunnel = TunnelService(repo_root=repo_root, console_port=console_port)
+    mock_mdns = LanMdnsService(port=console_port)
+    mock_network = ConsoleNetworkService(
+        nanobot_dir=mock_runtime.root,
+        port=console_port,
+        lan_access=mock_lan_access,
+        lan_https=mock_lan_https,
+        tunnel=mock_tunnel,
+    )
 
     real_services.mock = Services(
         users=users,
@@ -432,7 +520,12 @@ def create_console_app_standalone(
         config=ConfigService(mock_runtime.root),
         files=FileService(mock_runtime.workspace, mock_runtime.root),
         gateway=MockGatewayService(console_port),
-        lan_access=LanAccessService(mock_runtime.root, console_port=console_port),
+        lan_access=mock_lan_access,
+        mdns=mock_mdns,
+        tunnel=mock_tunnel,
+        lan_https=mock_lan_https,
+        pair_throttle=PairThrottleService(mock_db),
+        network=mock_network,
         media=MediaService(
             media_dir=mock_runtime.media_dir,
             screenshot_dir=mock_runtime.media_dir.parent / "screenshots",

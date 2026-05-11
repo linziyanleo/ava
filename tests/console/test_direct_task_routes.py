@@ -117,13 +117,16 @@ def test_submit_direct_task_route_creates_background_task(tmp_path, monkeypatch)
     )
 
     assert response.status_code == 201
-    assert response.json() == {
+    payload = response.json()
+    assert payload == {
         "task_id": "direct_001",
         "status": "queued",
         "task_type": "codex",
         "origin_conversation_id": "conv_1",
         "origin_turn_seq": 2,
+        "trace_id": payload["trace_id"],
     }
+    assert payload["trace_id"]
     assert bg_store.calls[0]["origin_session_key"] == "console:abc123"
     assert bg_store.calls[0]["origin_conversation_id"] == "conv_1"
 

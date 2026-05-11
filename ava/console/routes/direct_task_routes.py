@@ -31,7 +31,7 @@ class DirectTaskSubmitRequest(BaseModel):
 async def submit_direct_task(
     body: DirectTaskSubmitRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     from ava.console.app import get_services_for_user
 

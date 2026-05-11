@@ -31,15 +31,15 @@ async def login(body: LoginRequest, request: Request):
         target="", ip=get_client_ip(request),
     )
     response = JSONResponse(LoginResponse(user=user).model_dump())
-    auth.set_session_cookie(response, token)
+    auth.set_session_cookie(response, token, request)
     return response
 
 
 @router.post("/refresh", response_model=LoginResponse)
-async def refresh(user: UserInfo = Depends(auth.get_current_user)):
+async def refresh(request: Request, user: UserInfo = Depends(auth.get_current_user)):
     token = auth.create_access_token({"sub": user.username, "role": user.role, "created_at": user.created_at})
     response = JSONResponse(LoginResponse(user=user).model_dump())
-    auth.set_session_cookie(response, token)
+    auth.set_session_cookie(response, token, request)
     return response
 
 

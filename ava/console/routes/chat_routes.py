@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from loguru import logger
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from nanobot.bus.events import OutboundMessage
 
 from ava.agents.nanobot.skill_matcher import natural_language_skill_matching, skill_match_narration
@@ -206,13 +206,13 @@ def _get_chat_service(user: UserInfo):
     return svc
 
 @router.get("/sessions")
-async def list_sessions(user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
+async def list_sessions(user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",)))):
     return _get_chat_service(user).list_sessions(user.username)
 
 @router.post("/sessions")
 async def create_session(
     body: ChatSessionCreateRequest,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("read",))),
 ):
     return _get_chat_service(user).create_session(
         user.username,
@@ -225,7 +225,7 @@ async def create_session(
 async def update_session(
     session_id: str,
     body: ChatSessionUpdateRequest,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     try:
         return _get_chat_service(user).update_session(
@@ -240,7 +240,7 @@ async def update_session(
 async def stop_session(
     request: Request,
     session_id: str,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     svc_chat = _get_chat_service(user)
     result = await svc_chat.stop_session(session_id)
@@ -262,7 +262,7 @@ async def stop_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("read",))),
 ):
     if not _get_chat_service(user).delete_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
@@ -271,7 +271,7 @@ async def delete_session(
 @router.get("/sessions/{session_id}/history")
 async def get_history(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     return _get_chat_service(user).get_history(session_id)
 
@@ -279,7 +279,7 @@ async def get_history(
 @router.get("/sessions/{session_id}/context-size")
 async def get_context_size(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     try:
         return _get_chat_service(user).get_context_size(session_id)
@@ -290,7 +290,7 @@ async def get_context_size(
 @router.post("/sessions/{session_id}/compress")
 async def compress_context(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",))),
 ):
     try:
         return _get_chat_service(user).compress_context(session_id)
@@ -301,7 +301,7 @@ async def compress_context(
 @router.get("/sessions/{session_id}/compressions")
 async def list_context_compressions(
     session_id: str,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     return _get_chat_service(user).list_context_compressions(session_id)
 
@@ -311,7 +311,7 @@ async def get_context_preview(
     session_key: str,
     full: bool = Query(False, description="Return full content instead of truncated preview"),
     reveal: bool = Query(False, description="Disable redaction for preview text"),
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     try:
         return _get_chat_service(user).get_context_preview(
@@ -330,7 +330,7 @@ async def get_messages(
     session_key: str | None = Query(None, description="Session key (e.g. telegram:12345)"),
     conversation_id: str | None = Query(None, description="Conversation id within the session; omit to use active conversation"),
     trace_id: str | None = Query(None, description="Trace id to locate messages across sessions"),
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     """Full message history for any session, including tool_calls and reasoning."""
     svc = _get_chat_service(user)
@@ -345,7 +345,7 @@ async def get_messages(
 async def upload_chat_files(
     request: Request,
     files: list[UploadFile] = File(...),
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer", "mock_tester")),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("operate",))),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
@@ -383,7 +383,7 @@ async def upload_chat_files(
 @router.get("/conversations")
 async def list_conversations(
     session_key: str = Query(..., description="Session key (e.g. telegram:12345)"),
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     """Conversation summaries for one session_key."""
     return _get_chat_service(user).list_conversations(session_key)
@@ -431,6 +431,9 @@ async def observe_ws(websocket: WebSocket, session_key: str):
 @router.websocket("/ws/{session_id}")
 async def chat_ws(websocket: WebSocket, session_id: str):
     user = await auth.get_ws_user(websocket)
+    if getattr(websocket.state, "device_id", None) and "operate" not in set(getattr(websocket.state, "device_capabilities", [])):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     if user.role == "mock_tester":
         await websocket.accept()
         try:

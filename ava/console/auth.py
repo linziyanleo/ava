@@ -15,7 +15,7 @@ _algorithm: str = "HS256"
 _expire_minutes: int = 480
 _cookie_name: str = "ava_console_session"
 _cookie_secure: bool = False
-_cookie_samesite: str = "lax"
+_cookie_samesite: str = "strict"
 _device_token_validator: Callable[[dict[str, Any]], bool] | None = None
 
 READ_ROLES = ("admin", "editor", "viewer", "read_only", "mock_tester")
@@ -28,7 +28,7 @@ def configure(
     *,
     cookie_name: str = "ava_console_session",
     cookie_secure: bool = False,
-    cookie_samesite: str = "lax",
+    cookie_samesite: str = "strict",
 ) -> None:
     global _secret_key, _expire_minutes, _cookie_name, _cookie_secure, _cookie_samesite, _device_token_validator
     _secret_key = secret_key
@@ -68,14 +68,25 @@ def session_cookie_name() -> str:
     return _cookie_name
 
 
-def set_session_cookie(response: Response, token: str) -> None:
+def set_session_cookie(
+    response: Response,
+    token: str,
+    request: Request | None = None,
+    *,
+    max_age_seconds: int | None = None,
+) -> None:
+    secure = _cookie_secure
+    if request is not None:
+        from ava.console.middleware import is_effective_https
+
+        secure = is_effective_https(request)
     response.set_cookie(
         key=_cookie_name,
         value=token,
         httponly=True,
-        secure=_cookie_secure,
-        samesite=_cookie_samesite,
-        max_age=_expire_minutes * 60,
+        secure=secure,
+        samesite="strict",
+        max_age=max_age_seconds if max_age_seconds is not None else _expire_minutes * 60,
         path="/",
     )
 
@@ -124,6 +135,10 @@ async def get_current_user(request: Request) -> UserInfo:
 
 async def get_ws_user(websocket: WebSocket) -> UserInfo:
     """Extract user from WebSocket cookie or Authorization header."""
+    from ava.console.middleware import is_ws_origin_allowed
+
+    if not is_ws_origin_allowed(websocket.headers):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
     token = _ws_token(websocket)
     if not token:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
@@ -137,6 +152,9 @@ async def get_ws_user(websocket: WebSocket) -> UserInfo:
     created_at = payload.get("created_at", "")
     if not username or not role:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    if payload.get("kind") == "device":
+        websocket.state.device_id = payload.get("device_id")
+        websocket.state.device_capabilities = payload.get("capabilities", [])
     return UserInfo(username=username, role=role, created_at=created_at)
 
 
@@ -160,6 +178,33 @@ def require_role(*allowed_roles: str) -> Callable:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{user.role}' not allowed. Required: {', '.join(allowed_roles)}",
+            )
+        return user
+
+    return checker
+
+
+def require_console_role_or_device_capability(
+    *,
+    console_roles: tuple[str, ...],
+    device_capabilities: tuple[str, ...],
+) -> Callable:
+    """Allow either a console role or a device token with required capabilities."""
+
+    async def checker(request: Request, user: UserInfo = Depends(get_current_user)) -> UserInfo:
+        capabilities = set(getattr(request.state, "device_capabilities", []))
+        if getattr(request.state, "device_id", None):
+            required = set(device_capabilities)
+            if not required.issubset(capabilities):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Device capability required: {', '.join(device_capabilities)}",
+                )
+            return user
+        if user.role not in console_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{user.role}' not allowed. Required: {', '.join(console_roles)}",
             )
         return user
 

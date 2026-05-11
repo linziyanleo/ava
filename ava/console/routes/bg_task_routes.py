@@ -28,7 +28,7 @@ async def list_tasks(
     trace_id: str | None = None,
     chain_id: str | None = None,
     include_finished: bool = True,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
@@ -61,7 +61,7 @@ async def list_history(
     status: str | None = None,
     trace_id: str | None = None,
     chain_id: str | None = None,
-    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
     bg_store = _get_bg_store(user)
     if not bg_store:
@@ -81,7 +81,7 @@ async def list_history(
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
+async def get_task(task_id: str, user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",)))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"error": "BackgroundTaskStore not initialized"}
@@ -92,7 +92,7 @@ async def get_task(task_id: str, user: UserInfo = Depends(auth.require_role(*aut
 
 
 @router.get("/{task_id}/detail")
-async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
+async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",)))):
     """获取任务的完整 prompt、result 和 workspace metadata。"""
     bg_store = _get_bg_store(user)
     if not bg_store:
@@ -116,7 +116,7 @@ async def get_task_detail(task_id: str, user: UserInfo = Depends(auth.require_ro
 
 
 @router.get("/{task_id}/timeline")
-async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES))):
+async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",)))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"events": []}
@@ -131,7 +131,7 @@ async def get_timeline(task_id: str, user: UserInfo = Depends(auth.require_role(
 
 
 @router.post("/{task_id}/cancel")
-async def cancel_task(task_id: str, user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES))):
+async def cancel_task(task_id: str, user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.EDIT_ROLES, device_capabilities=("operate",)))):
     bg_store = _get_bg_store(user)
     if not bg_store:
         return {"message": "BackgroundTaskStore not initialized"}
