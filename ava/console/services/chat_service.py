@@ -1340,6 +1340,28 @@ class ChatService:
         return session_key, int(row["id"]), conversation_id, [dict(item) for item in rows]
 
     def get_context_size(self, session_id: str) -> dict[str, Any]:
+        """Deprecated: prefers context-preview totals, falls back to DB estimation."""
+        session_key = f"console:{session_id}"
+        try:
+            preview = self.get_context_preview(session_key)
+            totals = preview.get("totals", {})
+            return {
+                "used_tokens": totals.get("request_total_tokens", 0),
+                "model_limit": totals.get("ctx_budget", _DEFAULT_CONTEXT_MODEL_LIMIT),
+                "breakdown": {
+                    "messages": totals.get("history_tokens", 0),
+                    "system": totals.get("system_tokens", 0),
+                    "runtime": totals.get("runtime_tokens", 0),
+                    "tools": totals.get("tool_tokens", 0),
+                },
+                "compression_preview": "",
+                "before_after_diff": None,
+            }
+        except (KeyError, RuntimeError):
+            return self._get_context_size_legacy(session_id)
+
+    def _get_context_size_legacy(self, session_id: str) -> dict[str, Any]:
+        """Original DB-based estimation, kept as fallback for compress_context."""
         session_key, _numeric_session_id, conversation_id, rows = self._active_console_context_rows(session_id)
         messages_tokens = sum(self._estimate_context_tokens(row.get("content")) for row in rows)
         system_tokens = 0

@@ -189,6 +189,21 @@ export interface ContextPreviewMessage {
   truncated: boolean
 }
 
+export interface ContextPreviewWindow {
+  strategy: string
+  kept_count: number
+  dropped_count: number
+  kept_tokens: number
+  estimate_scope: string
+  replay_max_messages?: number | null
+  replay_max_tokens?: number | null
+  runner_snipped?: boolean | null
+  consolidated_count?: number | null
+  summary_present?: boolean | null
+  oldest_kept_msg_id?: string | null
+  oldest_dropped_msg_id?: string | null
+}
+
 export interface ContextPreview {
   snapshot_ts: string
   session_key: string
@@ -220,7 +235,9 @@ export interface ContextPreview {
     max_completion_tokens: number
     ctx_budget: number
     utilization_pct: number
+    estimate_scope?: string
   }
+  window?: ContextPreviewWindow
   flags: {
     sanitized: boolean
     full: boolean

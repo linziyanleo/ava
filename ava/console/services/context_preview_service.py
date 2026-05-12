@@ -337,6 +337,34 @@ def _serialize_message(
     return payload, any_sanitized
 
 
+def _estimate_dropped_count(session: Any, kept_count: int) -> int:
+    """Estimate how many unconsolidated messages were dropped by the replay window.
+
+    Uses ``session.messages`` and ``session.last_consolidated`` when available.
+    Returns 0 when the internal attributes are absent or the estimate is negative.
+    """
+    messages = getattr(session, "messages", None)
+    last_consolidated = getattr(session, "last_consolidated", None)
+    if not isinstance(messages, list) or not isinstance(last_consolidated, int):
+        return 0
+    total_unconsolidated = len(messages) - last_consolidated
+    estimate = total_unconsolidated - kept_count
+    if estimate < 0:
+        logger.debug(
+            "Dropped count estimate is negative ({}) for session with {} messages, "
+            "last_consolidated={}, kept_count={}",
+            estimate, len(messages), last_consolidated, kept_count,
+        )
+        return 0
+    return estimate
+
+
+def _safe_consolidated_count(session: Any) -> int | None:
+    """Return ``session.last_consolidated`` if the attribute is a stable int, else None."""
+    value = getattr(session, "last_consolidated", None)
+    return value if isinstance(value, int) else None
+
+
 def build_context_preview(
     *,
     loop: Any,
@@ -372,6 +400,7 @@ def build_context_preview(
     )
 
     history = session.get_history(max_messages=0)
+    kept_count = len(history)
     serialized_messages: list[dict[str, Any]] = []
     any_sanitized = runtime_sanitized
     for section in system_sections:
@@ -409,6 +438,19 @@ def build_context_preview(
     request_total_tokens = system_tokens + runtime_tokens + history_tokens + tool_tokens
     utilization_pct = round((request_total_tokens / ctx_budget) * 100, 1)
     in_flight = session_key in getattr(loop, "_pending_queues", {})
+
+    estimate_scope = "replay_window_pre_trim"
+
+    window: dict[str, Any] = {
+        "strategy": "auto",
+        "kept_count": kept_count,
+        "dropped_count": _estimate_dropped_count(session, kept_count),
+        "kept_tokens": history_tokens,
+        "estimate_scope": estimate_scope,
+    }
+    consolidated_count = _safe_consolidated_count(session)
+    if consolidated_count is not None:
+        window["consolidated_count"] = consolidated_count
 
     return {
         "snapshot_ts": datetime.now().astimezone().isoformat(),
@@ -454,7 +496,9 @@ def build_context_preview(
             "max_completion_tokens": max_completion_tokens,
             "ctx_budget": ctx_budget,
             "utilization_pct": utilization_pct,
+            "estimate_scope": estimate_scope,
         },
+        "window": window,
         "flags": {
             "sanitized": any_sanitized,
             "full": full,
@@ -463,8 +507,9 @@ def build_context_preview(
             "in_flight": in_flight,
         },
         "notes": [
-            "history = session.get_history(max_messages=0)",
+            "history = session.get_history(max_messages=0) — unconsolidated replay window",
             "request_total_tokens excludes the user's next prompt",
             "tool tokens include registered tool schema",
+            "estimate_scope=replay_window_pre_trim: not equivalent to provider request",
         ],
     }

@@ -281,10 +281,19 @@ async def get_context_size(
     session_id: str,
     user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
+    from fastapi.responses import JSONResponse
     try:
-        return _get_chat_service(user).get_context_size(session_id)
+        data = _get_chat_service(user).get_context_size(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+    return JSONResponse(
+        content=data,
+        headers={
+            "Deprecation": "true",
+            "Sunset": "2026-08-01",
+            "Link": '</api/chat/sessions/{sessionKey}/context-preview>; rel="successor-version"',
+        },
+    )
 
 
 @router.post("/sessions/{session_id}/compress")

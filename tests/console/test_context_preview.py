@@ -191,3 +191,76 @@ def test_context_preview_route_returns_payload_and_404(tmp_path, monkeypatch):
 
     missing = client.get("/api/chat/sessions/console:missing/context-preview")
     assert missing.status_code == 404
+
+
+def test_context_preview_includes_window_and_estimate_scope(tmp_path):
+    """Phase 1 fields: totals.estimate_scope + window sub-object with required keys."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_text("boot", encoding="utf-8")
+
+    db = Database(tmp_path / "window.db")
+    _insert_session(db, key="console:ctx", metadata={"conversation_id": "conv_ctx"})
+
+    session = _build_session()
+    agent_loop = _make_agent_loop(workspace, session)
+    service = ChatService(agent_loop=agent_loop, workspace=workspace, db=db)
+
+    preview = service.get_context_preview("console:ctx")
+
+    assert preview["totals"]["estimate_scope"] == "replay_window_pre_trim"
+    window = preview["window"]
+    assert window["strategy"] == "auto"
+    assert window["estimate_scope"] == "replay_window_pre_trim"
+    assert isinstance(window["kept_count"], int) and window["kept_count"] >= 0
+    assert isinstance(window["dropped_count"], int) and window["dropped_count"] >= 0
+    assert isinstance(window["kept_tokens"], int) and window["kept_tokens"] >= 0
+    assert window["kept_tokens"] == preview["totals"]["history_tokens"]
+
+
+def test_context_preview_is_side_effect_free(tmp_path):
+    """Preview must not write to DB, trigger consolidation, or change session state."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_text("boot", encoding="utf-8")
+
+    db = Database(tmp_path / "sideeffect.db")
+    _insert_session(db, key="console:ctx", metadata={"conversation_id": "conv_ctx"})
+
+    session = _build_session()
+    original_messages = list(session.messages)
+    original_last_consolidated = session.last_consolidated
+    agent_loop = _make_agent_loop(workspace, session)
+    service = ChatService(agent_loop=agent_loop, workspace=workspace, db=db)
+
+    service.get_context_preview("console:ctx")
+    service.get_context_preview("console:ctx", full=True, reveal=True)
+
+    assert session.messages == original_messages
+    assert session.last_consolidated == original_last_consolidated
+
+    row = db.fetchone(
+        "SELECT COUNT(*) AS cnt FROM sessions WHERE key = 'console:ctx'",
+    )
+    assert row["cnt"] == 1
+
+
+def test_context_size_deprecated_uses_preview_totals(tmp_path):
+    """Deprecated /context-size must return data derived from preview totals."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_text("boot", encoding="utf-8")
+
+    db = Database(tmp_path / "deprecated.db")
+    _insert_session(db, key="console:ctx", metadata={"conversation_id": "conv_ctx"})
+
+    session = _build_session()
+    agent_loop = _make_agent_loop(workspace, session)
+    service = ChatService(agent_loop=agent_loop, workspace=workspace, db=db)
+
+    preview = service.get_context_preview("console:ctx")
+    context_size = service.get_context_size("ctx")
+
+    assert context_size["used_tokens"] == preview["totals"]["request_total_tokens"]
+    assert context_size["model_limit"] == preview["totals"]["ctx_budget"]
+    assert context_size["breakdown"]["system"] == preview["totals"]["system_tokens"]
