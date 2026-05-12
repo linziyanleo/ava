@@ -250,26 +250,24 @@ def test_ava10_chat_control_plane_layout_and_read_only_checklist_is_covered() ->
         [
             "const filteredSessions = sessions",
             "<TaskPreviewBar",
-            "<ConversationConfigBar",
             "<SessionSidebar",
             "<MessageArea",
             "mobileSessionOpen",
             "isReadOnlyConversation",
             "只读模式 · 申请权限",
+            "onParticipantsChange={handleParticipantsChange}",
         ],
     )
     assert "<SceneTabs" not in chat_page
+    assert "ConversationConfigBar" not in chat_page
     assert_contains_all(
         message_area,
         [
             "<HudBar",
             "{isConsole && !isReadOnly && (",
-            "History · Read-only",
             "onToggleSessionPanel",
-            "getSessionTitle(session)",
-            "headerParticipantLabels.join(' / ')",
-            "getAgentInitial(agentId)",
-            "sessionLabel={session ? headerTitle : ''}",
+            "<ChatHeader",
+            "onParticipantsChange",
         ],
     )
     assert_contains_all(
@@ -874,7 +872,10 @@ def test_ava27_natural_language_skill_matching_checklist_is_covered() -> None:
 def test_ava38_context_size_and_compression_checklist_is_covered() -> None:
     routes = read("ava/console/routes/chat_routes.py")
     service = read("ava/console/services/chat_service.py")
-    config_bar = read("console-ui/src/pages/ChatPage/ConversationConfigBar.tsx")
+    chat_header = read("console-ui/src/pages/ChatPage/ChatHeader.tsx")
+    agents_dropdown = read("console-ui/src/pages/ChatPage/AgentsDropdown.tsx")
+    context_chip = read("console-ui/src/pages/ChatPage/ContextChip.tsx")
+    preview_service = read("ava/console/services/context_preview_service.py")
     tests = (
         read("tests/console_ui/test_linear_acceptance_checklists.py")
         + read("tests/console/test_chat_service.py")
@@ -890,9 +891,15 @@ def test_ava38_context_size_and_compression_checklist_is_covered() -> None:
             "model_limit",
             "compression_preview",
             "before_after_diff",
+            "Deprecation",
         ],
     )
-    assert_contains_all(config_bar, ["Context Size", "handleCompress", "compressionPreview", "查看压缩后上下文"])
+    assert_contains_all(chat_header, ["<AgentsDropdown", "<ContextChip", "<ContextInspector", "onParticipantsChange"])
+    assert_contains_all(agents_dropdown, ["CHAT_AGENTS", "onParticipantsChange", "至少保留 1 个"])
+    assert_contains_all(context_chip, ["/context-preview", "utilization_pct", "estimate_scope"])
+    assert_contains_all(preview_service, ["estimate_scope", "replay_window_pre_trim", '"window"'])
+    import pathlib
+    assert not pathlib.Path("console-ui/src/pages/ChatPage/ConversationConfigBar.tsx").exists()
     assert "test_ava38_context_size_and_compression_checklist_is_covered" in tests
 
 

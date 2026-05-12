@@ -17,7 +17,6 @@ import {
 } from './inFlightTurn'
 import { SessionSidebar } from './SessionSidebar'
 import { MessageArea } from './MessageArea'
-import { ConversationConfigBar } from './ConversationConfigBar'
 import { TaskPreviewBar } from '../../components/tasks/TaskPreviewBar'
 import { useTaskFloater } from '../../stores/taskFloater'
 
@@ -1192,13 +1191,6 @@ export default function ChatPage() {
           onOpenList={openMobileTaskList}
         />
       )}
-      <ConversationConfigBar
-        session={currentMeta}
-        activeScene={activeScene}
-        isReadOnly={mockMode || !canMutateChat}
-        isMobile={isMobile}
-        onParticipantsChange={handleParticipantsChange}
-      />
 
       {/* Main content: sidebar + message area */}
       <div
@@ -1267,6 +1259,7 @@ export default function ChatPage() {
           onRefresh={handleRefresh}
           isMobile={isMobile}
           onToggleSessionPanel={() => setMobileSessionOpen(v => !v)}
+          onParticipantsChange={handleParticipantsChange}
           targetTaskId={deepLinkTaskId}
           targetTurnSeq={deepLinkTurnSeq}
           targetTraceId={deepLinkTraceId}

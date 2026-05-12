@@ -1,21 +1,15 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Loader2, RefreshCw, Copy, Check, ArrowDownToLine, Search, Menu, ExternalLink, FileText } from 'lucide-react'
+import { MessageSquare, Loader2, ArrowDownToLine } from 'lucide-react'
 import type { ChatComposePayload, DirectTaskMessage, DirectTaskSubmitParams, SessionMeta, ConversationMeta, TurnGroup, TurnTokenStats, IterationTokenStats, ChatStreamStatus, ActiveChatTransport } from './types';
-import { SCENE_LABELS } from './types'
-import { ConnectionBadge } from './ConnectionBadge'
 import { TurnGroupComponent } from './TurnGroup'
 import { ChatInput } from './ChatInput'
-import { SearchModal } from './SearchModal'
-import { ContextInspector } from './ContextInspector'
+import { ChatHeader } from './ChatHeader'
 import { InFlightTurnBlock } from './InFlightTurnBlock'
 import { TaskStatusCard } from './TaskStatusCard'
 import { ChainBubble } from './ChainBubble'
 import { HudBar } from './HudBar'
 import type { InFlightTurn } from './inFlightTurn'
-import { formatTokenCount, getAgentInitial, getAgentLabel, getSessionParticipants, getSessionTitle } from './utils'
 import { api } from '../../api/client';
-import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 
 type TaskTimelineItem =
   | { kind: 'chain'; chainId: string; tasks: DirectTaskMessage[] }
@@ -79,24 +73,20 @@ interface MessageAreaProps {
   onRefresh: () => void
   isMobile?: boolean
   onToggleSessionPanel?: () => void
+  onParticipantsChange?: (participants: string[]) => Promise<void> | void
   targetTaskId?: string | null
   targetTurnSeq?: number | null
   targetTraceId?: string | null
 }
 
-export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, directTasks, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onSubmitDirectTask, onRefresh, isMobile, onToggleSessionPanel, targetTaskId, targetTurnSeq, targetTraceId }: MessageAreaProps) {
-  const navigate = useNavigate()
+export function MessageArea({ session, conversation, conversationId, turns, inFlightTurn, directTasks, loading, isConsole, isReadOnly, transportStatus, activeTransport, sendDisabled, onSend, onStopCurrentTurn, onSubmitDirectTask, onRefresh, isMobile, onToggleSessionPanel, onParticipantsChange, targetTaskId, targetTurnSeq, targetTraceId }: MessageAreaProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isInitialScroll = useRef(true)
   const scrollRafRef = useRef<number | null>(null)
   const [turnTokenStats, setTurnTokenStats] = useState<Map<number, TurnTokenStats>>(new Map());
   const [iterationStats, setIterationStats] = useState<Map<string, IterationTokenStats>>(new Map());
-  const [refreshing, setRefreshing] = useState(false)
-  const [keyCopied, setKeyCopied] = useState(false)
   const [showScrollDown, setShowScrollDown] = useState(false)
-  const [showSearch, setShowSearch] = useState(false)
-  const [showInspector, setShowInspector] = useState(false)
 
   const handleSkillSelect = useCallback((skillName: string) => {
     if (sendDisabled || isReadOnly) return
@@ -193,10 +183,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
     isInitialScroll.current = true
   }, [session?.key, conversationId])
 
-  useEffect(() => {
-    setShowInspector(false)
-  }, [session?.key, conversationId])
-
   const taskLocatedRef = useRef<string | null>(null)
 
   // Deep-link: scroll to targetTraceId, targetTaskId, or targetTurnSeq after messages render.
@@ -285,9 +271,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   let headerTotalTokens = session.token_stats.total_tokens
   let headerLlmCalls = session.token_stats.llm_calls
-  const headerParticipants = getSessionParticipants(session)
-  const headerParticipantLabels = headerParticipants.map(getAgentLabel).filter(Boolean)
-  const headerTitle = getSessionTitle(session)
   const visibleTurns = isConsole
     && inFlightTurn?.transport === 'console'
     && typeof inFlightTurn.turnSeq === 'number'
@@ -309,105 +292,21 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   return (
     <div className="flex min-h-0 flex-1 min-w-0 flex-col bg-[var(--bg-primary)] relative">
-      {/* Session header */}
-      <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
-            {isMobile && onToggleSessionPanel && (
-              <button
-                onClick={onToggleSessionPanel}
-                className="p-1 -ml-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                title="会话列表"
-              >
-                <Menu className="w-4 h-4" />
-              </button>
-            )}
-            <span className="truncate">{headerTitle}</span>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(session.key)
-                setKeyCopied(true)
-                setTimeout(() => setKeyCopied(false), 1500)
-              }}
-              className="p-0.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-              title="Copy session key"
-            >
-              {keyCopied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-            </button>
-          </h3>
-          <div className="flex items-center gap-2 mt-0.5">
-            <div className="flex shrink-0 -space-x-1">
-              {headerParticipants.slice(0, 4).map((agentId) => (
-                <span
-                  key={agentId}
-                  title={getAgentLabel(agentId)}
-                  className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--bg-primary)] bg-[var(--bg-tertiary)] text-[8px] font-semibold text-[var(--text-secondary)]"
-                >
-                  {getAgentInitial(agentId)}
-                </span>
-              ))}
-            </div>
-            <span className="max-w-[220px] truncate text-[10px] text-[var(--text-secondary)]">
-              {headerParticipantLabels.join(' / ')}
-            </span>
-            <span className="text-[10px] text-[var(--text-secondary)]">
-              {SCENE_LABELS[session.scene]}
-            </span>
-            {conversation && (
-              <span className="text-[10px] text-[var(--text-secondary)] opacity-70">
-                {conversation.is_legacy ? 'Legacy thread' : conversation.is_active ? 'Active thread' : 'Archived thread'}
-              </span>
-            )}
-            <button
-              onClick={() => {
-                navigate(buildTokenStatsNavUrl({
-                  sessionKey: session.key,
-                  conversationId,
-                }))
-              }}
-              className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] hover:text-[var(--accent)] transition-colors"
-              title="查看当前会话的 Token 统计"
-            >
-              <span>⚡ {formatTokenCount(headerTotalTokens)} tokens · {headerLlmCalls} calls</span>
-              <ExternalLink className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <ConnectionBadge transport={activeTransport} status={transportStatus} />
-          {(isReadOnly || !isConsole) && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
-              {conversation && isReadOnly ? 'History · Read-only' : 'Read-only'}
-            </span>
-          )}
-          <button
-            onClick={() => {
-              setRefreshing(true)
-              onRefresh()
-              setTimeout(() => setRefreshing(false), 1000)
-            }}
-            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            onClick={() => setShowSearch(true)}
-            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-            title="Search"
-          >
-            <Search className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setShowInspector(true)}
-            disabled={!session?.key || isReadOnly}
-            className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-            title={isReadOnly ? '只对当前活跃会话开放 Context Inspector' : 'Context Inspector'}
-          >
-            <FileText className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+      <ChatHeader
+        session={session}
+        conversation={conversation}
+        conversationId={conversationId}
+        turns={turns}
+        isReadOnly={!!isReadOnly}
+        isMobile={isMobile}
+        transportStatus={transportStatus}
+        activeTransport={activeTransport}
+        headerTotalTokens={headerTotalTokens}
+        headerLlmCalls={headerLlmCalls}
+        onRefresh={onRefresh}
+        onToggleSessionPanel={onToggleSessionPanel}
+        onParticipantsChange={onParticipantsChange}
+      />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4 relative" ref={scrollContainerRef}>
@@ -463,7 +362,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
         onSkillSelect={handleSkillSelect}
       />
 
-      {/* Input (console only) */}
       {isConsole && !isReadOnly && (
         <ChatInput
           onSend={onSend}
@@ -473,19 +371,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
           isMobile={isMobile}
         />
       )}
-
-      {/* Search modal */}
-      {showSearch && (
-        <SearchModal turns={turns} onClose={() => setShowSearch(false)} />
-      )}
-
-      <ContextInspector
-        open={showInspector}
-        sessionKey={session?.key || null}
-        sessionLabel={session ? headerTitle : ''}
-        disabled={!!isReadOnly}
-        onClose={() => setShowInspector(false)}
-      />
     </div>
   );
 }
