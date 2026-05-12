@@ -894,7 +894,7 @@ def test_ava38_context_size_and_compression_checklist_is_covered() -> None:
             "Deprecation",
         ],
     )
-    assert_contains_all(chat_header, ["<AgentsDropdown", "<ContextChip", "<ContextInspector", "onParticipantsChange"])
+    assert_contains_all(chat_header, ["<AgentsDropdown", "<ContextChip", "<ContextLensDrawer", "onParticipantsChange"])
     assert_contains_all(agents_dropdown, ["CHAT_AGENTS", "onParticipantsChange", "至少保留 1 个"])
     assert_contains_all(context_chip, ["/context-preview", "utilization_pct", "estimate_scope"])
     assert_contains_all(preview_service, ["estimate_scope", "replay_window_pre_trim", '"window"'])

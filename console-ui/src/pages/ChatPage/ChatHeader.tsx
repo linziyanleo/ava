@@ -6,7 +6,7 @@ import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
 import { AgentsDropdown } from './AgentsDropdown'
 import { ContextChip } from './ContextChip'
-import { ContextInspector } from './ContextInspector'
+import { ContextLensDrawer } from './ContextLensDrawer'
 import { HeaderOverflowSheet } from './HeaderOverflowSheet'
 import { SearchModal } from './SearchModal'
 import type { TurnGroup } from './types'
@@ -135,11 +135,12 @@ export function ChatHeader({
         />
 
         {showSearch && <SearchModal turns={turns} onClose={() => setShowSearch(false)} />}
-        <ContextInspector
+        <ContextLensDrawer
           open={showInspector}
           sessionKey={session.key}
           sessionLabel={headerTitle}
           disabled={isReadOnly}
+          isMobile
           onClose={() => setShowInspector(false)}
         />
       </>
@@ -230,7 +231,7 @@ export function ChatHeader({
       </div>
 
       {showSearch && <SearchModal turns={turns} onClose={() => setShowSearch(false)} />}
-      <ContextInspector
+      <ContextLensDrawer
         open={showInspector}
         sessionKey={session.key}
         sessionLabel={headerTitle}
