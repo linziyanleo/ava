@@ -11,7 +11,6 @@ import {
   Monitor,
   Puzzle,
   RefreshCw,
-  Settings,
   Shield,
   User,
 } from 'lucide-react'
@@ -19,23 +18,69 @@ import type { LucideIcon } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useAuth, type UserRole } from '../stores/auth'
 
-interface SettingsItem {
+interface SettingsNode {
   to: string
   label: string
   description: string
-  icon: LucideIcon
+  icon?: LucideIcon
   allowedRoles?: UserRole[]
+  children?: SettingsNode[]
 }
 
 const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
 
-const settingsItems: SettingsItem[] = [
+const settingsTree: SettingsNode[] = [
   {
     to: '/settings/agents-config',
     label: 'Agents Config',
     description: 'Agent 状态、版本、路径与自有配置',
     icon: Bot,
     allowedRoles: READ_ONLY_ROLES,
+    children: [
+      { to: '/settings/agents-config', label: 'Overview', description: '', allowedRoles: READ_ONLY_ROLES },
+      {
+        to: '/settings/agents-config/nanobot',
+        label: 'Nanobot',
+        description: '',
+        icon: Bot,
+        allowedRoles: READ_ONLY_ROLES,
+        children: [
+          { to: '/settings/agents-config/nanobot/config', label: 'Config', description: '', allowedRoles: READ_ONLY_ROLES },
+          { to: '/settings/agents-config/nanobot/memory', label: 'Memory', description: '', icon: Brain, allowedRoles: READ_ONLY_ROLES },
+          { to: '/settings/agents-config/nanobot/persona', label: 'Persona', description: '', icon: User, allowedRoles: READ_ONLY_ROLES },
+        ],
+      },
+      {
+        to: '/settings/agents-config/codex',
+        label: 'Codex',
+        description: '',
+        icon: Cpu,
+        allowedRoles: READ_ONLY_ROLES,
+        children: [
+          { to: '/settings/agents-config/codex/config', label: 'Config', description: '', allowedRoles: READ_ONLY_ROLES },
+        ],
+      },
+      {
+        to: '/settings/agents-config/claude-code',
+        label: 'Claude Code',
+        description: '',
+        icon: Monitor,
+        allowedRoles: READ_ONLY_ROLES,
+        children: [
+          { to: '/settings/agents-config/claude-code/config', label: 'Config', description: '', allowedRoles: READ_ONLY_ROLES },
+        ],
+      },
+      {
+        to: '/settings/agents-config/image-gen',
+        label: 'Image Gen',
+        description: '',
+        icon: Image,
+        allowedRoles: READ_ONLY_ROLES,
+        children: [
+          { to: '/settings/agents-config/image-gen/config', label: 'Config', description: '', allowedRoles: READ_ONLY_ROLES },
+        ],
+      },
+    ],
   },
   {
     to: '/settings/statistics',
@@ -50,6 +95,9 @@ const settingsItems: SettingsItem[] = [
     description: 'Skill、内置工具与 MCP 管理',
     icon: Puzzle,
     allowedRoles: READ_ONLY_ROLES,
+    children: [
+      { to: '/settings/tools/skills', label: 'Skills', description: '', icon: Puzzle, allowedRoles: READ_ONLY_ROLES },
+    ],
   },
   {
     to: '/settings/users',
@@ -62,40 +110,65 @@ const settingsItems: SettingsItem[] = [
     to: '/settings/system/gateway',
     label: 'System',
     description: 'Gateway、Browser 与 Console 设置',
-    icon: Settings,
+    icon: Shield,
     allowedRoles: READ_ONLY_ROLES,
+    children: [
+      { to: '/settings/system/desktop', label: 'Desktop', description: '', icon: Monitor, allowedRoles: ['admin'] },
+      { to: '/settings/system/lan-access', label: 'LAN Access', description: '', icon: KeyRound, allowedRoles: ['admin'] },
+      { to: '/settings/system/gateway', label: 'Gateway', description: '', icon: Cpu, allowedRoles: READ_ONLY_ROLES },
+      { to: '/settings/system/browser', label: 'Browser', description: '', icon: Monitor, allowedRoles: ['admin', 'editor', 'viewer'] },
+      { to: '/settings/system/console', label: 'Console', description: '', allowedRoles: READ_ONLY_ROLES },
+      { to: '/settings/system/version', label: 'Version', description: '', icon: Shield, allowedRoles: READ_ONLY_ROLES },
+    ],
   },
 ]
 
-const systemLinks: SettingsItem[] = [
-  { to: '/settings/system/desktop', label: 'Desktop', description: '', icon: Monitor, allowedRoles: ['admin'] },
-  { to: '/settings/system/lan-access', label: 'LAN Access', description: '', icon: KeyRound, allowedRoles: ['admin'] },
-  { to: '/settings/system/gateway', label: 'Gateway', description: '', icon: Cpu, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/system/browser', label: 'Browser', description: '', icon: Monitor, allowedRoles: ['admin', 'editor', 'viewer'] },
-  { to: '/settings/system/console', label: 'Console', description: '', icon: Settings, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/system/version', label: 'Version', description: '', icon: Shield, allowedRoles: READ_ONLY_ROLES },
-]
-
-const toolsLinks: SettingsItem[] = [
-  { to: '/settings/tools/skills', label: 'Skills', description: '', icon: Puzzle, allowedRoles: READ_ONLY_ROLES },
-]
-
-const agentLinks: SettingsItem[] = [
-  { to: '/settings/agents-config', label: 'Overview', description: '', icon: Bot, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/nanobot', label: 'Nanobot', description: '', icon: Bot, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/codex', label: 'Codex', description: '', icon: Cpu, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/claude-code', label: 'Claude Code', description: '', icon: Monitor, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/image-gen', label: 'Image Gen', description: '', icon: Image, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/nanobot/config', label: 'Nanobot Config', description: '', icon: Settings, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/codex/config', label: 'Codex Config', description: '', icon: Settings, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/claude-code/config', label: 'Claude Config', description: '', icon: Settings, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/nanobot/memory', label: 'Memory', description: '', icon: Brain, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/nanobot/persona', label: 'Persona', description: '', icon: User, allowedRoles: READ_ONLY_ROLES },
-  { to: '/settings/agents-config/image-gen/config', label: 'Image Gen Config', description: '', icon: Settings, allowedRoles: READ_ONLY_ROLES },
-]
-
-function canAccess(item: SettingsItem, role?: UserRole | null) {
+function canAccess(item: SettingsNode, role?: UserRole | null) {
   return !item.allowedRoles || (role ? item.allowedRoles.includes(role) : false)
+}
+
+function isNodeActive(item: SettingsNode, pathname: string): boolean {
+  return pathname === item.to
+    || pathname.startsWith(`${item.to}/`)
+    || Boolean(item.children?.some((child) => isNodeActive(child, pathname)))
+}
+
+function SettingsTreeLinks({
+  nodes,
+  role,
+}: {
+  nodes: SettingsNode[]
+  role?: UserRole | null
+}) {
+  return (
+    <div className="space-y-1">
+      {nodes.filter((node) => canAccess(node, role)).map((node) => {
+        const Icon = node.icon
+        return (
+          <div key={node.to}>
+            <NavLink
+              to={node.to}
+              end={!node.children}
+              className={({ isActive }) => cn(
+                'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                isActive
+                  ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
+              )}
+            >
+              {Icon && <Icon className="h-4 w-4" />}
+              {node.label}
+            </NavLink>
+            {node.children && (
+              <div className="ml-4 mt-1 border-l border-[var(--border)] pl-2">
+                <SettingsTreeLinks nodes={node.children} role={role} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function SettingsVersionPage() {
@@ -260,13 +333,11 @@ export function DesktopSettingsPage() {
 export default function SettingsPage() {
   const { user } = useAuth()
   const location = useLocation()
-  const visibleItems = settingsItems.filter((item) => canAccess(item, user?.role))
-  const inAgentsConfig = location.pathname.startsWith('/settings/agents-config')
-  const inSystem = location.pathname.startsWith('/settings/system')
-  const inTools = location.pathname.startsWith('/settings/tools')
+  const visibleItems = settingsTree.filter((item) => canAccess(item, user?.role))
+  const activeRoot = visibleItems.find((item) => isNodeActive(item, location.pathname))
 
   return (
-    <div className="-m-4 -mb-20 flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--bg-primary)] md:-m-6 md:h-[calc(100%+3rem)] md:min-h-0 md:flex-row">
+    <div className="flex min-h-full flex-col bg-[var(--bg-primary)] md:h-full md:min-h-0 md:flex-row">
       <aside className="w-full shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)] p-4 md:w-72 md:border-b-0 md:border-r">
         <div className="mb-4">
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h1>
@@ -274,7 +345,8 @@ export default function SettingsPage() {
 
         <nav className="flex gap-1 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible md:pb-0">
           {visibleItems.map((item) => {
-            const isActive = location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+            const isActive = isNodeActive(item, location.pathname)
+            const Icon = item.icon
             return (
               <NavLink
                 key={item.to}
@@ -284,9 +356,9 @@ export default function SettingsPage() {
                   isActive
                     ? 'bg-[var(--accent)] text-white'
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-                )}
+                  )}
               >
-                <item.icon className="mt-0.5 h-4 w-4 shrink-0" />
+                {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0" />}
                 <span className="min-w-0">
                   <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
                     <span className="truncate">{item.label}</span>
@@ -300,73 +372,10 @@ export default function SettingsPage() {
           })}
         </nav>
 
-        {inAgentsConfig && (
+        {activeRoot?.children && (
           <div className="mt-5 border-t border-[var(--border)] pt-4">
-            <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">Agents</p>
-            <div className="space-y-1">
-              {agentLinks.filter((link) => canAccess(link, user?.role)).map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.to === '/settings/agents-config'}
-                  className={({ isActive }) => cn(
-                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-                  )}
-                >
-                  <link.icon className="h-4 w-4" />
-                  {link.label}
-                </NavLink>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {inTools && (
-          <div className="mt-5 border-t border-[var(--border)] pt-4">
-            <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">Tools</p>
-            <div className="space-y-1">
-              {toolsLinks.filter((link) => canAccess(link, user?.role)).map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  className={({ isActive }) => cn(
-                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-                  )}
-                >
-                  <link.icon className="h-4 w-4" />
-                  {link.label}
-                </NavLink>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {inSystem && (
-          <div className="mt-5 border-t border-[var(--border)] pt-4">
-            <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">System</p>
-            <div className="space-y-1">
-              {systemLinks.filter((link) => canAccess(link, user?.role)).map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  className={({ isActive }) => cn(
-                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-                  )}
-                >
-                  <link.icon className="h-4 w-4" />
-                  {link.label}
-                </NavLink>
-              ))}
-            </div>
+            <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">{activeRoot.label}</p>
+            <SettingsTreeLinks nodes={activeRoot.children} role={user?.role} />
           </div>
         )}
       </aside>

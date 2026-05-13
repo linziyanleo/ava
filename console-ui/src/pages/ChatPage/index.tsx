@@ -1162,7 +1162,7 @@ export default function ChatPage() {
   }, [activeSession, filteredSessions, handleSessionSelect, isMobile, mobileSessionOpen])
 
   return (
-    <div className={isMobile ? 'mobile-chat-shell relative -m-4 -mb-20 flex flex-col overflow-hidden' : 'relative -m-6 flex h-[calc(100%+3rem)] min-h-0 flex-col overflow-hidden'}>
+    <div className={isMobile ? 'mobile-chat-shell relative flex flex-col overflow-hidden' : 'relative flex h-full min-h-0 flex-col overflow-hidden'}>
       {(mockMode || !canMutateChat) && (
         <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
           只读模式 · 申请权限

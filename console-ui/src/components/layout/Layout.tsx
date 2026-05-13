@@ -62,7 +62,7 @@ export default function Layout() {
   if (isMobile) {
     return (
       <div className="flex flex-col h-dvh">
-        <main className="flex-1 min-h-0 overflow-y-auto p-4 pb-20">
+        <main className="flex-1 min-h-0 overflow-y-auto">
           {user?.role === 'mock_tester' && (
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
               MOCK SANDBOX
@@ -79,7 +79,7 @@ export default function Layout() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
-      <main className="min-h-0 flex-1 overflow-y-auto p-6">
+      <main className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
       <TaskFloater />

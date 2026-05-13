@@ -105,7 +105,7 @@ export default function BrowserPage() {
   }, [activeSession])
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-col p-4 md:p-6">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
         <h2 className="text-sm font-medium text-[var(--text-primary)]">浏览器预览</h2>

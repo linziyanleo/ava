@@ -87,7 +87,7 @@ export default function PersonaPage() {
   const currentFileInfo = PERSONA_FILES.find(f => f.key === activeFile)!
 
   return (
-    <div className="h-[calc(100vh-3rem)] flex flex-col">
+    <div className="flex h-full min-h-0 flex-col p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">

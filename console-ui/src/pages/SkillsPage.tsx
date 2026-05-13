@@ -948,7 +948,7 @@ function SkillCard({
 
 export default function SkillsPage() {
   return (
-    <div>
+    <div className="p-4 md:p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Puzzle className="w-6 h-6 text-[var(--accent)]" />

@@ -929,7 +929,7 @@ export default function TokenStatsPage() {
   }, [loadingSessionTurns, scrollTargetTurnKey, view]);
 
   return (
-    <div>
+    <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           {!isMobile && <h1 className="text-2xl font-bold">Token 统计</h1>}

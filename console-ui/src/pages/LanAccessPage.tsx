@@ -153,7 +153,7 @@ export default function LanAccessPage() {
   const activeDevices = status?.devices.filter((device) => !device.revoked_at) || []
 
   return (
-    <section className="max-w-6xl space-y-5">
+    <section className="max-w-6xl space-y-5 p-4 md:p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">LAN Access</h1>

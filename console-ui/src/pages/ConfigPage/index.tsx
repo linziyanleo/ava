@@ -153,7 +153,7 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
 
   if (activeTab === 'main' && !data) {
     return (
-      <div className="h-[calc(100vh-3rem)] flex flex-col">
+      <div className="flex h-full min-h-0 flex-col p-4 md:p-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">{PAGE_COPY[mode].title}</h1>
         </div>
@@ -163,7 +163,7 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
   }
 
   return (
-    <div className="h-[calc(100vh-3rem)] flex flex-col">
+    <div className="flex h-full min-h-0 flex-col p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">{PAGE_COPY[mode].title}</h1>
