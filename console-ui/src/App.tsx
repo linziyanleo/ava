@@ -17,6 +17,7 @@ import BrowserPage from './pages/BrowserPage'
 import LanAccessPage from './pages/LanAccessPage'
 import SettingsPage, { DesktopSettingsPage, SettingsVersionPage } from './pages/SettingsPage'
 import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
+import { useDeepLink } from './hooks/useDeepLink'
 
 const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
 const MobilePairPage = lazy(() => import('./pages/MobilePairPage'))
@@ -50,6 +51,11 @@ function ProtectedRoute({
   return <>{children}</>
 }
 
+function DeepLinkBridge() {
+  useDeepLink()
+  return null
+}
+
 export default function App() {
   const { checkAuth, user, loading } = useAuth()
 
@@ -60,6 +66,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <DeepLinkBridge />
       <Routes>
         <Route path="/login" element={user && !loading ? <Navigate to="/" replace /> : <LoginPage />} />
         <Route

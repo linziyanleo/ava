@@ -12,6 +12,7 @@ const skipConsoleBuild = process.argv.includes('--skip-console-build');
 const electronDownloadCacheRoot = process.env.ELECTRON_DOWNLOAD_CACHE_ROOT
   || path.join(os.tmpdir(), 'ava-electron-cache');
 const runtimeManifestName = 'ava-runtime-manifest.json';
+const urlScheme = process.env.AVA_DEEP_LINK_SCHEME || 'ava';
 
 function assertPath(relativePath) {
   const absolutePath = path.join(repoRoot, relativePath);
@@ -65,6 +66,37 @@ function readPlistValue(plistPath, key) {
   return result.stdout.trim();
 }
 
+function readPlistJson(plistPath, key) {
+  const result = spawnSync('plutil', ['-extract', key, 'json', '-o', '-', plistPath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    throw new Error(`failed to read ${key} from ${plistPath}: ${result.stderr}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function plistBuddy(plistPath, command, options = {}) {
+  const result = spawnSync('/usr/libexec/PlistBuddy', ['-c', command, plistPath], {
+    encoding: 'utf8',
+    stdio: options.ignoreFailure ? 'ignore' : ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0 && !options.ignoreFailure) {
+    throw new Error(`PlistBuddy ${command} failed: ${result.stderr}`);
+  }
+}
+
+function injectUrlScheme(appPath) {
+  const infoPlist = path.join(appPath, 'Contents', 'Info.plist');
+  plistBuddy(infoPlist, 'Delete :CFBundleURLTypes', { ignoreFailure: true });
+  plistBuddy(infoPlist, 'Add :CFBundleURLTypes array');
+  plistBuddy(infoPlist, 'Add :CFBundleURLTypes:0 dict');
+  plistBuddy(infoPlist, 'Add :CFBundleURLTypes:0:CFBundleURLName string app.ava.desktop');
+  plistBuddy(infoPlist, 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array');
+  plistBuddy(infoPlist, `Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ${urlScheme}`);
+}
+
 function readInstalledElectronVersion() {
   const packagePath = path.join(electronRoot, 'node_modules', 'electron', 'package.json');
   const electronPackage = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
@@ -116,6 +148,11 @@ function verifyPackagedApp(appPath) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   if (manifest.repoRoot !== repoRoot || !fs.existsSync(path.join(manifest.repoRoot, 'scripts', 'start-ava.sh'))) {
     throw new Error(`invalid runtime manifest repoRoot: ${manifest.repoRoot}`);
+  }
+  const urlTypes = readPlistJson(infoPlist, 'CFBundleURLTypes');
+  const schemes = urlTypes.flatMap((entry) => Array.isArray(entry.CFBundleURLSchemes) ? entry.CFBundleURLSchemes : []);
+  if (!schemes.includes(urlScheme)) {
+    throw new Error(`missing URL scheme ${urlScheme} in ${infoPlist}`);
   }
 }
 
@@ -186,6 +223,7 @@ try {
 }
 
 const packagedApp = path.join(electronRoot, 'dist', 'Ava-darwin-arm64', 'Ava.app');
+injectUrlScheme(packagedApp);
 verifyPackagedApp(packagedApp);
 run('codesign', ['--force', '--deep', '--sign', '-', packagedApp]);
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=1', packagedApp]);

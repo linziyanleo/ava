@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  FolderOpen,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../stores/auth';
@@ -35,11 +36,19 @@ interface MediaResponse {
   size: number;
 }
 
+interface AvaDesktopApi {
+  revealArtifact?: (artifactId: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function imageUrl(path: string): string {
   const filename = path.split('/').pop() || path;
   return `/api/media/images/${filename}`;
+}
+
+function desktopApi(): AvaDesktopApi | null {
+  return (window as unknown as { avaDesktop?: AvaDesktopApi }).avaDesktop || null;
 }
 
 // ── Grid Card ─────────────────────────────────────────────────────────────
@@ -160,6 +169,14 @@ export default function MediaPage() {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : '删除失败' });
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleReveal = async (record: MediaRecord) => {
+    try {
+      await desktopApi()?.revealArtifact?.(record.id);
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Reveal failed' });
     }
   };
 
@@ -454,6 +471,15 @@ export default function MediaPage() {
               )}
             </div>
             <div className="border-t border-[var(--border)] px-6 py-4 flex justify-end">
+              {desktopApi()?.revealArtifact && selected.output_images.length > 0 && (
+                <button
+                  onClick={() => handleReveal(selected)}
+                  className="mr-2 inline-flex items-center gap-2 rounded-lg bg-[var(--bg-secondary)] px-4 py-2 text-sm hover:bg-[var(--bg-tertiary)]"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Reveal in Finder
+                </button>
+              )}
               <button
                 onClick={() => setSelected(null)}
                 className="px-4 py-2 rounded-lg bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-sm"

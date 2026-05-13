@@ -685,7 +685,7 @@ def test_ava21_electron_shell_checklist_is_covered() -> None:
         preload,
         [
             "selectDirectory",
-            "openPath",
+            "revealArtifact",
             "getAppConfig",
             "getCoreEndpoint",
             "getAuthToken",

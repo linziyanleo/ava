@@ -2,12 +2,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const api = {
   selectDirectory: () => ipcRenderer.invoke('ava:selectDirectory'),
-  openPath: (targetPath) => ipcRenderer.invoke('ava:openPath', targetPath),
+  revealArtifact: (artifactId) => ipcRenderer.invoke('ava:revealArtifact', artifactId),
   openLogs: () => ipcRenderer.invoke('ava:openLogs'),
   getAppConfig: () => ipcRenderer.invoke('ava:getAppConfig'),
   getCoreEndpoint: () => ipcRenderer.invoke('ava:getCoreEndpoint'),
   getAuthToken: () => ipcRenderer.invoke('ava:getAuthToken'),
   getBootstrapState: () => ipcRenderer.invoke('ava:getBootstrapState'),
+  rendererReady: () => ipcRenderer.invoke('ava:rendererReady'),
   readDesktopConfig: () => ipcRenderer.invoke('ava:readDesktopConfig'),
   setNanobotRoot: (root) => ipcRenderer.invoke('ava:setNanobotRoot', root),
   retryCore: () => ipcRenderer.invoke('ava:retryCore'),
@@ -24,6 +25,12 @@ const api = {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('ava:openTaskFloater', listener);
     return () => ipcRenderer.removeListener('ava:openTaskFloater', listener);
+  },
+  onDeepLink: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('ava:deepLink', listener);
+    return () => ipcRenderer.removeListener('ava:deepLink', listener);
   },
 };
 

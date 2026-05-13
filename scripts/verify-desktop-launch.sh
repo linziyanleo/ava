@@ -8,6 +8,7 @@ CORE_LOG="${HOME}/Library/Logs/Ava/core.log"
 TIMEOUT_SECONDS="${AVA_DESKTOP_VERIFY_TIMEOUT:-45}"
 REQUIRE_FRESH_CORE="${AVA_DESKTOP_VERIFY_REQUIRE_FRESH_CORE:-0}"
 FORBID_ENDPOINT_PORT="${AVA_DESKTOP_VERIFY_FORBID_ENDPOINT_PORT:-}"
+DEEP_LINK_SCHEME="${AVA_DEEP_LINK_SCHEME:-ava}"
 
 fail() {
   echo "verify-desktop-launch: $*" >&2
@@ -40,6 +41,28 @@ read_plist_value() {
   local plist="$1"
   local key="$2"
   plutil -extract "${key}" raw -o - "${plist}" 2>/dev/null || return 1
+}
+
+require_url_scheme() {
+  local plist="$1"
+  local scheme="$2"
+  local url_types
+  url_types="$(plutil -extract CFBundleURLTypes json -o - "${plist}" 2>/dev/null)" \
+    || fail "missing CFBundleURLTypes in ${plist}"
+  URL_TYPES_JSON="${url_types}" python3 - "${scheme}" <<'PY'
+import json
+import os
+import sys
+
+scheme = sys.argv[1]
+payload = json.loads(os.environ["URL_TYPES_JSON"])
+schemes = []
+for item in payload:
+    if isinstance(item, dict) and isinstance(item.get("CFBundleURLSchemes"), list):
+        schemes.extend(str(value) for value in item["CFBundleURLSchemes"])
+if scheme not in schemes:
+    raise SystemExit(1)
+PY
 }
 
 running_app_pids() {
@@ -172,6 +195,7 @@ INFO_PLIST="${APP_ABS_PATH}/Contents/Info.plist"
 [[ -f "${INFO_PLIST}" ]] || fail "missing Info.plist: ${INFO_PLIST}"
 BUNDLE_EXECUTABLE="$(read_plist_value "${INFO_PLIST}" "CFBundleExecutable")" || fail "missing CFBundleExecutable in ${INFO_PLIST}"
 [[ -n "${BUNDLE_EXECUTABLE}" ]] || fail "empty CFBundleExecutable in ${INFO_PLIST}"
+require_url_scheme "${INFO_PLIST}" "${DEEP_LINK_SCHEME}" || fail "Info.plist missing URL scheme ${DEEP_LINK_SCHEME}"
 MAIN_EXECUTABLE="${APP_ABS_PATH}/Contents/MacOS/${BUNDLE_EXECUTABLE}"
 require_mach_o_executable "${MAIN_EXECUTABLE}"
 set +e

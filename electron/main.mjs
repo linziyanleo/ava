@@ -53,6 +53,7 @@ let startupPromise = null;
 let consoleLoadPromise = null;
 let consoleLoaded = false;
 let consoleReadyWatcher = null;
+let pendingDeepLink = null;
 let logs = null;
 let stderrTail = '';
 let bootstrapTail = '';
@@ -125,6 +126,81 @@ function publicConfig(config = launchConfig) {
 
 function getAvaConfig() {
   return publicConfig();
+}
+
+function deepLinkScheme() {
+  return process.env.AVA_DEEP_LINK_SCHEME || (app.isPackaged ? 'ava' : 'ava-dev');
+}
+
+function registerDeepLinkProtocol() {
+  const scheme = deepLinkScheme();
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(scheme);
+    return;
+  }
+  const entry = process.argv[1] ? [path.resolve(process.argv[1])] : [];
+  app.setAsDefaultProtocolClient(scheme, process.execPath, entry);
+}
+
+function routeDeepLink(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== `${deepLinkScheme()}:`) {
+    return null;
+  }
+  const segments = [parsed.hostname, ...parsed.pathname.split('/').filter(Boolean)].filter(Boolean);
+  const [kind, value] = segments;
+  if (!kind) return '/';
+
+  const params = new URLSearchParams();
+  if (kind === 'session' && value) {
+    params.set('session_key', value);
+    return `/?${params.toString()}`;
+  }
+  if (kind === 'task' && value) {
+    params.set('view', 'tasks');
+    params.set('task_id', value);
+    return `/?${params.toString()}`;
+  }
+  if (kind === 'trace' && value) {
+    params.set('view', 'tasks');
+    params.set('trace_id', value);
+    return `/?${params.toString()}`;
+  }
+  if (kind === 'chain' && value) {
+    params.set('view', 'tasks');
+    params.set('chain_id', value);
+    return `/?${params.toString()}`;
+  }
+  if (kind === 'settings') {
+    return `/settings/${segments.slice(1).join('/')}`;
+  }
+  return null;
+}
+
+function flushPendingDeepLink() {
+  if (!pendingDeepLink || !mainWindow || mainWindow.isDestroyed() || !consoleLoaded) {
+    return;
+  }
+  const pathToOpen = pendingDeepLink;
+  pendingDeepLink = null;
+  mainWindow.webContents.send('ava:deepLink', { path: pathToOpen });
+}
+
+async function handleDeepLink(rawUrl) {
+  const pathToOpen = routeDeepLink(rawUrl);
+  if (!pathToOpen) return;
+
+  const canSendImmediately = consoleLoaded && mainWindow && !mainWindow.isDestroyed();
+  pendingDeepLink = pathToOpen;
+  await showMainWindow();
+  if (canSendImmediately) {
+    flushPendingDeepLink();
+  }
 }
 
 function rotateLogFile(logPath) {
@@ -532,6 +608,67 @@ async function openLogs() {
   return { ok: error.length === 0, error };
 }
 
+function avaHome() {
+  return path.resolve(process.env.AVA_HOME || path.join(os.homedir(), '.ava'));
+}
+
+function artifactRoots() {
+  const mediaRoot = path.join(avaHome(), 'media');
+  return [
+    path.join(mediaRoot, 'generated'),
+    path.join(mediaRoot, 'screenshots'),
+    path.join(mediaRoot, 'chat-uploads'),
+  ];
+}
+
+function assertPathInsideRoots(candidate, roots) {
+  const resolved = path.resolve(candidate);
+  for (const root of roots) {
+    const resolvedRoot = path.resolve(root);
+    const relative = path.relative(resolvedRoot, resolved);
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      return resolved;
+    }
+    if (!relative) {
+      return resolved;
+    }
+  }
+  throw new Error('artifact path is outside allowed roots');
+}
+
+function resolveRevealArtifactPath(artifactId) {
+  if (typeof artifactId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(artifactId)) {
+    throw new Error('invalid artifact id');
+  }
+
+  const roots = artifactRoots();
+  const candidates = [];
+  for (const root of roots) {
+    candidates.push(path.join(root, artifactId));
+    candidates.push(path.join(root, `${artifactId}_0.png`));
+  }
+
+  for (const candidate of candidates) {
+    const resolved = assertPathInsideRoots(candidate, roots);
+    if (fs.existsSync(resolved)) {
+      return resolved;
+    }
+  }
+
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    const match = fs.readdirSync(root).find((entry) => entry === artifactId || entry.startsWith(`${artifactId}_`));
+    if (match) {
+      const resolved = assertPathInsideRoots(path.join(root, match), roots);
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    }
+  }
+
+  throw new Error('artifact not found');
+}
+
 async function showStartupError(reason, logPath, tail) {
   const detailParts = [];
   if (reason.detail) {
@@ -824,16 +961,18 @@ ipcMain.handle('ava:getAppConfig', () => getAvaConfig());
 ipcMain.handle('ava:getCoreEndpoint', () => getAvaConfig().coreEndpoint);
 ipcMain.handle('ava:getAuthToken', () => null);
 ipcMain.handle('ava:getBootstrapState', () => bootstrapState);
+ipcMain.handle('ava:rendererReady', () => {
+  flushPendingDeepLink();
+  return { ok: true };
+});
 ipcMain.handle('ava:selectDirectory', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   return result.canceled ? null : result.filePaths[0] || null;
 });
-ipcMain.handle('ava:openPath', async (_event, targetPath) => {
-  if (typeof targetPath !== 'string' || targetPath.length === 0) {
-    return { ok: false, error: 'invalid path' };
-  }
-  const error = await shell.openPath(targetPath);
-  return { ok: error.length === 0, error };
+ipcMain.handle('ava:revealArtifact', (_event, artifactId) => {
+  const targetPath = resolveRevealArtifactPath(artifactId);
+  shell.showItemInFolder(targetPath);
+  return { ok: true };
 });
 ipcMain.handle('ava:openLogs', () => openLogs());
 ipcMain.handle('ava:readDesktopConfig', () => readDesktopConfig());
@@ -865,7 +1004,17 @@ ipcMain.handle('ava:showNotification', (_event, payload) => {
   return { ok: true };
 });
 
-app.on('second-instance', () => {
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url).catch(showFatalStartupError);
+});
+
+app.on('second-instance', (_event, commandLine) => {
+  const deepLinkUrl = commandLine.find((item) => item.startsWith(`${deepLinkScheme()}://`));
+  if (deepLinkUrl) {
+    handleDeepLink(deepLinkUrl).catch(showFatalStartupError);
+    return;
+  }
   if (!mainWindow) {
     return;
   }
@@ -877,6 +1026,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   const config = await createLaunchConfig();
+  registerDeepLinkProtocol();
   installAppMenu();
   createBootstrapWindow(config);
   await bootstrapAndStart(config);
