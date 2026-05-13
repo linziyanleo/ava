@@ -23,7 +23,16 @@ const MobilePairPage = lazy(() => import('./pages/MobilePairPage'))
 
 function LegacyRedirect() {
   const location = useLocation()
+  const rule = legacyRedirectMatrix.find((item) => item.from === location.pathname)
   const target = resolveLegacyRedirect(location.pathname, location.search) || { pathname: '/', search: '' }
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !rule) return
+    console.warn(
+      `[Ava] Legacy route "${rule.from}" is deprecated and will be removed after ${rule.deprecatedAfter}; use "${rule.to}" instead.`,
+    )
+  }, [rule])
+
   return <Navigate to={target} replace />
 }
 

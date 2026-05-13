@@ -1,6 +1,7 @@
 export interface LegacyRedirectRule {
   from: string
   to: string
+  deprecatedAfter: string
   defaults?: Record<string, string>
   renameParams?: Record<string, string>
 }
@@ -11,21 +12,21 @@ export interface RedirectLocation {
 }
 
 export const legacyRedirectMatrix: LegacyRedirectRule[] = [
-  { from: '/agents', to: '/settings/agents-config' },
-  { from: '/config', to: '/settings/system/console' },
-  { from: '/memory', to: '/settings/agents-config/nanobot/memory' },
-  { from: '/persona', to: '/settings/agents-config/nanobot/persona' },
-  { from: '/skills', to: '/settings/tools/skills' },
-  { from: '/media', to: '/', defaults: { view: 'tasks', task_view: 'artifacts' } },
-  { from: '/chat', to: '/', renameParams: { session_key: 'session_id' } },
-  { from: '/tasks', to: '/', defaults: { view: 'tasks', task_view: 'scheduled' } },
-  { from: '/bg-tasks', to: '/', defaults: { view: 'tasks', task_view: 'history' } },
-  { from: '/tokens', to: '/settings/statistics' },
-  { from: '/users', to: '/settings/users' },
-  { from: '/browser', to: '/settings/system/browser' },
-  { from: '/gateway', to: '/settings/system/gateway' },
-  { from: '/files', to: '/settings/agents-config/nanobot/memory' },
-  { from: '/audit', to: '/settings/users' },
+  { from: '/agents', to: '/settings/agents-config', deprecatedAfter: '0.3.0' },
+  { from: '/config', to: '/settings/system/console', deprecatedAfter: '0.3.0' },
+  { from: '/memory', to: '/settings/agents-config/nanobot/memory', deprecatedAfter: '0.3.0' },
+  { from: '/persona', to: '/settings/agents-config/nanobot/persona', deprecatedAfter: '0.3.0' },
+  { from: '/skills', to: '/settings/tools/skills', deprecatedAfter: '0.3.0' },
+  { from: '/media', to: '/', deprecatedAfter: '0.3.0', defaults: { view: 'tasks', task_view: 'artifacts' } },
+  { from: '/chat', to: '/', deprecatedAfter: '0.3.0', renameParams: { session_key: 'session_id' } },
+  { from: '/tasks', to: '/', deprecatedAfter: '0.3.0', defaults: { view: 'tasks', task_view: 'scheduled' } },
+  { from: '/bg-tasks', to: '/', deprecatedAfter: '0.3.0', defaults: { view: 'tasks', task_view: 'history' } },
+  { from: '/tokens', to: '/settings/statistics', deprecatedAfter: '0.3.0' },
+  { from: '/users', to: '/settings/users', deprecatedAfter: '0.3.0' },
+  { from: '/browser', to: '/settings/system/browser', deprecatedAfter: '0.3.0' },
+  { from: '/gateway', to: '/settings/system/gateway', deprecatedAfter: '0.3.0' },
+  { from: '/files', to: '/settings/agents-config/nanobot/memory', deprecatedAfter: '0.3.0' },
+  { from: '/audit', to: '/settings/users', deprecatedAfter: '0.3.0' },
 ]
 
 export function resolveLegacyRedirect(pathname: string, search: string): RedirectLocation | null {

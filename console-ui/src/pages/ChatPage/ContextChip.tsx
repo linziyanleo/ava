@@ -18,11 +18,11 @@ function toneTextClass(pct: number): string {
 
 interface ContextChipProps {
   sessionKey: string | null
-  onOpenInspector: () => void
+  onOpenLens: () => void
   isMobile?: boolean
 }
 
-export function ContextChip({ sessionKey, onOpenInspector, isMobile }: ContextChipProps) {
+export function ContextChip({ sessionKey, onOpenLens, isMobile }: ContextChipProps) {
   const [preview, setPreview] = useState<ContextPreview | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
@@ -32,8 +32,6 @@ export function ContextChip({ sessionKey, onOpenInspector, isMobile }: ContextCh
 
   useEffect(() => {
     if (!sessionKey) {
-      setPreview(null)
-      setError(false)
       return
     }
     let disposed = false
@@ -93,7 +91,7 @@ export function ContextChip({ sessionKey, onOpenInspector, isMobile }: ContextCh
     return (
       <button
         type="button"
-        onClick={onOpenInspector}
+        onClick={onOpenLens}
         className="inline-flex items-center gap-1.5 rounded-md border border-[var(--danger)]/30 px-2.5 py-1.5 text-xs text-[var(--danger)]"
       >
         <AlertCircle className="h-3.5 w-3.5" />
@@ -106,7 +104,7 @@ export function ContextChip({ sessionKey, onOpenInspector, isMobile }: ContextCh
     return (
       <button
         type="button"
-        onClick={onOpenInspector}
+        onClick={onOpenLens}
         className={`inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1.5 text-xs ${toneTextClass(pct)}`}
       >
         <span className={`inline-block h-1.5 w-1.5 rounded-full ${toneClass(pct)}`} />
@@ -121,7 +119,7 @@ export function ContextChip({ sessionKey, onOpenInspector, isMobile }: ContextCh
       <button
         ref={chipRef}
         type="button"
-        onClick={onOpenInspector}
+        onClick={onOpenLens}
         onMouseEnter={handleMouseEnter}
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-[var(--bg-tertiary)]"
       >

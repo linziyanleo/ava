@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { RefreshCw, Search, Zap, Radio, Lock, X } from 'lucide-react'
+import { RefreshCw, Search, Radio, Lock, X } from 'lucide-react'
 import type { ActiveChatTransport, ChatStreamStatus } from './types'
 
 interface HeaderOverflowSheetProps {
@@ -7,11 +7,9 @@ interface HeaderOverflowSheetProps {
   onClose: () => void
   onRefresh: () => void
   onSearch: () => void
-  onTokenStats: () => void
   transportStatus: ChatStreamStatus
   activeTransport: ActiveChatTransport
   isReadOnly: boolean
-  tokenSummary: string
 }
 
 const TRANSPORT_LABELS: Record<ActiveChatTransport, string> = {
@@ -33,11 +31,9 @@ export function HeaderOverflowSheet({
   onClose,
   onRefresh,
   onSearch,
-  onTokenStats,
   transportStatus,
   activeTransport,
   isReadOnly,
-  tokenSummary,
 }: HeaderOverflowSheetProps) {
   useEffect(() => {
     if (!open) return
@@ -86,7 +82,6 @@ export function HeaderOverflowSheet({
         <div className="divide-y divide-[var(--border)]">
           {actionItem(<RefreshCw className="h-4 w-4" />, 'Refresh', onRefresh)}
           {actionItem(<Search className="h-4 w-4" />, 'Search', onSearch)}
-          {actionItem(<Zap className="h-4 w-4" />, `Token stats · ${tokenSummary}`, onTokenStats)}
           {infoItem(
             <Radio className="h-4 w-4" />,
             'Connection',

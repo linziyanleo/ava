@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Box, Gauge, MemoryStick, Puzzle, type LucideIcon } from 'lucide-react'
 import { api } from '../../api/client'
-import type { ActiveChatTransport, DirectTaskMessage, SessionMeta } from './types'
+import type { DirectTaskMessage, SessionMeta } from './types'
 import { formatTokenCount } from './utils'
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 import { useTaskFloater } from '../../stores/taskFloater'
@@ -45,8 +45,6 @@ export function HudBar({
 }: {
   session: SessionMeta | null
   directTasks: DirectTaskMessage[]
-  activeTransport: ActiveChatTransport
-  isReadOnly: boolean
   onSkillSelect?: (skillName: string) => void
 }) {
   const navigate = useNavigate()

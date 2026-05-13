@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Copy, Check, RefreshCw, Search, Menu, ExternalLink, MoreHorizontal } from 'lucide-react'
+import { Copy, Check, RefreshCw, Search, Menu, MoreHorizontal } from 'lucide-react'
 import type { SessionMeta, ConversationMeta, ActiveChatTransport, ChatStreamStatus } from './types'
 import { SCENE_LABELS } from './types'
 import { ConnectionBadge } from './ConnectionBadge'
@@ -10,20 +9,16 @@ import { ContextLensDrawer } from './ContextLensDrawer'
 import { HeaderOverflowSheet } from './HeaderOverflowSheet'
 import { SearchModal } from './SearchModal'
 import type { TurnGroup } from './types'
-import { formatTokenCount, getSessionParticipants, getSessionTitle } from './utils'
-import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
+import { getSessionParticipants, getSessionTitle } from './utils'
 
 interface ChatHeaderProps {
   session: SessionMeta | null
   conversation: ConversationMeta | null
-  conversationId: string | null
   turns: TurnGroup[]
   isReadOnly: boolean
   isMobile?: boolean
   transportStatus: ChatStreamStatus
   activeTransport: ActiveChatTransport
-  headerTotalTokens: number
-  headerLlmCalls: number
   onRefresh: () => void
   onToggleSessionPanel?: () => void
   onParticipantsChange?: (participants: string[]) => Promise<void> | void
@@ -32,23 +27,19 @@ interface ChatHeaderProps {
 export function ChatHeader({
   session,
   conversation,
-  conversationId,
   turns,
   isReadOnly,
   isMobile,
   transportStatus,
   activeTransport,
-  headerTotalTokens,
-  headerLlmCalls,
   onRefresh,
   onToggleSessionPanel,
   onParticipantsChange,
 }: ChatHeaderProps) {
-  const navigate = useNavigate()
   const [keyCopied, setKeyCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
-  const [showInspector, setShowInspector] = useState(false)
+  const [showLens, setShowLens] = useState(false)
   const [showOverflow, setShowOverflow] = useState(false)
 
   const handleCopyKey = useCallback(() => {
@@ -64,16 +55,10 @@ export function ChatHeader({
     setTimeout(() => setRefreshing(false), 1000)
   }, [onRefresh])
 
-  const handleTokenStats = useCallback(() => {
-    if (!session) return
-    navigate(buildTokenStatsNavUrl({ sessionKey: session.key, conversationId }))
-  }, [conversationId, navigate, session])
-
   if (!session) return null
 
   const headerTitle = getSessionTitle(session)
   const participants = getSessionParticipants(session)
-  const tokenSummary = `${formatTokenCount(headerTotalTokens)} · ${headerLlmCalls} calls`
 
   if (isMobile) {
     return (
@@ -109,7 +94,7 @@ export function ChatHeader({
 
           <ContextChip
             sessionKey={session.key}
-            onOpenInspector={() => setShowInspector(true)}
+            onOpenLens={() => setShowLens(true)}
             isMobile
           />
 
@@ -127,21 +112,19 @@ export function ChatHeader({
           onClose={() => setShowOverflow(false)}
           onRefresh={handleRefresh}
           onSearch={() => setShowSearch(true)}
-          onTokenStats={handleTokenStats}
           transportStatus={transportStatus}
           activeTransport={activeTransport}
           isReadOnly={isReadOnly}
-          tokenSummary={tokenSummary}
         />
 
         {showSearch && <SearchModal turns={turns} onClose={() => setShowSearch(false)} />}
         <ContextLensDrawer
-          open={showInspector}
+          open={showLens}
           sessionKey={session.key}
           sessionLabel={headerTitle}
           disabled={isReadOnly}
           isMobile
-          onClose={() => setShowInspector(false)}
+          onClose={() => setShowLens(false)}
         />
       </>
     )
@@ -187,7 +170,7 @@ export function ChatHeader({
 
         <ContextChip
           sessionKey={session.key}
-          onOpenInspector={() => setShowInspector(true)}
+          onOpenLens={() => setShowLens(true)}
         />
 
         {/* Spacer */}
@@ -201,16 +184,6 @@ export function ChatHeader({
             RO
           </span>
         )}
-
-        <button
-          type="button"
-          onClick={handleTokenStats}
-          className="hidden shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--accent)] md:inline-flex"
-          title="Token 统计"
-        >
-          ⚡ {tokenSummary}
-          <ExternalLink className="h-2.5 w-2.5" />
-        </button>
 
         <button
           type="button"
@@ -232,11 +205,11 @@ export function ChatHeader({
 
       {showSearch && <SearchModal turns={turns} onClose={() => setShowSearch(false)} />}
       <ContextLensDrawer
-        open={showInspector}
+        open={showLens}
         sessionKey={session.key}
         sessionLabel={headerTitle}
         disabled={isReadOnly}
-        onClose={() => setShowInspector(false)}
+        onClose={() => setShowLens(false)}
       />
     </>
   )

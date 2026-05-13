@@ -51,7 +51,11 @@ function buildTaskTimelineItems(tasks: DirectTaskMessage[]): TaskTimelineItem[] 
 
   return items
     .sort((a, b) => (a.order - b.order) || a.tie.localeCompare(b.tie))
-    .map(({ order: _order, tie: _tie, ...item }) => item)
+    .map((item) => (
+      item.kind === 'chain'
+        ? { kind: 'chain', chainId: item.chainId, tasks: item.tasks }
+        : { kind: 'task', task: item.task }
+    ))
 }
 
 interface MessageAreaProps {
@@ -95,8 +99,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
 
   useEffect(() => {
     if (!session?.key) {
-      setTurnTokenStats(new Map());
-      setIterationStats(new Map());
       return;
     }
     const conversationFilter = conversationId !== null
@@ -269,8 +271,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
     )
   }
 
-  let headerTotalTokens = session.token_stats.total_tokens
-  let headerLlmCalls = session.token_stats.llm_calls
   const visibleTurns = isConsole
     && inFlightTurn?.transport === 'console'
     && typeof inFlightTurn.turnSeq === 'number'
@@ -281,28 +281,16 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
     || inFlightTurn?.thinkingContent
     || inFlightTurn?.entries.length,
   )
-  if (turnTokenStats.size > 0) {
-    headerTotalTokens = 0
-    headerLlmCalls = 0
-    for (const stats of turnTokenStats.values()) {
-      headerTotalTokens += stats.total_tokens
-      headerLlmCalls += stats.llm_calls
-    }
-  }
-
   return (
     <div className="flex min-h-0 flex-1 min-w-0 flex-col bg-[var(--bg-primary)] relative">
       <ChatHeader
         session={session}
         conversation={conversation}
-        conversationId={conversationId}
         turns={turns}
         isReadOnly={!!isReadOnly}
         isMobile={isMobile}
         transportStatus={transportStatus}
         activeTransport={activeTransport}
-        headerTotalTokens={headerTotalTokens}
-        headerLlmCalls={headerLlmCalls}
         onRefresh={onRefresh}
         onToggleSessionPanel={onToggleSessionPanel}
         onParticipantsChange={onParticipantsChange}
@@ -357,8 +345,6 @@ export function MessageArea({ session, conversation, conversationId, turns, inFl
       <HudBar
         session={session}
         directTasks={directTasks}
-        activeTransport={activeTransport}
-        isReadOnly={!!isReadOnly}
         onSkillSelect={handleSkillSelect}
       />
 
