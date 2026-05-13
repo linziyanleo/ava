@@ -10,7 +10,7 @@ Strategy:
   chat API without HTTP reverse-proxy.
 
 Console is served at: http://127.0.0.1:<port>
-Port priority: config.gateway.console.port → CAFE_CONSOLE_PORT env → 6688
+Port priority: AVA_DESKTOP_CONSOLE_PORT env (only when AVA_DESKTOP=1) → config.gateway.console.port → CAFE_CONSOLE_PORT env → 6688
 """
 
 from __future__ import annotations
@@ -61,6 +61,14 @@ def _clear_console_meta() -> None:
         runtime_paths.get_console_meta_file().unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def resolve_console_port(console_cfg: object | None) -> int:
+    desktop_port = os.environ.get("AVA_DESKTOP_CONSOLE_PORT")
+    if os.environ.get("AVA_DESKTOP") == "1" and desktop_port:
+        return int(desktop_port)
+    config_port = getattr(console_cfg, "port", None) if console_cfg else None
+    return int(config_port or os.environ.get("CAFE_CONSOLE_PORT", "6688"))
 
 
 def _on_sigusr1() -> None:
@@ -176,10 +184,7 @@ def apply_console_patch() -> str:
 
                     # Port config
                     console_cfg = getattr(getattr(cfg, "gateway", None), "console", None)
-                    console_port = (
-                        (console_cfg.port if console_cfg else None)
-                        or int(os.environ.get("CAFE_CONSOLE_PORT", "6688"))
-                    )
+                    console_port = resolve_console_port(console_cfg)
                     console_host = (
                         (console_cfg.host if console_cfg else None)
                         or os.environ.get("CAFE_CONSOLE_HOST", "127.0.0.1")

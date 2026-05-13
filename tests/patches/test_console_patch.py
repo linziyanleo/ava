@@ -7,6 +7,29 @@ import pytest
 
 
 class TestConsolePatch:
+    def test_desktop_console_port_overrides_config(self, monkeypatch):
+        """Desktop launch port must beat config.gateway.console.port."""
+        from types import SimpleNamespace
+
+        from ava.patches.console_patch import resolve_console_port
+
+        monkeypatch.setenv("AVA_DESKTOP", "1")
+        monkeypatch.setenv("AVA_DESKTOP_CONSOLE_PORT", "54321")
+        monkeypatch.setenv("CAFE_CONSOLE_PORT", "11111")
+
+        assert resolve_console_port(SimpleNamespace(port=6688)) == 54321
+
+    def test_non_desktop_console_port_uses_config_first(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from ava.patches.console_patch import resolve_console_port
+
+        monkeypatch.delenv("AVA_DESKTOP", raising=False)
+        monkeypatch.setenv("AVA_DESKTOP_CONSOLE_PORT", "54321")
+        monkeypatch.setenv("CAFE_CONSOLE_PORT", "11111")
+
+        assert resolve_console_port(SimpleNamespace(port=6688)) == 6688
+
     def test_patch_applies_without_error(self):
         """T7.1: apply_console_patch runs without error."""
         from ava.patches.console_patch import apply_console_patch

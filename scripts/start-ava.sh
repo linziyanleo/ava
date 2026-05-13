@@ -5,7 +5,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_NANOBOT_ROOT="${REPO_ROOT}/../nanobot"
 NANOBOT_ROOT="${AVA_NANOBOT_ROOT:-${DEFAULT_NANOBOT_ROOT}}"
 
-if [[ ! -f "${NANOBOT_ROOT}/pyproject.toml" || ! -f "${NANOBOT_ROOT}/nanobot/__main__.py" ]]; then
+json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+if [[ ! -f "${NANOBOT_ROOT}/pyproject.toml" || ! -f "${NANOBOT_ROOT}/nanobot/__main__.py" || ! -f "${NANOBOT_ROOT}/nanobot/cli/commands.py" ]]; then
+  if [[ "${AVA_DESKTOP:-}" == "1" ]]; then
+    printf '{"error":"nanobot_not_found","path":%s,"message":"nanobot checkout not found"}\n' "$(json_string "${NANOBOT_ROOT}")" >&2
+  fi
   echo "nanobot checkout not found: ${NANOBOT_ROOT}" >&2
   echo "Set AVA_NANOBOT_ROOT to a full HKUDS/nanobot checkout." >&2
   exit 1
