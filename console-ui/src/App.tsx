@@ -15,7 +15,7 @@ import TokenStatsPage from './pages/TokenStatsPage'
 import UsersPage from './pages/UsersPage'
 import BrowserPage from './pages/BrowserPage'
 import LanAccessPage from './pages/LanAccessPage'
-import SettingsPage, { SettingsVersionPage } from './pages/SettingsPage'
+import SettingsPage, { DesktopSettingsPage, SettingsVersionPage } from './pages/SettingsPage'
 import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
 
 const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
@@ -85,6 +85,7 @@ export default function App() {
             <Route path="tools/skills" element={<SkillsPage />} />
             <Route path="users" element={<ProtectedRoute allowedRoles={['admin']}><UsersPage /></ProtectedRoute>} />
             <Route path="system" element={<Navigate to="gateway" replace />} />
+            <Route path="system/desktop" element={<ProtectedRoute allowedRoles={['admin']}><DesktopSettingsPage /></ProtectedRoute>} />
             <Route path="system/lan-access" element={<ProtectedRoute allowedRoles={['admin']}><LanAccessPage /></ProtectedRoute>} />
             <Route path="system/gateway" element={<DashboardPage />} />
             <Route path="system/browser" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer']}><BrowserPage /></ProtectedRoute>} />

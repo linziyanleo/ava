@@ -33,7 +33,7 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[var(--accent)]/10 mb-4">
             <Bot className="w-8 h-8 text-[var(--accent)]" />
           </div>
-          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Nanobot Console</h1>
+          <h1 className="text-2xl font-bold text-[var(--text-primary)]">Ava</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">Sign in to manage your bot</p>
         </div>
 
