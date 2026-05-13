@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,47 @@ def _deep_diff(base: Any, target: Any) -> Any:
     if base == target:
         return _NO_CHANGE
     return copy.deepcopy(target)
+
+
+def _desktop_port(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+    try:
+        port = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer port") from exc
+    if port <= 0 or port > 65_535:
+        raise ValueError(f"{name} must be between 1 and 65535")
+    return port
+
+
+def apply_desktop_runtime_overrides(data: dict[str, Any]) -> dict[str, Any]:
+    if os.environ.get("AVA_DESKTOP") != "1":
+        return data
+
+    gateway_port = _desktop_port("AVA_DESKTOP_GATEWAY_PORT")
+    websocket_port = _desktop_port("AVA_DESKTOP_WEBSOCKET_PORT")
+    if gateway_port is None and websocket_port is None:
+        return data
+
+    merged = copy.deepcopy(data)
+    if gateway_port is not None:
+        gateway = merged.setdefault("gateway", {})
+        if not isinstance(gateway, dict):
+            raise ValueError("gateway config must be an object")
+        gateway["port"] = gateway_port
+
+    if websocket_port is not None:
+        channels = merged.setdefault("channels", {})
+        if not isinstance(channels, dict):
+            raise ValueError("channels config must be an object")
+        websocket = channels.setdefault("websocket", {})
+        if not isinstance(websocket, dict):
+            raise ValueError("channels.websocket config must be an object")
+        websocket["port"] = websocket_port
+
+    return merged
 
 
 def get_legacy_config_path() -> Path:

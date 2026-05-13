@@ -29,6 +29,7 @@ def apply_config_overlay_patch() -> str:
 
         config = loader_mod.Config()
         data = config_overlay.load_effective_config_data(path)
+        data = config_overlay.apply_desktop_runtime_overrides(data)
         if data:
             try:
                 migrated = loader_mod._migrate_config(data)

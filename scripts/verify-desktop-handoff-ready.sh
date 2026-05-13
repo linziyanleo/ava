@@ -208,6 +208,37 @@ check_app_process() {
   ok "no running Ava.app process found for ${app_abs_path}"
 }
 
+check_frontable_desktop_session() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    ok "frontable desktop session check skipped outside macOS"
+    return
+  fi
+  if ! command -v lsappinfo >/dev/null 2>&1; then
+    blocker "lsappinfo is unavailable; cannot confirm this macOS session can make apps frontmost before visual evidence."
+    return
+  fi
+
+  local front_asn
+  if ! front_asn="$(lsappinfo front 2>/dev/null)" || [[ -z "${front_asn}" ]]; then
+    blocker "cannot read the frontmost macOS app; run the handoff from an unlocked desktop session."
+    return
+  fi
+
+  local front_info
+  if ! front_info="$(lsappinfo info "${front_asn}" 2>/dev/null)" || [[ -z "${front_info}" ]]; then
+    blocker "cannot inspect the frontmost macOS app (${front_asn}); run the handoff from an unlocked desktop session."
+    return
+  fi
+
+  if grep -q 'bundleID="com.apple.loginwindow"' <<<"${front_info}"; then
+    blocker "frontmost macOS session is loginwindow; unlock the Mac into a normal desktop session before visual evidence."
+    printf '%s\n' "${front_info}" >&2
+    return
+  fi
+
+  ok "frontmost macOS session is not loginwindow"
+}
+
 healthy_core_at_port() {
   local port="$1"
   python3 - "${port}" <<'PY'
@@ -316,6 +347,7 @@ check_runtime_meta_ready() {
 cd "${REPO_ROOT}"
 check_node_version
 check_app_process
+check_frontable_desktop_session
 if [[ "${MODE}" == "port-conflict" ]]; then
   check_conflict_port_ready
   check_runtime_meta_ready

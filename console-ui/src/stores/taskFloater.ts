@@ -66,14 +66,19 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
 
 interface AvaDesktopApi {
   onOpenTaskFloater?: (callback: (payload?: { taskId?: string | null }) => void) => () => void
+  setBadgeCount?: (count: number) => Promise<{ ok: boolean; error?: string }>
 }
 
 let uninstallDesktopBridge: (() => void) | null = null
 
+function desktopApi(): AvaDesktopApi | null {
+  return (window as unknown as { avaDesktop?: AvaDesktopApi }).avaDesktop || null
+}
+
 export function installTaskFloaterDesktopBridge() {
   if (uninstallDesktopBridge) return uninstallDesktopBridge
 
-  const api = (window as unknown as { avaDesktop?: AvaDesktopApi }).avaDesktop
+  const api = desktopApi()
   if (!api?.onOpenTaskFloater) return () => {}
 
   uninstallDesktopBridge = api.onOpenTaskFloater((payload) => {
@@ -88,4 +93,10 @@ export function installTaskFloaterDesktopBridge() {
     uninstallDesktopBridge?.()
     uninstallDesktopBridge = null
   }
+}
+
+export function setTaskFloaterBadgeCount(count: number) {
+  const api = desktopApi()
+  if (!api?.setBadgeCount) return
+  void api.setBadgeCount(count)
 }

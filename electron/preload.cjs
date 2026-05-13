@@ -11,6 +11,7 @@ const api = {
   rendererReady: () => ipcRenderer.invoke('ava:rendererReady'),
   readDesktopConfig: () => ipcRenderer.invoke('ava:readDesktopConfig'),
   setNanobotRoot: (root) => ipcRenderer.invoke('ava:setNanobotRoot', root),
+  setBadgeCount: (count) => ipcRenderer.invoke('ava:setBadgeCount', count),
   retryCore: () => ipcRenderer.invoke('ava:retryCore'),
   cancelBootstrap: () => ipcRenderer.invoke('ava:cancelBootstrap'),
   showNotification: (payload) => ipcRenderer.invoke('ava:showNotification', payload),

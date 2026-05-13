@@ -23,6 +23,33 @@ def assert_contains_all(source: str, needles: list[str]) -> None:
     assert missing == []
 
 
+def test_electron_main_avoids_macos_safe_storage_keychain_prompt() -> None:
+    main = read("electron/main.mjs")
+    keychain_switch = (
+        "if (process.platform === 'darwin') {\n"
+        "  // Prevent Chromium Safe Storage from blocking launch with a login keychain prompt.\n"
+        "  app.commandLine.appendSwitch('use-mock-keychain');\n"
+        "}"
+    )
+    assert keychain_switch in main
+    assert main.index("app.commandLine.appendSwitch('use-mock-keychain')") < main.index(
+        "app.requestSingleInstanceLock()"
+    )
+
+
+def test_electron_main_has_cold_login_item_startup_timeout() -> None:
+    main = read("electron/main.mjs")
+    assert_contains_all(
+        main,
+        [
+            "const CORE_HEALTH_TIMEOUT_MS = 120_000;",
+            "'core_startup_timeout'",
+            "Ava core did not become reachable within ${Math.round(CORE_HEALTH_TIMEOUT_MS / 1000)} seconds",
+            "lastError ? String(lastError.message || lastError) : ''",
+        ],
+    )
+
+
 def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
     main = read("electron/main.mjs")
     wrapper = read("electron/bin/ava-core")
@@ -30,6 +57,7 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
     desktop_config = read("electron/lib/desktop-config.mjs")
     launch_env = read("electron/lib/launch-env.mjs")
     runtime_manifest = read("electron/lib/runtime-manifest.mjs")
+    runtime_mirror = read("electron/lib/runtime-mirror.mjs")
 
     assert_contains_all(
         main,
@@ -39,6 +67,7 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "import { pickFreePort } from './lib/ports.mjs'",
             "from './lib/launch-env.mjs'",
             "from './lib/runtime-manifest.mjs'",
+            "from './lib/runtime-mirror.mjs'",
             "resolveExistingAvaCore",
             "readRuntimeManifestRepoRoot(runtimeManifestPaths(__dirname))",
             "const existingCore = await resolveExistingAvaCore(host, preferredPort);",
@@ -47,18 +76,45 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "saveNanobotRoot(app.getPath('appData'), root)",
             "validateNanobotRoot(nanobotRoot)",
             "return null;",
-            "spawn('/bin/bash', [wrapper]",
+            "const venvPythonPath = path.join(config.repoRoot, '.venv', 'bin', 'python');",
+            "const pythonPath = fs.realpathSync(venvPythonPath);",
+            "path.join(process.resourcesPath, 'ava-runtime')",
+            "? packagedRuntimeRoot",
+            "prepareRuntimeMirror({",
+            "appDataPath: app.getPath('userData')",
+            "spawn(pythonPath, ['-m', 'ava', 'gateway']",
             "waitForAvaCoreOrExit(child, config)",
+            "async function checkStartupInterfaces(config)",
+            "await waitForStartupInterfaces(config);",
             "/api/gateway/health",
+            "/api/auth/me",
+            "Ava auth interface returned HTTP",
             "mainWindow.loadURL(config.coreEndpoint)",
             "child.kill('SIGTERM')",
             "child.kill('SIGKILL')",
             "stdio: ['ignore', 'pipe', 'pipe']",
             "path.join(os.homedir(), 'Library', 'Logs', 'Ava')",
             "Menu.setApplicationMenu(menu)",
+            "function ensureForegroundActivation()",
+            "app.setActivationPolicy('regular')",
+            "app.dock?.show?.()",
+            "function presentMainWindow(appWindow, reason)",
+            "appWindow.setSkipTaskbar(false)",
+            "appWindow.moveTop()",
+            "app.focus({ steal: true })",
+            "app.commandLine.appendSwitch('use-mock-keychain')",
+            "show: false",
+            "focusable: true",
+            "function createBootstrapWindow(config, { loadSetup = true } = {})",
+            "if (!loadSetup)",
+            "createBootstrapWindow(config, { loadSetup: !consoleLoaded })",
+            "presentMainWindow(mainWindow, 'setup loaded')",
+            "presentMainWindow(mainWindow, `console loaded: ${reason}`)",
+            "await showMainWindow();",
             "label: 'Edit'",
             "label: 'View'",
             "label: 'Window'",
+            "role: 'close'",
             "label: 'Retry Core'",
             "role: 'toggleDevTools'",
             "if (process.platform !== 'darwin') {\n    app.quit();\n  }",
@@ -71,7 +127,26 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "function routeDeepLink(rawUrl)",
             "ipcMain.handle('ava:revealArtifact'",
             "shell.showItemInFolder(targetPath)",
+            "const TRAY_ICON_SIZE = 18;",
+            "image.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE })",
+            "new Tray(trayImage)",
+            "tray.setContextMenu(Menu.buildFromTemplate",
+            "label: 'Show Window'",
+            "globalShortcut.register('Control+Shift+A'",
+            "globalShortcut.unregisterAll()",
+            "ipcMain.handle('ava:setBadgeCount'",
+            "return { ok: false, error: 'invalid badge count' }",
+            "app.dock.setBadge(count > 0 ? String(count) : '')",
+            "const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000",
+            "const UPDATE_CHECK_INITIAL_DELAY_MS = 5 * 1000",
+            "import { checkForUpdate } from './lib/update-check.mjs'",
+            "checkForUpdate({ currentVersion: readElectronAppVersion() })",
+            "update notification shown for",
+            "shell.openExternal(update.url)",
             "parseStructuredStartupError(stderrTail)",
+            "await stopAvaCore();",
+            "avaCoreProcess = null;",
+            "if (!exited) {\n        child.kill('SIGKILL');\n      }",
             "const RING_BUFFER_BYTES = 256 * 1024",
             "function appendRingBuffer(buffer, chunk, maxBytes = RING_BUFFER_BYTES)",
             "stderrTail = appendRingBuffer(stderrTail, chunk)",
@@ -91,7 +166,7 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "SETUP_LOAD_TIMEOUT_MS",
             "mainWindow.on('closed', () => {\n    clearTimeout(setupLoadTimeout);\n    mainWindow = null;\n  });",
             "did-finish-load",
-            "Setup surface did not finish loading.",
+            "setup surface did not finish loading within",
             "active.child.kill('SIGKILL')",
             "clearTimeout(killTimeout)",
             "active.child.kill('SIGTERM')",
@@ -105,6 +180,7 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
         core_health,
         [
             "export async function detectExistingAvaCore(host, port",
+            "export function httpGetStatus(url, timeoutMs = 2_000)",
             "export function isHealthyCorePayload(health)",
             "export function readConsoleMetaCandidate(options = {})",
             "export async function resolveExistingAvaCore(preferredHost, preferredPort",
@@ -113,6 +189,22 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
         ],
     )
     assert_contains_all(wrapper, ["scripts/start-ava.sh gateway", "trap shutdown INT TERM", "wait \"${core_pid}\""])
+    assert_contains_all(
+        runtime_mirror,
+        [
+            "export function prepareRuntimeMirror",
+            "runtime-mirror",
+            "function copyEntry",
+            "path.basename(repoRoot) === 'ava-runtime'",
+            "nanobot-checkout",
+            "SITE_PACKAGES_EXCLUDES",
+            "copyTree(path.join(repoRoot, 'ava')",
+            "copyTree(path.join(effectiveNanobotRoot, 'nanobot')",
+            "copySitePackages(sourceSitePackages, paths.sitePackages)",
+            "copyOptionalTree(path.join(repoRoot, 'console-ui', 'dist')",
+            "copyOptionalTree(path.join(repoRoot, 'vendor', 'cloudflared')",
+        ],
+    )
     assert_contains_all(
         desktop_config,
         [
@@ -135,8 +227,13 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "path.join(homeDir, '.pyenv', 'shims')",
             "path.join(homeDir, '.real', '.bin')",
             "export function findExecutable(command, env)",
+            "export function venvSitePackages(repoRoot, pythonExecutable = '')",
             "export function buildCoreEnv(config, nanobotRoot)",
+            "VIRTUAL_ENV: path.join(config.repoRoot, '.venv')",
+            "PYTHONPATH: pythonPath",
             "AVA_DESKTOP_CONSOLE_PORT: String(config.port)",
+            "AVA_DESKTOP_GATEWAY_PORT",
+            "AVA_DESKTOP_WEBSOCKET_PORT",
         ],
     )
     assert_contains_all(
@@ -166,6 +263,33 @@ def test_electron_port_picker_falls_back_when_preferred_port_is_busy() -> None:
                 "-e",
                 "import { pickFreePort } from './electron/lib/ports.mjs';"
                 "const selected = await pickFreePort(Number(process.env.BUSY_PORT));"
+                "console.log(String(selected));",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "BUSY_PORT": str(busy_port)},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+            check=False,
+        )
+    assert result.returncode == 0, result.stdout
+    selected_port = int(result.stdout.strip())
+    assert selected_port > 0
+    assert selected_port != busy_port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("0.0.0.0", 0))
+        server.listen(1)
+        busy_port = server.getsockname()[1]
+        result = subprocess.run(
+            [
+                node,
+                "--input-type=module",
+                "-e",
+                "import { pickFreePort } from './electron/lib/ports.mjs';"
+                "const selected = await pickFreePort(Number(process.env.BUSY_PORT), '0.0.0.0');"
                 "console.log(String(selected));",
             ],
             cwd=ROOT,
@@ -237,79 +361,103 @@ def test_core_health_module_detects_existing_core_and_runtime_meta(tmp_path: Pat
     node = shutil.which("node")
     assert node is not None
     ava_home = tmp_path / "ava-home"
+    servers: list[ThreadingHTTPServer] = []
+
+    def start_server(payload: dict[str, object] | None = None, status_code: int = 200) -> int:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(status_code)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                if payload is not None:
+                    self.wfile.write(json.dumps(payload).encode("utf-8"))
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        servers.append(server)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return int(server.server_address[1])
+
+    healthy_port = start_server({"ready": True, "shutting_down": False, "boot_generation": 1})
+    unhealthy_port = start_server({"ready": True, "shutting_down": True, "boot_generation": 1})
+    unauthorized_port = start_server(status_code=401)
     script = """
-import fs from 'node:fs';
-import http from 'node:http';
-import path from 'node:path';
-import {
-  detectExistingAvaCore,
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import {
+      detectExistingAvaCore,
+  httpGetStatus,
   isHealthyCorePayload,
   readConsoleMetaCandidate,
-  resolveExistingAvaCore,
-} from './electron/lib/core-health.mjs';
+      resolveExistingAvaCore,
+    } from './electron/lib/core-health.mjs';
 
-const servers = [];
-async function makeServer(payload) {
-  const server = http.createServer((_request, response) => {
-    response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify(payload));
-  });
-  servers.push(server);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return server.address().port;
-}
+    if (!isHealthyCorePayload({ ready: true, shutting_down: false, boot_generation: 1 })) {
+      throw new Error('healthy payload was rejected');
+    }
+    if (isHealthyCorePayload({ ready: true, shutting_down: true, boot_generation: 1 })) {
+      throw new Error('shutting down payload must be rejected');
+    }
+    const healthyPort = Number(process.env.HEALTHY_PORT);
+    const unhealthyPort = Number(process.env.UNHEALTHY_PORT);
+    const unauthorizedPort = Number(process.env.UNAUTHORIZED_PORT);
+    if (!await detectExistingAvaCore('127.0.0.1', healthyPort)) {
+      throw new Error('healthy core was not detected');
+    }
+    if (await detectExistingAvaCore('127.0.0.1', unhealthyPort)) {
+      throw new Error('shutting down core must not be accepted');
+    }
+    const unauthorizedStatus = await httpGetStatus(`http://127.0.0.1:${unauthorizedPort}/api/auth/me`);
+    if (unauthorizedStatus !== 401) {
+      throw new Error(`auth status probe did not preserve 401: ${unauthorizedStatus}`);
+    }
 
-try {
-  if (!isHealthyCorePayload({ ready: true, shutting_down: false, boot_generation: 1 })) {
-    throw new Error('healthy payload was rejected');
-  }
-  if (isHealthyCorePayload({ ready: true, shutting_down: true, boot_generation: 1 })) {
-    throw new Error('shutting down payload must be rejected');
-  }
-  const healthyPort = await makeServer({ ready: true, shutting_down: false, boot_generation: 1 });
-  const unhealthyPort = await makeServer({ ready: true, shutting_down: true, boot_generation: 1 });
-  if (!await detectExistingAvaCore('127.0.0.1', healthyPort)) {
-    throw new Error('healthy core was not detected');
-  }
-  if (await detectExistingAvaCore('127.0.0.1', unhealthyPort)) {
-    throw new Error('shutting down core must not be accepted');
-  }
-
-  const avaHome = process.env.AVA_HOME_FIXTURE;
-  fs.mkdirSync(avaHome, { recursive: true });
-  fs.writeFileSync(path.join(avaHome, 'console.json'), '{', 'utf8');
-  if (readConsoleMetaCandidate({ env: { AVA_HOME: avaHome } }) !== null) {
-    throw new Error('bad console meta must be ignored');
-  }
-  fs.writeFileSync(
-    path.join(avaHome, 'console.json'),
-    JSON.stringify({ console_host: '0.0.0.0', console_port: healthyPort }),
-    'utf8',
-  );
-  const candidate = readConsoleMetaCandidate({ env: { AVA_HOME: avaHome } });
-  if (!candidate || candidate.host !== '127.0.0.1' || candidate.port !== healthyPort) {
-    throw new Error(`console meta candidate was not normalized: ${JSON.stringify(candidate)}`);
-  }
-  const resolved = await resolveExistingAvaCore('127.0.0.1', unhealthyPort, {
-    env: { AVA_HOME: avaHome },
-  });
-  if (!resolved || resolved.host !== '127.0.0.1' || resolved.port !== healthyPort) {
-    throw new Error(`healthy console meta fallback was not selected: ${JSON.stringify(resolved)}`);
-  }
-} finally {
-  await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
-}
-"""
-    result = subprocess.run(
-        [node, "--input-type=module", "-e", script],
-        cwd=ROOT,
-        env={**os.environ, "AVA_HOME_FIXTURE": str(ava_home)},
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=10,
-        check=False,
-    )
+    const avaHome = process.env.AVA_HOME_FIXTURE;
+    fs.mkdirSync(avaHome, { recursive: true });
+    fs.writeFileSync(path.join(avaHome, 'console.json'), '{', 'utf8');
+    if (readConsoleMetaCandidate({ env: { AVA_HOME: avaHome } }) !== null) {
+      throw new Error('bad console meta must be ignored');
+    }
+    fs.writeFileSync(
+      path.join(avaHome, 'console.json'),
+      JSON.stringify({ console_host: '0.0.0.0', console_port: healthyPort }),
+      'utf8',
+    );
+    const candidate = readConsoleMetaCandidate({ env: { AVA_HOME: avaHome } });
+    if (!candidate || candidate.host !== '127.0.0.1' || candidate.port !== healthyPort) {
+      throw new Error(`console meta candidate was not normalized: ${JSON.stringify(candidate)}`);
+    }
+    const resolved = await resolveExistingAvaCore('127.0.0.1', unhealthyPort, {
+      env: { AVA_HOME: avaHome },
+    });
+    if (!resolved || resolved.host !== '127.0.0.1' || resolved.port !== healthyPort) {
+      throw new Error(`healthy console meta fallback was not selected: ${JSON.stringify(resolved)}`);
+    }
+    """
+    try:
+        result = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "AVA_HOME_FIXTURE": str(ava_home),
+                "HEALTHY_PORT": str(healthy_port),
+                "UNHEALTHY_PORT": str(unhealthy_port),
+                "UNAUTHORIZED_PORT": str(unauthorized_port),
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=10,
+            check=False,
+        )
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
     assert result.returncode == 0, result.stdout
 
 
@@ -354,7 +502,7 @@ if (findExecutable('uv', env) !== path.join(process.env.BIN_DIR, 'uv')) {
   throw new Error('uv executable was not resolved from merged PATH');
 }
 const coreEnv = buildCoreEnv(
-  { env, repoRoot: '/repo/ava', host: '127.0.0.1', port: 6688 },
+  { env, repoRoot: '/repo/ava', host: '127.0.0.1', port: 6688, gatewayPort: 18791, websocketPort: 8766, pythonExecutable: '/opt/python3.11' },
   '/repo/nanobot',
 );
 if (coreEnv.AVA_DESKTOP !== '1' || coreEnv.AVA_REPO_ROOT !== '/repo/ava') {
@@ -363,8 +511,20 @@ if (coreEnv.AVA_DESKTOP !== '1' || coreEnv.AVA_REPO_ROOT !== '/repo/ava') {
 if (coreEnv.AVA_NANOBOT_ROOT !== '/repo/nanobot') {
   throw new Error('nanobot root was not propagated');
 }
+if (coreEnv.VIRTUAL_ENV !== '/repo/ava/.venv') {
+  throw new Error('virtual env path was not propagated');
+}
+if (coreEnv.PYTHONPATH.split(path.delimiter)[0] !== '/repo/ava' || coreEnv.PYTHONPATH.split(path.delimiter)[1] !== '/repo/nanobot') {
+  throw new Error(`PYTHONPATH was not prepared for desktop wrapper launch: ${coreEnv.PYTHONPATH}`);
+}
+if (coreEnv.PYTHONPATH.split(path.delimiter)[2] !== '/repo/ava/.venv/lib/python3.11/site-packages') {
+  throw new Error(`venv site-packages was not prepared from the resolved Python executable: ${coreEnv.PYTHONPATH}`);
+}
 if (coreEnv.AVA_DESKTOP_CONSOLE_PORT !== '6688' || coreEnv.CAFE_CONSOLE_PORT !== '6688') {
   throw new Error('console ports were not propagated');
+}
+if (coreEnv.AVA_DESKTOP_GATEWAY_PORT !== '18791' || coreEnv.AVA_DESKTOP_WEBSOCKET_PORT !== '8766') {
+  throw new Error('sidecar runtime ports were not propagated');
 }
 """
     result = subprocess.run(
@@ -385,6 +545,84 @@ if (coreEnv.AVA_DESKTOP_CONSOLE_PORT !== '6688' || coreEnv.CAFE_CONSOLE_PORT !==
     assert result.returncode == 0, result.stdout
 
 
+def test_runtime_mirror_copies_import_roots_outside_checkout(tmp_path: Path) -> None:
+    node = shutil.which("node")
+    assert node is not None
+    repo_root = tmp_path / "repo"
+    nanobot_root = tmp_path / "nanobot"
+    app_data = tmp_path / "app-data"
+    (repo_root / "ava").mkdir(parents=True)
+    (repo_root / "ava" / "__init__.py").write_text("# ava\n", encoding="utf-8")
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "pkg").mkdir(parents=True)
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "pkg" / "__init__.py").write_text("# pkg\n", encoding="utf-8")
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "console-ui" / "node_modules").mkdir(parents=True)
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "console-ui" / "node_modules" / "skip.js").write_text("skip\n", encoding="utf-8")
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "bridge").mkdir(parents=True)
+    (repo_root / ".venv" / "lib" / "python3.11" / "site-packages" / "bridge" / "skip.js").write_text("skip\n", encoding="utf-8")
+    (repo_root / "console-ui" / "dist").mkdir(parents=True)
+    (repo_root / "console-ui" / "dist" / "index.html").write_text("<html></html>\n", encoding="utf-8")
+    (repo_root / "vendor" / "cloudflared").mkdir(parents=True)
+    (repo_root / "vendor" / "cloudflared" / "cloudflared").write_text("bin\n", encoding="utf-8")
+    (nanobot_root / "nanobot").mkdir(parents=True)
+    (nanobot_root / "nanobot" / "__main__.py").write_text("# nanobot\n", encoding="utf-8")
+    (nanobot_root / "pyproject.toml").write_text("[project]\nname='nanobot'\n", encoding="utf-8")
+
+    script = """
+import fs from 'node:fs';
+import path from 'node:path';
+import { prepareRuntimeMirror } from './electron/lib/runtime-mirror.mjs';
+
+const runtime = prepareRuntimeMirror({
+  appDataPath: process.env.APP_DATA,
+  repoRoot: process.env.REPO_ROOT,
+  nanobotRoot: process.env.NANOBOT_ROOT,
+  pythonExecutable: '/opt/python3.11',
+});
+
+const expected = [
+  path.join(runtime.repoRoot, 'ava', '__init__.py'),
+  path.join(runtime.nanobotRoot, 'nanobot', '__main__.py'),
+  path.join(runtime.nanobotRoot, 'pyproject.toml'),
+  path.join(runtime.repoRoot, 'console-ui', 'dist', 'index.html'),
+  path.join(runtime.repoRoot, 'vendor', 'cloudflared', 'cloudflared'),
+  path.join(runtime.repoRoot, '.venv', 'lib', 'python3.11', 'site-packages', 'pkg', '__init__.py'),
+];
+for (const file of expected) {
+  if (!fs.existsSync(file)) {
+    throw new Error(`missing mirrored file: ${file}`);
+  }
+}
+if (!runtime.repoRoot.includes('runtime-mirror') || !runtime.nanobotRoot.includes('nanobot-checkout')) {
+  throw new Error(`unexpected mirror paths: ${JSON.stringify(runtime)}`);
+}
+const excluded = [
+  path.join(runtime.repoRoot, '.venv', 'lib', 'python3.11', 'site-packages', 'console-ui', 'node_modules', 'skip.js'),
+  path.join(runtime.repoRoot, '.venv', 'lib', 'python3.11', 'site-packages', 'bridge', 'skip.js'),
+];
+for (const file of excluded) {
+  if (fs.existsSync(file)) {
+    throw new Error(`site-packages mirror copied excluded file: ${file}`);
+  }
+}
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "APP_DATA": str(app_data),
+            "REPO_ROOT": str(repo_root),
+            "NANOBOT_ROOT": str(nanobot_root),
+        },
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+
+
 def test_desktop_env_overrides_python_configured_console_port() -> None:
     node = shutil.which("node")
     assert node is not None
@@ -392,12 +630,14 @@ def test_desktop_env_overrides_python_configured_console_port() -> None:
 import { buildCoreEnv } from './electron/lib/launch-env.mjs';
 
 const coreEnv = buildCoreEnv(
-  { env: process.env, repoRoot: '/repo/ava', host: '127.0.0.1', port: 54321 },
+  { env: process.env, repoRoot: '/repo/ava', host: '127.0.0.1', port: 54321, gatewayPort: 18791, websocketPort: 8766 },
   '/repo/nanobot',
 );
 console.log(JSON.stringify({
   AVA_DESKTOP: coreEnv.AVA_DESKTOP,
   AVA_DESKTOP_CONSOLE_PORT: coreEnv.AVA_DESKTOP_CONSOLE_PORT,
+  AVA_DESKTOP_GATEWAY_PORT: coreEnv.AVA_DESKTOP_GATEWAY_PORT,
+  AVA_DESKTOP_WEBSOCKET_PORT: coreEnv.AVA_DESKTOP_WEBSOCKET_PORT,
   CAFE_CONSOLE_PORT: coreEnv.CAFE_CONSOLE_PORT,
 }));
 """
@@ -532,6 +772,7 @@ def test_preload_exposes_only_p1b_native_whitelist() -> None:
             "rendererReady",
             "readDesktopConfig",
             "setNanobotRoot",
+            "setBadgeCount",
             "retryCore",
             "cancelBootstrap",
             "onBootstrapState",
@@ -561,6 +802,10 @@ def test_pnpm_build_scripts_and_readme_are_present() -> None:
         [
             "const dryRun = process.argv.includes('--dry-run')",
             "AVA Electron dry-run passed",
+            "import { prepareRuntimeMirror } from '../lib/runtime-mirror.mjs'",
+            "const runtimeResourceName = 'ava-runtime'",
+            "function resolveNanobotRootForPackaging()",
+            "function prepareRuntimeResource(workDir)",
             "npm', ['run', 'build']",
             "electron-packager",
             "electron/lib/core-health.mjs",
@@ -568,11 +813,16 @@ def test_pnpm_build_scripts_and_readme_are_present() -> None:
             "electron/lib/launch-env.mjs",
             "electron/lib/ports.mjs",
             "electron/lib/runtime-manifest.mjs",
+            "electron/lib/runtime-mirror.mjs",
+            "electron/lib/update-check.mjs",
+            "electron/assets/tray-icon-Template.png",
             "--platform=darwin",
             "--arch=arm64",
             "const runtimeManifestName = 'ava-runtime-manifest.json'",
             "function writeRuntimeManifest()",
             "--extra-resource=${manifestPath}",
+            "--extra-resource=${runtimeResourceDir}",
+            "missing packaged runtime resource",
             "invalid runtime manifest repoRoot",
             "function findCachedElectronZipDir(cacheRoot, version",
             "--electron-zip-dir=",
@@ -580,9 +830,12 @@ def test_pnpm_build_scripts_and_readme_are_present() -> None:
             "function verifyPackagedApp(appPath)",
             "function readPlistValue(plistPath, key)",
             "function injectUrlScheme(appPath)",
+            "function injectPersistentStatePolicy(appPath)",
             "CFBundleURLTypes",
             "CFBundleURLSchemes",
             "CFBundleExecutable",
+            "NSQuitAlwaysKeepsWindows",
+            "ApplePersistenceIgnoreState",
             "path.join(appPath, 'Contents', 'MacOS', bundleExecutable)",
             "Ava Helper (Renderer).app",
             "codesign",
@@ -691,6 +944,7 @@ def test_current_feature_inventory_records_desktop_and_hook_boundaries() -> None
 
 def test_desktop_port_and_nanobot_error_contracts_are_present() -> None:
     console_patch = read("ava/patches/console_patch.py")
+    config_overlay = read("ava/runtime/config_overlay.py")
     start_script = read("scripts/start-ava.sh")
 
     assert_contains_all(
@@ -699,6 +953,15 @@ def test_desktop_port_and_nanobot_error_contracts_are_present() -> None:
             "def resolve_console_port",
             'os.environ.get("AVA_DESKTOP") == "1"',
             'os.environ.get("AVA_DESKTOP_CONSOLE_PORT")',
+        ],
+    )
+    assert_contains_all(
+        config_overlay,
+        [
+            "def apply_desktop_runtime_overrides",
+            "AVA_DESKTOP_GATEWAY_PORT",
+            "AVA_DESKTOP_WEBSOCKET_PORT",
+            'os.environ.get("AVA_DESKTOP") != "1"',
         ],
     )
     assert_contains_all(
@@ -754,6 +1017,10 @@ def test_desktop_launch_verifier_script_contract() -> None:
             "DEEP_LINK_SCHEME",
             "absolute_app_path",
             "CFBundleExecutable",
+            "CFBundleIdentifier",
+            "clear_persistent_state_prompt",
+            "ApplePersistenceIgnoreState",
+            "Saved Application State",
             "Contents/MacOS/${BUNDLE_EXECUTABLE}",
             "require_mach_o_executable",
             "Mach-O 64-bit executable",
@@ -773,13 +1040,23 @@ def test_desktop_launch_verifier_script_contract() -> None:
             '"${current_id}" != "${previous_id}"',
             "current_size < offset",
             "latest_endpoint_from_new_log",
+            "runtime_meta_marker",
+            "latest_endpoint_from_runtime_meta",
+            "RUNTIME_META",
+            "console.json",
+            "0.0.0.0",
             "fail_on_new_core_errors",
             'log_since "${MAIN_LOG}" "${MAIN_LOG_SIZE}" "${MAIN_LOG_ID}" >&2',
             'log_since "${CORE_LOG}" "${CORE_LOG_SIZE}" "${CORE_LOG_ID}" >&2',
+            'cat "${RUNTIME_META}"',
             "coreEndpoint=http://",
             "Gateway crashed unexpectedly",
             "Traceback",
             "/api/gateway/health",
+            "auth_interface_ready()",
+            "/api/auth/me",
+            "200",
+            "401",
             "payload.get(\"ready\") is True",
             "payload.get(\"shutting_down\") is False",
             "payload.get(\"boot_generation\")",
@@ -793,6 +1070,7 @@ def test_desktop_launch_verifier_script_contract() -> None:
             "Ava selected forbidden endpoint port",
             "externalCore=true",
             "fresh core was required, but Ava reused an existing core",
+            "Ava Console startup interfaces are healthy at ${endpoint}",
         ],
     )
     result = subprocess.run(
@@ -921,6 +1199,12 @@ def test_desktop_launch_verifier_script_contract() -> None:
             "pid(s): ${running_pids//$'\\n'/, }",
             "Quit the running Ava.app from Dock/Finder",
             "If no app UI is available, use normal SIGTERM: kill ${pid}",
+            "check_frontable_desktop_session()",
+            "lsappinfo front",
+            "lsappinfo info \"${front_asn}\"",
+            "bundleID=\"com.apple.loginwindow\"",
+            "frontmost macOS session is loginwindow",
+            "unlock the Mac into a normal desktop session",
             "port-conflict-only checks skipped for happy-path handoff",
             "app bundle is missing: ${APP_PATH}; run the happy-path evidence command first",
             "already hosts a healthy Ava core",
@@ -981,7 +1265,7 @@ def test_desktop_launch_verifier_script_contract() -> None:
             "use normal SIGTERM with `kill <PID>` from the `lsof` row",
             "avoid `kill -9` unless SIGTERM fails",
             "Optional readiness preflight:",
-            "Default mode checks Node.js `20.19.0+` and the target `Ava.app` process",
+            "Default mode checks Node.js `20.19.0+`, the target `Ava.app` process, and that the frontmost macOS session is not `loginwindow`",
             "`--port-conflict` additionally requires `127.0.0.1:6688` to be free",
             "scripts/verify-desktop-acceptance.sh --evidence-log docs/desktop-acceptance-happy.log",
             "scripts/verify-desktop-acceptance.sh --skip-build --with-port-conflict --evidence-log docs/desktop-acceptance-port-conflict.log",
@@ -996,13 +1280,13 @@ def test_desktop_launch_verifier_script_contract() -> None:
             "Full automated evidence run:",
             "Dynamic-port evidence run:",
             "## Result Records",
-            "Canonical automated evidence logs have been generated, but the human visual confirmation fields below are still blank.",
+            "Canonical automated evidence logs and human visual confirmations have been recorded.",
             "Each successful acceptance run prints a `Paste-ready result record` block",
             "The `Command` field must exactly match the corresponding handoff command",
             "The human visual confirmation fields must match exactly between this document and the active Task Spec.",
             "Do not use any evidence log containing `Automated desktop acceptance checks failed` as a successful Result Record.",
             "Do not treat `Automated desktop acceptance checks passed` alone as full acceptance",
-            "mirror the same result summary in the active Task Spec",
+            "Keep the two records below mirrored with the active Task Spec.",
             "The full dynamic-port acceptance evidence must use",
             "it does not replace the runner because it lacks the controlled marker file, fresh-core guard, and evidence log",
             "Conflict port:",
@@ -1045,6 +1329,24 @@ exit 1
         encoding="utf-8",
     )
     fake_node.chmod(0o755)
+    fake_lsappinfo = bin_dir / "lsappinfo"
+    fake_lsappinfo.write_text(
+        """#!/bin/sh
+case "$1" in
+  front)
+    printf '%s\\n' "ASN:0x0-0x1234:"
+    exit 0
+    ;;
+  info)
+    printf '%s\\n' '"Finder" ASN:0x0-0x1234: (in front) bundleID="com.apple.finder"'
+    exit 0
+    ;;
+esac
+exit 1
+""",
+        encoding="utf-8",
+    )
+    fake_lsappinfo.chmod(0o755)
     ava_home = tmp_path / "ava-home"
     ava_home.mkdir()
     missing_app = tmp_path / "Missing.app"
@@ -1115,6 +1417,37 @@ exit 1
     assert "use normal SIGTERM: kill" in blocked.stdout
     assert "After fixing blockers, rerun: scripts/verify-desktop-handoff-ready.sh --port-conflict" in blocked.stdout
     assert "Fix them before generating canonical evidence logs" in blocked.stdout
+
+    fake_lsappinfo.write_text(
+        """#!/bin/sh
+case "$1" in
+  front)
+    printf '%s\\n' "ASN:0x0-0x2002:"
+    exit 0
+    ;;
+  info)
+    printf '%s\\n' '"loginwindow" ASN:0x0-0x2002: (in front) bundleID="com.apple.loginwindow"'
+    exit 0
+    ;;
+esac
+exit 1
+""",
+        encoding="utf-8",
+    )
+    loginwindow_blocked = subprocess.run(
+        ["scripts/verify-desktop-handoff-ready.sh", str(missing_app)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=10,
+        check=False,
+    )
+    assert loginwindow_blocked.returncode == 1, loginwindow_blocked.stdout
+    assert "frontmost macOS session is loginwindow" in loginwindow_blocked.stdout
+    assert "unlock the Mac into a normal desktop session" in loginwindow_blocked.stdout
+    assert "bundleID=\"com.apple.loginwindow\"" in loginwindow_blocked.stdout
 
 
 def test_desktop_acceptance_closeout_handoff_command_is_fail_fast(tmp_path: Path) -> None:
@@ -1967,6 +2300,7 @@ def test_desktop_launch_verifier_log_rotation_functions_are_executable(tmp_path:
     functions_file.write_text(functions, encoding="utf-8")
     main_log = tmp_path / "main.log"
     core_log = tmp_path / "core.log"
+    runtime_meta = tmp_path / "console.json"
     text_executable = tmp_path / "not-mach-o"
     text_executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     text_executable.chmod(0o755)
@@ -1995,6 +2329,23 @@ MAIN_LOG_SIZE="$(log_size "${MAIN_LOG}")"
 CORE_LOG_SIZE="$(log_size "${CORE_LOG}")"
 MAIN_LOG_ID="$(log_identity "${MAIN_LOG}")"
 CORE_LOG_ID="$(log_identity "${CORE_LOG}")"
+RUNTIME_META="${RUNTIME_META_FIXTURE}"
+cat >"${RUNTIME_META}" <<'JSON'
+{"console_host":"0.0.0.0","console_port":7777,"pid":123,"started_at":100.5}
+JSON
+RUNTIME_META_MARKER="$(runtime_meta_marker "${RUNTIME_META}")"
+if latest_endpoint_from_runtime_meta >/dev/null; then
+  echo "unchanged runtime metadata was treated as fresh"
+  exit 1
+fi
+cat >"${RUNTIME_META}" <<'JSON'
+{"console_host":"0.0.0.0","console_port":7778,"pid":124,"started_at":101.5}
+JSON
+runtime_endpoint="$(latest_endpoint_from_runtime_meta)"
+[[ "${runtime_endpoint}" == "http://127.0.0.1:7778" ]] || {
+  echo "wrong runtime metadata endpoint: ${runtime_endpoint}"
+  exit 1
+}
 rm "${MAIN_LOG}"
 cat >"${MAIN_LOG}" <<'LOG'
 launch config repoRootFound=true externalCore=true coreEndpoint=http://127.0.0.1:5544
@@ -2044,6 +2395,7 @@ grep -q "Gateway crashed unexpectedly" "${OUTPUT_FILE}"
             "FUNCTIONS_FILE": str(functions_file),
             "MAIN_LOG_FIXTURE": str(main_log),
             "CORE_LOG_FIXTURE": str(core_log),
+            "RUNTIME_META_FIXTURE": str(runtime_meta),
             "OUTPUT_FILE": str(output_file),
             "TEXT_EXECUTABLE": str(text_executable),
         },
@@ -2250,6 +2602,7 @@ def test_desktop_setup_surface_verifier_script_contract() -> None:
         verifier,
         [
             "mainWindow.loadFile(path.join(__dirname, 'setup.html'))",
+            "const CORE_HEALTH_TIMEOUT_MS = 120_000",
             "SETUP_LOAD_TIMEOUT_MS",
             "dialog.showErrorBox('Ava setup failed to load'",
             "function showFatalStartupError(error)",
@@ -2266,14 +2619,59 @@ def test_desktop_setup_surface_verifier_script_contract() -> None:
             "window.avaDesktop.cancelBootstrap",
             "LC_ALL=C strings",
             "desktop-config.mjs",
+            "core-health.mjs",
             "launch-env.mjs",
+            "runtime-mirror.mjs",
+            "prepareRuntimeMirror",
+            "runtime-mirror",
+            "function copyEntry",
+            "const pythonPath = fs.realpathSync(venvPythonPath)",
+            "appDataPath: app.getPath('userData')",
+            "spawn(pythonPath, ['-m', 'ava', 'gateway']",
+            "export function venvSitePackages(repoRoot, pythonExecutable = '')",
+            "VIRTUAL_ENV: path.join(config.repoRoot, '.venv')",
+            "export function httpGetStatus(url, timeoutMs = 2_000)",
+            "async function checkStartupInterfaces(config)",
+            "/api/auth/me",
+            "Ava auth interface returned HTTP",
+            "core_startup_timeout",
+            "Ava core did not become reachable within",
             "export function resolveLaunchPath",
+            "AVA_DESKTOP_GATEWAY_PORT",
+            "AVA_DESKTOP_WEBSOCKET_PORT",
             "function findCachedElectronZipDir(cacheRoot, version",
             "--electron-zip-dir=",
             "active.child.kill('SIGKILL')",
+            "await stopAvaCore();",
+            "avaCoreProcess = null;",
             "label: 'Open Logs'",
             "label: 'Retry Core'",
+            "label: 'Show Window'",
             "Menu.setApplicationMenu(menu)",
+            "function ensureForegroundActivation()",
+            "app.setActivationPolicy('regular')",
+            "app.dock?.show?.()",
+            "function presentMainWindow(appWindow, reason)",
+            "appWindow.setSkipTaskbar(false)",
+            "appWindow.moveTop()",
+            "app.focus({ steal: true })",
+            "show: false",
+            "focusable: true",
+            "function createBootstrapWindow(config, { loadSetup = true } = {})",
+            "if (!loadSetup)",
+            "createBootstrapWindow(config, { loadSetup: !consoleLoaded })",
+            "presentMainWindow(mainWindow, 'setup loaded')",
+            "presentMainWindow(mainWindow, `console loaded: ${reason}`)",
+            "await showMainWindow();",
+            "const TRAY_ICON_SIZE = 18;",
+            "image.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE })",
+            "new Tray(trayImage)",
+            "globalShortcut.register('Control+Shift+A'",
+            "globalShortcut.unregisterAll()",
+            "ipcMain.handle('ava:setBadgeCount'",
+            "return { ok: false, error: 'invalid badge count' }",
+            "scheduleUpdateChecks();",
+            "update check failed:",
             "if (process.platform !== 'darwin')",
             "app.on('activate', () => {",
             "const RING_BUFFER_BYTES = 256 * 1024",
@@ -2312,6 +2710,442 @@ def test_desktop_setup_surface_verifier_script_contract() -> None:
     assert result.returncode == 0, result.stdout
     result = subprocess.run(
         ["node", "scripts/verify-desktop-setup-dom.mjs"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+
+
+def test_update_check_contract_compares_electron_version_only() -> None:
+    node = shutil.which("node")
+    assert node is not None
+    script = """
+import { DEFAULT_UPDATE_REPO, checkForUpdate, compareVersions, githubRequestHeaders, latestReleaseUrl } from './electron/lib/update-check.mjs';
+
+if (DEFAULT_UPDATE_REPO !== 'linziyanleo/ava') throw new Error('wrong default update repo');
+if (latestReleaseUrl() !== 'https://api.github.com/repos/linziyanleo/ava/releases/latest') {
+  throw new Error('wrong latest release URL');
+}
+if (compareVersions('v0.2.0', '0.1.0') !== 1) throw new Error('newer tag did not compare greater');
+if (compareVersions('0.1.0', '0.1.0') !== 0) throw new Error('equal versions did not compare equal');
+if (compareVersions('0.1.0', '0.2.0') !== -1) throw new Error('older version did not compare lower');
+if (githubRequestHeaders({ token: '' }).Authorization) throw new Error('empty token should not set Authorization');
+if (githubRequestHeaders({ token: ' test-token ' }).Authorization !== 'Bearer test-token') {
+  throw new Error('GitHub token header not applied');
+}
+
+const update = await checkForUpdate({
+  currentVersion: '0.1.0',
+  requestJson: async (url) => {
+    if (url !== 'https://api.github.com/repos/linziyanleo/ava/releases/latest') {
+      throw new Error(`wrong request URL: ${url}`);
+    }
+    return { tag_name: 'v0.2.0', html_url: 'https://github.com/linziyanleo/ava/releases/tag/v0.2.0' };
+  },
+});
+if (!update.available || update.version !== 'v0.2.0') throw new Error('expected available update');
+
+const noUpdate = await checkForUpdate({
+  currentVersion: '0.2.0',
+  requestJson: async () => ({ tag_name: 'v0.2.0', html_url: 'https://github.com/linziyanleo/ava/releases/tag/v0.2.0' }),
+});
+if (noUpdate.available) throw new Error('equal release should not report available update');
+
+let missingVersionFailed = false;
+try {
+  await checkForUpdate({ requestJson: async () => ({ tag_name: 'v0.2.0', html_url: 'https://github.com/linziyanleo/ava/releases/tag/v0.2.0' }) });
+} catch (error) {
+  missingVersionFailed = String(error).includes('currentVersion is required');
+}
+if (!missingVersionFailed) throw new Error('missing currentVersion did not fail clearly');
+
+let invalidRepoFailed = false;
+try {
+  latestReleaseUrl('bad/repo/extra');
+} catch (error) {
+  invalidRepoFailed = String(error).includes('invalid GitHub repo slug');
+}
+if (!invalidRepoFailed) throw new Error('invalid repo slug did not fail clearly');
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout
+
+
+def test_desktop_integrations_runtime_contract_with_mocked_electron(tmp_path: Path) -> None:
+    node = shutil.which("node")
+    assert node is not None
+
+    fake_electron = tmp_path / "fake-electron.mjs"
+    fake_electron.write_text(
+        """
+export const state = {
+  appEvents: {},
+  badges: [],
+  handlers: {},
+  notifications: [],
+  openExternal: [],
+  protocolRegistrations: [],
+  shortcuts: [],
+  trays: [],
+};
+
+export const app = {
+  isPackaged: true,
+  commandLine: {
+    appendSwitch(name) {
+      state.commandLineSwitches = state.commandLineSwitches || [];
+      state.commandLineSwitches.push(name);
+    },
+  },
+  dock: {
+    setBadge(value) {
+      state.badges.push(value);
+    },
+  },
+  getAppPath() {
+    return process.cwd();
+  },
+  getPath(name) {
+    return `/tmp/ava-${name}`;
+  },
+  on(event, callback) {
+    state.appEvents[event] = callback;
+  },
+  quit() {
+    state.quitCalled = true;
+  },
+  requestSingleInstanceLock() {
+    state.singleInstanceRequested = true;
+    return true;
+  },
+  setAsDefaultProtocolClient(...args) {
+    state.protocolRegistrations.push(args);
+    return true;
+  },
+  whenReady() {
+    return new Promise(() => {});
+  },
+};
+
+export class BrowserWindow {}
+
+export const dialog = {
+  showErrorBox(title, message) {
+    state.errorBox = { title, message };
+  },
+  async showMessageBox() {
+    return { response: 0 };
+  },
+  async showOpenDialog() {
+    return { canceled: true, filePaths: [] };
+  },
+};
+
+export const globalShortcut = {
+  register(accelerator, callback) {
+    state.shortcuts.push({ accelerator, callback });
+    return state.shortcutRegisterResult !== false;
+  },
+  unregisterAll() {
+    state.shortcutsUnregistered = true;
+  },
+};
+
+export const ipcMain = {
+  handle(name, callback) {
+    state.handlers[name] = callback;
+  },
+};
+
+export const Menu = {
+  buildFromTemplate(template) {
+    state.lastMenuTemplate = template;
+    return { template };
+  },
+  setApplicationMenu(menu) {
+    state.applicationMenu = menu;
+  },
+};
+
+export const nativeImage = {
+  createFromPath(imagePath) {
+    state.imagePath = imagePath;
+    return {
+      isEmpty() {
+        return state.imageEmpty === true;
+      },
+      setTemplateImage(value) {
+        state.templateImage = value;
+      },
+      resize(options) {
+        state.imageResize = options;
+        return this;
+      },
+    };
+  },
+};
+
+export class Notification {
+  static isSupported() {
+    return state.notificationSupported !== false;
+  }
+
+  constructor(options) {
+    this.options = options;
+    this.handlers = {};
+    state.notifications.push(this);
+  }
+
+  on(event, callback) {
+    this.handlers[event] = callback;
+  }
+
+  show() {
+    state.notificationShows = (state.notificationShows || 0) + 1;
+  }
+
+  click() {
+    this.handlers.click?.();
+  }
+}
+
+export const shell = {
+  async openExternal(url) {
+    state.openExternal.push(url);
+  },
+  async openPath(targetPath) {
+    state.openPath = targetPath;
+    return '';
+  },
+  showItemInFolder(targetPath) {
+    state.showItemInFolder = targetPath;
+  },
+};
+
+export class Tray {
+  constructor(image) {
+    this.image = image;
+    this.handlers = {};
+    state.trays.push(this);
+  }
+
+  setToolTip(value) {
+    this.toolTip = value;
+  }
+
+  setContextMenu(menu) {
+    this.menu = menu;
+  }
+
+  on(event, callback) {
+    this.handlers[event] = callback;
+  }
+
+  destroy() {
+    this.destroyed = true;
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    fake_update_check = tmp_path / "fake-update-check.mjs"
+    fake_update_check.write_text(
+        """
+export const state = {
+  calls: [],
+  next: { available: false },
+};
+
+export async function checkForUpdate(args) {
+  state.calls.push(args);
+  if (state.error) {
+    throw state.error;
+  }
+  return state.next;
+}
+""",
+        encoding="utf-8",
+    )
+
+    main_source = read("electron/main.mjs")
+    import_replacements = {
+        "from 'electron';": f"from '{fake_electron.as_uri()}';",
+        "from './lib/desktop-config.mjs';": f"from '{(ROOT / 'electron/lib/desktop-config.mjs').as_uri()}';",
+        "from './lib/core-health.mjs';": f"from '{(ROOT / 'electron/lib/core-health.mjs').as_uri()}';",
+        "from './lib/launch-env.mjs';": f"from '{(ROOT / 'electron/lib/launch-env.mjs').as_uri()}';",
+        "from './lib/ports.mjs';": f"from '{(ROOT / 'electron/lib/ports.mjs').as_uri()}';",
+        "from './lib/runtime-manifest.mjs';": f"from '{(ROOT / 'electron/lib/runtime-manifest.mjs').as_uri()}';",
+        "from './lib/runtime-mirror.mjs';": f"from '{(ROOT / 'electron/lib/runtime-mirror.mjs').as_uri()}';",
+        "from './lib/update-check.mjs';": f"from '{fake_update_check.as_uri()}';",
+    }
+    for needle, replacement in import_replacements.items():
+        assert needle in main_source
+        main_source = main_source.replace(needle, replacement)
+
+    ready_block = """app.whenReady().then(async () => {
+  const config = await createLaunchConfig();
+  registerDeepLinkProtocol();
+  installAppMenu();
+  installDesktopIntegrations();
+  ensureForegroundActivation();
+  await showMainWindow();
+}).catch(showFatalStartupError);"""
+    assert ready_block in main_source
+    main_source = main_source.replace(ready_block, "")
+    show_main_window_block = """async function showMainWindow() {
+  const config = await createLaunchConfig();
+  const hadWindow = mainWindow && !mainWindow.isDestroyed();
+  const appWindow = createBootstrapWindow(config, { loadSetup: !consoleLoaded });
+  presentMainWindow(appWindow, 'show requested');
+
+  if (consoleLoaded) {
+    if (!hadWindow) {
+      await appWindow.loadURL(config.coreEndpoint);
+      presentMainWindow(appWindow, 'console reloaded');
+    }
+    return;
+  }
+
+  await bootstrapAndStart(config);
+}"""
+    assert show_main_window_block in main_source
+    main_source = main_source.replace(
+        show_main_window_block,
+        """async function showMainWindow() {
+  showMainWindow.calls = (showMainWindow.calls || 0) + 1;
+  if (!mainWindow) {
+    mainWindow = {
+      webContents: {
+        sent: [],
+        send(channel, payload) {
+          this.sent.push({ channel, payload });
+        },
+      },
+      isDestroyed() {
+        return false;
+      },
+    };
+  }
+}""",
+    )
+    main_source += """
+
+export {
+  getMainWindowForTest,
+  installDesktopIntegrations,
+  installGlobalShortcut,
+  installTray,
+  runUpdateCheck,
+  setDockBadgeCount,
+};
+
+function getMainWindowForTest() {
+  return mainWindow;
+}
+"""
+    test_main = tmp_path / "main-under-test.mjs"
+    test_main.write_text(main_source, encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"version":"0.1.0"}\n', encoding="utf-8")
+    legal_artifact = tmp_path / "ava-home" / "media" / "generated" / "legal_0.png"
+    legal_artifact.parent.mkdir(parents=True)
+    legal_artifact.write_bytes(b"png")
+
+    script = f"""
+import assert from 'node:assert/strict';
+import {{ pathToFileURL }} from 'node:url';
+
+process.env.AVA_HOME = {json.dumps(str(tmp_path / "ava-home"))};
+const electron = await import({json.dumps(fake_electron.as_uri())});
+const updateCheck = await import({json.dumps(fake_update_check.as_uri())});
+const main = await import(pathToFileURL({json.dumps(str(test_main))}).href);
+
+assert.equal(electron.state.singleInstanceRequested, true);
+assert.equal(typeof electron.state.handlers['ava:setBadgeCount'], 'function');
+assert.equal(typeof electron.state.handlers['ava:revealArtifact'], 'function');
+assert.equal(typeof electron.state.handlers['ava:showNotification'], 'function');
+
+main.installTray();
+assert.equal(electron.state.trays.length, 1);
+assert.equal(electron.state.templateImage, true);
+assert.deepEqual(electron.state.imageResize, {{ width: 18, height: 18 }});
+assert.equal(electron.state.trays[0].toolTip, 'Ava');
+assert.deepEqual(
+  electron.state.lastMenuTemplate.map((item) => item.label || item.type),
+  ['Show Window', 'Open Logs', 'Retry Core', 'separator', 'Quit'],
+);
+assert.equal(typeof electron.state.trays[0].handlers.click, 'function');
+
+main.installTray();
+assert.equal(electron.state.trays.length, 1, 'installTray should be idempotent');
+
+main.installGlobalShortcut();
+assert.equal(electron.state.shortcuts.length, 1);
+assert.equal(electron.state.shortcuts[0].accelerator, 'Control+Shift+A');
+assert.equal(typeof electron.state.shortcuts[0].callback, 'function');
+
+assert.deepEqual(main.setDockBadgeCount(-1), {{ ok: false, error: 'invalid badge count' }});
+assert.deepEqual(main.setDockBadgeCount(1.5), {{ ok: false, error: 'invalid badge count' }});
+assert.deepEqual(main.setDockBadgeCount(2), {{ ok: true }});
+assert.deepEqual(main.setDockBadgeCount(0), {{ ok: true }});
+if (process.platform === 'darwin') {{
+  assert.deepEqual(electron.state.badges, ['2', '']);
+}}
+
+updateCheck.state.next = {{
+  available: true,
+  version: 'v9.9.9',
+  url: 'https://github.com/linziyanleo/ava/releases/tag/v9.9.9',
+}};
+await main.runUpdateCheck();
+assert.equal(updateCheck.state.calls[0].currentVersion, '0.1.0');
+assert.equal(electron.state.notifications.length, 1);
+assert.equal(electron.state.notifications[0].options.title, 'Ava v9.9.9 is available');
+assert.match(electron.state.notifications[0].options.body, /GitHub release/);
+assert.equal(electron.state.notificationShows, 1);
+electron.state.notifications[0].click();
+assert.deepEqual(electron.state.openExternal, ['https://github.com/linziyanleo/ava/releases/tag/v9.9.9']);
+
+updateCheck.state.next = {{ available: false }};
+await main.runUpdateCheck();
+assert.equal(electron.state.notifications.length, 1, 'no notification when release is not newer');
+
+await electron.state.handlers['ava:revealArtifact']({{}}, 'legal');
+assert.equal(electron.state.showItemInFolder, {json.dumps(str(legal_artifact))});
+
+let invalidArtifactFailed = false;
+try {{
+  await electron.state.handlers['ava:revealArtifact']({{}}, '../../etc/passwd');
+}} catch (error) {{
+  invalidArtifactFailed = String(error).includes('invalid artifact id');
+}}
+assert.equal(invalidArtifactFailed, true);
+assert.equal(electron.state.showItemInFolder, {json.dumps(str(legal_artifact))});
+
+await electron.state.handlers['ava:showNotification']({{}}, {{ title: 'Task done', body: 'Finished', taskId: 'task-123' }});
+assert.equal(electron.state.notifications.length, 2);
+assert.equal(electron.state.notifications[1].options.title, 'Task done');
+electron.state.notifications[1].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+const windowForNotification = main.getMainWindowForTest();
+assert.deepEqual(windowForNotification.webContents.sent, [
+  {{ channel: 'ava:openTaskFloater', payload: {{ taskId: 'task-123' }} }},
+]);
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,

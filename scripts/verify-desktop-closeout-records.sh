@@ -13,6 +13,7 @@ cd "${REPO_ROOT}"
 python3 - "${HAPPY_LOG}" "${PORT_CONFLICT_LOG}" "${ACCEPTANCE_DOC}" "${TASK_SPEC}" <<'PY'
 import sys
 from pathlib import Path
+from typing import Optional
 
 happy_log, port_conflict_log, acceptance_doc, task_spec = sys.argv[1:5]
 
@@ -80,7 +81,7 @@ def expected_command(evidence_log: str, *, with_port_conflict: bool) -> str:
     return f"scripts/verify-desktop-acceptance.sh --evidence-log {evidence_log}"
 
 
-def field_value(line: str, field: str) -> str | None:
+def field_value(line: str, field: str) -> Optional[str]:
     prefix = f"{field}:"
     if not line.startswith(prefix):
         return None

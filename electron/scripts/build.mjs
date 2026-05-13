@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { prepareRuntimeMirror } from '../lib/runtime-mirror.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -12,6 +13,7 @@ const skipConsoleBuild = process.argv.includes('--skip-console-build');
 const electronDownloadCacheRoot = process.env.ELECTRON_DOWNLOAD_CACHE_ROOT
   || path.join(os.tmpdir(), 'ava-electron-cache');
 const runtimeManifestName = 'ava-runtime-manifest.json';
+const runtimeResourceName = 'ava-runtime';
 const urlScheme = process.env.AVA_DEEP_LINK_SCHEME || 'ava';
 
 function assertPath(relativePath) {
@@ -55,6 +57,35 @@ function writeRuntimeManifest() {
   return { manifestDir, manifestPath };
 }
 
+function resolveNanobotRootForPackaging() {
+  const nanobotRoot = path.resolve(process.env.AVA_NANOBOT_ROOT || path.join(repoRoot, '..', 'nanobot'));
+  for (const requiredPath of [
+    'pyproject.toml',
+    path.join('nanobot', '__main__.py'),
+    path.join('nanobot', 'cli', 'commands.py'),
+  ]) {
+    if (!fs.existsSync(path.join(nanobotRoot, requiredPath))) {
+      throw new Error(`missing nanobot packaging path: ${path.join(nanobotRoot, requiredPath)}`);
+    }
+  }
+  return nanobotRoot;
+}
+
+function prepareRuntimeResource(workDir) {
+  const pythonPath = path.join(repoRoot, '.venv', 'bin', 'python');
+  assertExecutable(pythonPath);
+  const runtime = prepareRuntimeMirror({
+    appDataPath: workDir,
+    repoRoot,
+    nanobotRoot: resolveNanobotRootForPackaging(),
+    pythonExecutable: fs.realpathSync(pythonPath),
+  });
+  const runtimeResourceDir = path.join(workDir, runtimeResourceName);
+  fs.rmSync(runtimeResourceDir, { recursive: true, force: true });
+  fs.renameSync(runtime.repoRoot, runtimeResourceDir);
+  return runtimeResourceDir;
+}
+
 function readPlistValue(plistPath, key) {
   const result = spawnSync('plutil', ['-extract', key, 'raw', '-o', '-', plistPath], {
     encoding: 'utf8',
@@ -77,6 +108,24 @@ function readPlistJson(plistPath, key) {
   return JSON.parse(result.stdout);
 }
 
+function readPlistBool(plistPath, key) {
+  const result = spawnSync('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, plistPath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    throw new Error(`failed to read ${key} from ${plistPath}: ${result.stderr}`);
+  }
+  const value = result.stdout.trim();
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  throw new Error(`expected ${key} to be bool in ${plistPath}, got: ${value}`);
+}
+
 function plistBuddy(plistPath, command, options = {}) {
   const result = spawnSync('/usr/libexec/PlistBuddy', ['-c', command, plistPath], {
     encoding: 'utf8',
@@ -95,6 +144,14 @@ function injectUrlScheme(appPath) {
   plistBuddy(infoPlist, 'Add :CFBundleURLTypes:0:CFBundleURLName string app.ava.desktop');
   plistBuddy(infoPlist, 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array');
   plistBuddy(infoPlist, `Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ${urlScheme}`);
+}
+
+function injectPersistentStatePolicy(appPath) {
+  const infoPlist = path.join(appPath, 'Contents', 'Info.plist');
+  plistBuddy(infoPlist, 'Delete :NSQuitAlwaysKeepsWindows', { ignoreFailure: true });
+  plistBuddy(infoPlist, 'Add :NSQuitAlwaysKeepsWindows bool false');
+  plistBuddy(infoPlist, 'Delete :ApplePersistenceIgnoreState', { ignoreFailure: true });
+  plistBuddy(infoPlist, 'Add :ApplePersistenceIgnoreState bool true');
 }
 
 function readInstalledElectronVersion() {
@@ -142,6 +199,7 @@ function verifyPackagedApp(appPath) {
     assertExecutable(path.join(frameworksDir, helperName, 'Contents', 'MacOS', executableName));
   }
   const manifestPath = path.join(appPath, 'Contents', 'Resources', runtimeManifestName);
+  const runtimeResourcePath = path.join(appPath, 'Contents', 'Resources', runtimeResourceName);
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`missing runtime manifest: ${manifestPath}`);
   }
@@ -149,10 +207,27 @@ function verifyPackagedApp(appPath) {
   if (manifest.repoRoot !== repoRoot || !fs.existsSync(path.join(manifest.repoRoot, 'scripts', 'start-ava.sh'))) {
     throw new Error(`invalid runtime manifest repoRoot: ${manifest.repoRoot}`);
   }
+  for (const requiredPath of [
+    'ava',
+    path.join('nanobot-checkout', 'nanobot'),
+    path.join('nanobot-checkout', 'pyproject.toml'),
+    path.join('console-ui', 'dist'),
+    path.join('.venv', 'lib'),
+  ]) {
+    if (!fs.existsSync(path.join(runtimeResourcePath, requiredPath))) {
+      throw new Error(`missing packaged runtime resource: ${path.join(runtimeResourcePath, requiredPath)}`);
+    }
+  }
   const urlTypes = readPlistJson(infoPlist, 'CFBundleURLTypes');
   const schemes = urlTypes.flatMap((entry) => Array.isArray(entry.CFBundleURLSchemes) ? entry.CFBundleURLSchemes : []);
   if (!schemes.includes(urlScheme)) {
     throw new Error(`missing URL scheme ${urlScheme} in ${infoPlist}`);
+  }
+  if (readPlistBool(infoPlist, 'NSQuitAlwaysKeepsWindows') !== false) {
+    throw new Error(`NSQuitAlwaysKeepsWindows must be false in ${infoPlist}`);
+  }
+  if (readPlistBool(infoPlist, 'ApplePersistenceIgnoreState') !== true) {
+    throw new Error(`ApplePersistenceIgnoreState must be true in ${infoPlist}`);
   }
 }
 
@@ -165,6 +240,9 @@ function verifyContract() {
     'electron/lib/launch-env.mjs',
     'electron/lib/ports.mjs',
     'electron/lib/runtime-manifest.mjs',
+    'electron/lib/runtime-mirror.mjs',
+    'electron/lib/update-check.mjs',
+    'electron/assets/tray-icon-Template.png',
     'electron/bin/ava-core',
     'console-ui/package.json',
     'scripts/start-ava.sh',
@@ -200,6 +278,7 @@ const downloadArgs = cachedElectronZipDir
   ? [`--electron-zip-dir=${cachedElectronZipDir}`]
   : [`--download.cacheRoot=${electronDownloadCacheRoot}`];
 const { manifestDir, manifestPath } = writeRuntimeManifest();
+const runtimeResourceDir = prepareRuntimeResource(manifestDir);
 
 try {
   run(
@@ -214,6 +293,7 @@ try {
       '--out=dist',
       '--overwrite',
       `--extra-resource=${manifestPath}`,
+      `--extra-resource=${runtimeResourceDir}`,
       ...downloadArgs,
     ],
     { cwd: electronRoot },
@@ -224,6 +304,7 @@ try {
 
 const packagedApp = path.join(electronRoot, 'dist', 'Ava-darwin-arm64', 'Ava.app');
 injectUrlScheme(packagedApp);
+injectPersistentStatePolicy(packagedApp);
 verifyPackagedApp(packagedApp);
 run('codesign', ['--force', '--deep', '--sign', '-', packagedApp]);
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=1', packagedApp]);

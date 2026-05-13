@@ -1,10 +1,13 @@
 import {
   app,
   BrowserWindow,
+  Tray,
   Menu,
   Notification,
   dialog,
+  globalShortcut,
   ipcMain,
+  nativeImage,
   shell,
 } from 'electron';
 import { spawn } from 'node:child_process';
@@ -21,6 +24,7 @@ import {
 import {
   endpoint,
   httpGetJson,
+  httpGetStatus,
   isHealthyCorePayload,
   resolveExistingAvaCore,
 } from './lib/core-health.mjs';
@@ -35,17 +39,26 @@ import {
   readRuntimeManifestRepoRoot,
   runtimeManifestPaths,
 } from './lib/runtime-manifest.mjs';
+import { prepareRuntimeMirror } from './lib/runtime-mirror.mjs';
+import { checkForUpdate } from './lib/update-check.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CONSOLE_PORT = 6688;
-const CORE_HEALTH_TIMEOUT_MS = 45_000;
+const DEFAULT_GATEWAY_PORT = 18790;
+const DEFAULT_WEBSOCKET_PORT = 8765;
+const CORE_HEALTH_TIMEOUT_MS = 120_000;
+const TRAY_ICON_SIZE = 18;
+const STARTUP_INTERFACE_TIMEOUT_MS = 2_000;
 const SETUP_LOAD_TIMEOUT_MS = 5_000;
 const LOG_ROTATE_BYTES = 1024 * 1024;
 const RING_BUFFER_BYTES = 256 * 1024;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_CHECK_INITIAL_DELAY_MS = 5 * 1000;
 
 let mainWindow = null;
 let avaCoreProcess = null;
 let activeBootstrapProcess = null;
+let tray = null;
 let allowQuit = false;
 let launchConfigPromise = null;
 let launchConfig = null;
@@ -53,6 +66,8 @@ let startupPromise = null;
 let consoleLoadPromise = null;
 let consoleLoaded = false;
 let consoleReadyWatcher = null;
+let updateCheckTimer = null;
+let updateCheckInitialTimer = null;
 let pendingDeepLink = null;
 let logs = null;
 let stderrTail = '';
@@ -66,6 +81,11 @@ let bootstrapState = {
   nanobotRoot: '',
   coreEndpoint: '',
 };
+
+if (process.platform === 'darwin') {
+  // Prevent Chromium Safe Storage from blocking launch with a login keychain prompt.
+  app.commandLine.appendSwitch('use-mock-keychain');
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -108,6 +128,8 @@ function publicConfig(config = launchConfig) {
     repoRootFound: Boolean(findRepoRoot()),
     host: process.env.AVA_DESKTOP_CONSOLE_HOST || '127.0.0.1',
     port: Number(process.env.AVA_DESKTOP_CONSOLE_PORT || process.env.CAFE_CONSOLE_PORT || DEFAULT_CONSOLE_PORT),
+    gatewayPort: null,
+    websocketPort: null,
     logDir: logs?.logDir || '',
     externalCore: false,
   };
@@ -240,12 +262,15 @@ function setupLogging() {
     mainStream: fs.createWriteStream(mainLogPath, { flags: 'a' }),
     coreStream: fs.createWriteStream(coreLogPath, { flags: 'a' }),
   };
-  logs.mainStream.write(`[${new Date().toISOString()}] Ava desktop launch\n`);
+  writeMainLog('Ava desktop launch');
   return logs;
 }
 
 function writeMainLog(message) {
-  logs?.mainStream.write(`[${new Date().toISOString()}] ${message}\n`);
+  if (!logs?.mainLogPath) {
+    return;
+  }
+  fs.appendFileSync(logs.mainLogPath, `[${new Date().toISOString()}] ${message}\n`);
 }
 
 function appendRingBuffer(buffer, chunk, maxBytes = RING_BUFFER_BYTES) {
@@ -297,6 +322,25 @@ function ensureNanobotRoot(config) {
   return nanobotRoot;
 }
 
+function readPreferredPort(rawValue, fallback, label) {
+  const value = Number(rawValue || fallback);
+  if (!Number.isInteger(value) || value <= 0 || value > 65_535) {
+    throw makeStartupError('invalid_desktop_port', `${label} must be an integer port between 1 and 65535`);
+  }
+  return value;
+}
+
+async function pickDistinctFreePort(preferred, usedPorts, host = '127.0.0.1') {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const selected = await pickFreePort(attempt === 0 ? preferred : 0, host);
+    if (!usedPorts.has(selected)) {
+      usedPorts.add(selected);
+      return selected;
+    }
+  }
+  throw makeStartupError('port_selection_failed', 'Could not select distinct desktop runtime ports');
+}
+
 async function createLaunchConfig() {
   if (launchConfigPromise) {
     return launchConfigPromise;
@@ -306,10 +350,25 @@ async function createLaunchConfig() {
     const detectedRepoRoot = findRepoRoot();
     const repoRoot = detectedRepoRoot || path.resolve(__dirname, '..');
     const host = process.env.AVA_DESKTOP_CONSOLE_HOST || '127.0.0.1';
-    const preferredPort = Number(process.env.AVA_DESKTOP_CONSOLE_PORT || process.env.CAFE_CONSOLE_PORT || DEFAULT_CONSOLE_PORT);
+    const preferredPort = readPreferredPort(
+      process.env.AVA_DESKTOP_CONSOLE_PORT || process.env.CAFE_CONSOLE_PORT,
+      DEFAULT_CONSOLE_PORT,
+      'Console port',
+    );
     const existingCore = await resolveExistingAvaCore(host, preferredPort);
     const externalCore = Boolean(existingCore);
-    const port = existingCore?.port || await pickFreePort(preferredPort);
+    const usedPorts = new Set();
+    const port = existingCore?.port || await pickDistinctFreePort(preferredPort, usedPorts, host);
+    const gatewayPort = externalCore ? null : await pickDistinctFreePort(
+      readPreferredPort(process.env.AVA_DESKTOP_GATEWAY_PORT, DEFAULT_GATEWAY_PORT, 'Gateway port'),
+      usedPorts,
+      '0.0.0.0',
+    );
+    const websocketPort = externalCore ? null : await pickDistinctFreePort(
+      readPreferredPort(process.env.AVA_DESKTOP_WEBSOCKET_PORT, DEFAULT_WEBSOCKET_PORT, 'WebSocket port'),
+      usedPorts,
+      '127.0.0.1',
+    );
     const launchHost = existingCore?.host || host;
     const coreEndpoint = endpoint(launchHost, port);
     const config = {
@@ -317,6 +376,8 @@ async function createLaunchConfig() {
       repoRootFound: Boolean(detectedRepoRoot),
       host: launchHost,
       port,
+      gatewayPort,
+      websocketPort,
       externalCore,
       coreEndpoint,
       healthEndpoint: `${coreEndpoint}/api/gateway/health`,
@@ -326,7 +387,7 @@ async function createLaunchConfig() {
       env: resolveLaunchPath(process.env),
     };
     writeMainLog(
-      `launch config repoRootFound=${config.repoRootFound} externalCore=${config.externalCore} coreEndpoint=${config.coreEndpoint}`,
+      `launch config repoRootFound=${config.repoRootFound} externalCore=${config.externalCore} coreEndpoint=${config.coreEndpoint} gatewayPort=${config.gatewayPort ?? ''} websocketPort=${config.websocketPort ?? ''}`,
     );
     if (externalCore) {
       writeMainLog(`reusing existing Ava core at ${coreEndpoint}`);
@@ -351,7 +412,39 @@ function sendBootstrapState(partial) {
   }
 }
 
-function createBootstrapWindow(config) {
+function ensureForegroundActivation() {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+  try {
+    app.setActivationPolicy('regular');
+    app.dock?.show?.();
+  } catch (error) {
+    writeMainLog(`failed to ensure foreground activation: ${String(error)}`);
+  }
+}
+
+function presentMainWindow(appWindow, reason) {
+  if (!appWindow || appWindow.isDestroyed()) {
+    return;
+  }
+  ensureForegroundActivation();
+  if (appWindow.isMinimized()) {
+    appWindow.restore();
+  }
+  appWindow.setSkipTaskbar(false);
+  appWindow.show();
+  appWindow.moveTop();
+  appWindow.focus();
+  if (process.platform === 'darwin') {
+    app.focus({ steal: true });
+  }
+  writeMainLog(
+    `presented main window (${reason}) visible=${appWindow.isVisible()} minimized=${appWindow.isMinimized()} focused=${appWindow.isFocused()}`,
+  );
+}
+
+function createBootstrapWindow(config, { loadSetup = true } = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
   }
@@ -361,6 +454,8 @@ function createBootstrapWindow(config) {
     minWidth: 960,
     minHeight: 680,
     title: 'Ava',
+    show: false,
+    focusable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -368,8 +463,11 @@ function createBootstrapWindow(config) {
       sandbox: true,
     },
   });
+  if (!loadSetup) {
+    return mainWindow;
+  }
   const setupLoadTimeout = setTimeout(() => {
-    dialog.showErrorBox('Ava setup failed to load', `Setup surface did not finish loading.\nLogs: ${config.logDir}`);
+    writeMainLog(`setup surface did not finish loading within ${SETUP_LOAD_TIMEOUT_MS}ms`);
   }, SETUP_LOAD_TIMEOUT_MS);
   mainWindow.on('closed', () => {
     clearTimeout(setupLoadTimeout);
@@ -377,6 +475,7 @@ function createBootstrapWindow(config) {
   });
   mainWindow.webContents.once('did-finish-load', () => {
     clearTimeout(setupLoadTimeout);
+    presentMainWindow(mainWindow, 'setup loaded');
   });
   mainWindow.webContents.once('did-fail-load', (_event, _errorCode, errorDescription) => {
     clearTimeout(setupLoadTimeout);
@@ -390,22 +489,44 @@ function createBootstrapWindow(config) {
   return mainWindow;
 }
 
-async function waitForAvaCore(healthEndpoint) {
+async function checkStartupInterfaces(config) {
+  const health = await httpGetJson(config.healthEndpoint, STARTUP_INTERFACE_TIMEOUT_MS);
+  if (!isHealthyCorePayload(health)) {
+    throw makeStartupError(
+      'core_health_unready',
+      'Ava core health endpoint did not report ready',
+      `${config.healthEndpoint} returned ${JSON.stringify(health)}`,
+    );
+  }
+
+  const authStatus = await httpGetStatus(`${config.coreEndpoint}/api/auth/me`, STARTUP_INTERFACE_TIMEOUT_MS);
+  if (authStatus !== 200 && authStatus !== 401) {
+    throw makeStartupError(
+      'auth_interface_unready',
+      `Ava auth interface returned HTTP ${authStatus}`,
+      `${config.coreEndpoint}/api/auth/me must return 200 for an existing session or 401 for a login-required session before Console loads.`,
+    );
+  }
+
+  return { health, authStatus };
+}
+
+async function waitForStartupInterfaces(config) {
   const deadline = Date.now() + CORE_HEALTH_TIMEOUT_MS;
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      const health = await httpGetJson(healthEndpoint);
-      if (isHealthyCorePayload(health)) {
-        return health;
-      }
-      lastError = new Error('ava-core healthcheck is not ready');
+      return await checkStartupInterfaces(config);
     } catch (error) {
       lastError = error;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw lastError || new Error('ava-core healthcheck timed out');
+  throw makeStartupError(
+    'core_startup_timeout',
+    `Ava core did not become reachable within ${Math.round(CORE_HEALTH_TIMEOUT_MS / 1000)} seconds`,
+    lastError ? String(lastError.message || lastError) : '',
+  );
 }
 
 function stopConsoleReadyWatcher() {
@@ -436,7 +557,9 @@ async function loadConsole(config, reason) {
     writeMainLog(`loading Console from ${config.coreEndpoint} (${reason})`);
     await mainWindow.loadURL(config.coreEndpoint);
     consoleLoaded = true;
+    presentMainWindow(mainWindow, `console loaded: ${reason}`);
     writeMainLog(`Console loaded from ${config.coreEndpoint} (${reason})`);
+    scheduleUpdateChecks();
   })();
 
   try {
@@ -459,11 +582,9 @@ function startConsoleReadyWatcher(config) {
       return;
     }
     try {
-      const health = await httpGetJson(config.healthEndpoint, 1_000);
-      if (isHealthyCorePayload(health)) {
-        await loadConsole(config, 'health watcher');
-        return;
-      }
+      await checkStartupInterfaces(config);
+      await loadConsole(config, 'health watcher');
+      return;
     } catch {
       // Keep waiting; the main startup path owns the visible failure after timeout.
     }
@@ -536,14 +657,27 @@ function startAvaCore(config, nanobotRoot) {
   if (avaCoreProcess) {
     return avaCoreProcess;
   }
-  const wrapper = path.join(config.repoRoot, 'electron', 'bin', 'ava-core');
-  if (!fs.existsSync(wrapper)) {
-    throw makeStartupError('wrapper_not_found', `ava-core wrapper not found: ${wrapper}`);
+  const venvPythonPath = path.join(config.repoRoot, '.venv', 'bin', 'python');
+  if (!fs.existsSync(venvPythonPath)) {
+    throw makeStartupError('python_not_found', `Ava Python interpreter not found: ${venvPythonPath}`);
   }
+  const pythonPath = fs.realpathSync(venvPythonPath);
+  const packagedRuntimeRoot = path.join(process.resourcesPath, 'ava-runtime');
+  const runtimeSourceRoot = app.isPackaged && fs.existsSync(packagedRuntimeRoot)
+    ? packagedRuntimeRoot
+    : config.repoRoot;
+  writeMainLog(`preparing ava runtime mirror from ${runtimeSourceRoot}`);
+  const runtime = prepareRuntimeMirror({
+    appDataPath: app.getPath('userData'),
+    repoRoot: runtimeSourceRoot,
+    nanobotRoot,
+    pythonExecutable: pythonPath,
+  });
 
-  const env = buildCoreEnv(config, nanobotRoot);
-  const child = spawn('/bin/bash', [wrapper], {
-    cwd: config.repoRoot,
+  const env = buildCoreEnv({ ...config, repoRoot: runtime.repoRoot, pythonExecutable: pythonPath }, runtime.nanobotRoot);
+  writeMainLog(`starting ava-core sidecar repoRoot=${runtime.repoRoot} nanobotRoot=${runtime.nanobotRoot}`);
+  const child = spawn(pythonPath, ['-m', 'ava', 'gateway'], {
+    cwd: runtime.repoRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -587,7 +721,7 @@ function parseStructuredStartupError(output) {
 
 function waitForAvaCoreOrExit(child, config) {
   return Promise.race([
-    waitForAvaCore(config.healthEndpoint),
+    waitForStartupInterfaces(config),
     new Promise((_, reject) => {
       child.once('error', (error) => {
         reject(makeStartupError('sidecar_spawn_failed', 'Failed to start ava-core sidecar', String(error)));
@@ -606,6 +740,126 @@ async function openLogs() {
   setupLogging();
   const error = await shell.openPath(logs.logDir);
   return { ok: error.length === 0, error };
+}
+
+function readElectronAppVersion() {
+  const packagePath = path.join(__dirname, 'package.json');
+  const electronPackage = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  if (typeof electronPackage.version !== 'string') {
+    throw new Error('electron package.json must define version');
+  }
+  return electronPackage.version;
+}
+
+function showUpdateNotification(update) {
+  if (!Notification.isSupported()) {
+    writeMainLog(`update notification unsupported for ${update.version}`);
+    return false;
+  }
+  const notification = new Notification({
+    title: `Ava ${update.version} is available`,
+    body: 'Open the GitHub release to download the latest build.',
+  });
+  notification.on('click', () => {
+    shell.openExternal(update.url).catch((error) => {
+      writeMainLog(`failed to open update release: ${String(error)}`);
+    });
+  });
+  notification.show();
+  writeMainLog(`update notification shown for ${update.version}: ${update.url}`);
+  return true;
+}
+
+async function runUpdateCheck() {
+  try {
+    const update = await checkForUpdate({ currentVersion: readElectronAppVersion() });
+    if (update.available) {
+      showUpdateNotification(update);
+    } else {
+      writeMainLog(`update check found no newer release: ${update.version}`);
+    }
+  } catch (error) {
+    writeMainLog(`update check failed: ${String(error)}`);
+  }
+}
+
+function scheduleUpdateChecks() {
+  if (updateCheckTimer || updateCheckInitialTimer) {
+    return;
+  }
+  updateCheckInitialTimer = setTimeout(() => {
+    updateCheckInitialTimer = null;
+    void runUpdateCheck();
+  }, UPDATE_CHECK_INITIAL_DELAY_MS);
+  updateCheckInitialTimer.unref?.();
+  updateCheckTimer = setInterval(() => {
+    void runUpdateCheck();
+  }, UPDATE_CHECK_INTERVAL_MS);
+  updateCheckTimer.unref?.();
+}
+
+function setDockBadgeCount(count) {
+  if (!Number.isInteger(count) || count < 0) {
+    return { ok: false, error: 'invalid badge count' };
+  }
+  if (process.platform === 'darwin') {
+    app.dock.setBadge(count > 0 ? String(count) : '');
+  }
+  return { ok: true };
+}
+
+function installTray() {
+  if (tray) {
+    return;
+  }
+  const iconPath = path.join(__dirname, 'assets', 'tray-icon-Template.png');
+  const image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    throw new Error(`missing tray icon: ${iconPath}`);
+  }
+  const trayImage = image.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE });
+  trayImage.setTemplateImage(true);
+  tray = new Tray(trayImage);
+  tray.setToolTip('Ava');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: 'Show Window',
+      click: () => {
+        showMainWindow().catch(showFatalStartupError);
+      },
+    },
+    {
+      label: 'Open Logs',
+      click: () => {
+        openLogs().catch(showFatalStartupError);
+      },
+    },
+    {
+      label: 'Retry Core',
+      click: () => {
+        retryCore().catch(showFatalStartupError);
+      },
+    },
+    { type: 'separator' },
+    { label: 'Quit', role: 'quit' },
+  ]));
+  tray.on('click', () => {
+    showMainWindow().catch(showFatalStartupError);
+  });
+}
+
+function installGlobalShortcut() {
+  const registered = globalShortcut.register('Control+Shift+A', () => {
+    showMainWindow().catch(showFatalStartupError);
+  });
+  if (!registered) {
+    writeMainLog('failed to register global shortcut Control+Shift+A');
+  }
+}
+
+function installDesktopIntegrations() {
+  installTray();
+  installGlobalShortcut();
 }
 
 function avaHome() {
@@ -739,6 +993,7 @@ async function handleStartupFailure(error, config) {
 
   const reason = error instanceof Error ? error : makeStartupError('startup_failed', String(error));
   writeMainLog(`startup failed ${reason.code || ''}: ${reason.message}`);
+  await stopAvaCore();
   sendBootstrapState({
     stage: reason.code === 'nanobot_not_found' ? 'nanobot' : 'error',
     message: 'Ava startup failed',
@@ -776,6 +1031,12 @@ async function runStartup(config) {
     );
   }
   if (config.externalCore) {
+    sendBootstrapState({
+      stage: 'interfaces',
+      message: 'Checking Ava core interfaces',
+      error: '',
+    });
+    await waitForStartupInterfaces(config);
     await loadConsole(config, 'existing core');
     return;
   }
@@ -788,6 +1049,11 @@ async function runStartup(config) {
   });
   const child = startAvaCore(config, nanobotRoot);
   startConsoleReadyWatcher(config);
+  sendBootstrapState({
+    stage: 'interfaces',
+    message: 'Checking Ava core interfaces',
+    error: '',
+  });
   await waitForAvaCoreOrExit(child, config);
   await loadConsole(config, 'startup');
 }
@@ -834,14 +1100,17 @@ function stopAvaCore() {
     return Promise.resolve();
   }
   const child = avaCoreProcess;
+  avaCoreProcess = null;
   return new Promise((resolve) => {
+    let exited = false;
     const timeout = setTimeout(() => {
-      if (!child.killed) {
+      if (!exited) {
         child.kill('SIGKILL');
       }
       resolve();
     }, 5_000);
     child.once('exit', () => {
+      exited = true;
       clearTimeout(timeout);
       resolve();
     });
@@ -898,6 +1167,7 @@ function installAppMenu() {
     {
       label: 'Window',
       submenu: [
+        { role: 'close' },
         { role: 'minimize' },
         { role: 'zoom' },
         ...(process.platform === 'darwin'
@@ -905,9 +1175,7 @@ function installAppMenu() {
             { type: 'separator' },
             { role: 'front' },
           ]
-          : [
-            { role: 'close' },
-          ]),
+          : []),
       ],
     },
     {
@@ -934,16 +1202,13 @@ function installAppMenu() {
 async function showMainWindow() {
   const config = await createLaunchConfig();
   const hadWindow = mainWindow && !mainWindow.isDestroyed();
-  const appWindow = createBootstrapWindow(config);
-  if (appWindow.isMinimized()) {
-    appWindow.restore();
-  }
-  appWindow.show();
-  appWindow.focus();
+  const appWindow = createBootstrapWindow(config, { loadSetup: !consoleLoaded });
+  presentMainWindow(appWindow, 'show requested');
 
   if (consoleLoaded) {
     if (!hadWindow) {
       await appWindow.loadURL(config.coreEndpoint);
+      presentMainWindow(appWindow, 'console reloaded');
     }
     return;
   }
@@ -974,6 +1239,7 @@ ipcMain.handle('ava:revealArtifact', (_event, artifactId) => {
   shell.showItemInFolder(targetPath);
   return { ok: true };
 });
+ipcMain.handle('ava:setBadgeCount', (_event, count) => setDockBadgeCount(count));
 ipcMain.handle('ava:openLogs', () => openLogs());
 ipcMain.handle('ava:readDesktopConfig', () => readDesktopConfig());
 ipcMain.handle('ava:setNanobotRoot', (_event, root) => {
@@ -1015,21 +1281,18 @@ app.on('second-instance', (_event, commandLine) => {
     handleDeepLink(deepLinkUrl).catch(showFatalStartupError);
     return;
   }
-  if (!mainWindow) {
-    return;
+  if (mainWindow) {
+    presentMainWindow(mainWindow, 'second instance');
   }
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-  mainWindow.focus();
 });
 
 app.whenReady().then(async () => {
   const config = await createLaunchConfig();
   registerDeepLinkProtocol();
   installAppMenu();
-  createBootstrapWindow(config);
-  await bootstrapAndStart(config);
+  installDesktopIntegrations();
+  ensureForegroundActivation();
+  await showMainWindow();
 }).catch(showFatalStartupError);
 
 app.on('window-all-closed', () => {
@@ -1048,6 +1311,18 @@ app.on('before-quit', async (event) => {
   }
   event.preventDefault();
   allowQuit = true;
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer);
+    updateCheckTimer = null;
+  }
+  if (updateCheckInitialTimer) {
+    clearTimeout(updateCheckInitialTimer);
+    updateCheckInitialTimer = null;
+  }
+  globalShortcut.unregisterAll();
+  tray?.destroy();
+  tray = null;
+  setDockBadgeCount(0);
   await stopAvaCore();
   logs?.mainStream.end();
   logs?.coreStream.end();

@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-${REPO_ROOT}/electron/dist/Ava-darwin-arm64/Ava.app}"
 MAIN_LOG="${HOME}/Library/Logs/Ava/main.log"
 CORE_LOG="${HOME}/Library/Logs/Ava/core.log"
+RUNTIME_META="${AVA_HOME:-${HOME}/.ava}/console.json"
 TIMEOUT_SECONDS="${AVA_DESKTOP_VERIFY_TIMEOUT:-45}"
 REQUIRE_FRESH_CORE="${AVA_DESKTOP_VERIFY_REQUIRE_FRESH_CORE:-0}"
 FORBID_ENDPOINT_PORT="${AVA_DESKTOP_VERIFY_FORBID_ENDPOINT_PORT:-}"
@@ -117,6 +118,13 @@ sys.exit(0 if ready and not_shutting_down and has_boot_generation else 1)
 ' <<<"${body}"
 }
 
+auth_interface_ready() {
+  local endpoint="$1"
+  local status
+  status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 "${endpoint}/api/auth/me" 2>/dev/null)" || return 1
+  [[ "${status}" == "200" || "${status}" == "401" ]]
+}
+
 log_size() {
   local file="$1"
   [[ -f "${file}" ]] || {
@@ -156,6 +164,59 @@ latest_endpoint_from_new_log() {
   log_since "${MAIN_LOG}" "${MAIN_LOG_SIZE}" "${MAIN_LOG_ID}" | grep -Eo 'coreEndpoint=http://[^[:space:]]+' | tail -n 1 | cut -d= -f2-
 }
 
+runtime_meta_marker() {
+  local file="$1"
+  [[ -f "${file}" ]] || return 0
+  python3 - "${file}" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        payload = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+
+pid = payload.get("pid")
+started_at = payload.get("started_at")
+if pid is None and started_at is None:
+    raise SystemExit(0)
+print(f"{pid}|{started_at}")
+PY
+}
+
+latest_endpoint_from_runtime_meta() {
+  [[ -f "${RUNTIME_META}" ]] || return 1
+  python3 - "${RUNTIME_META}" "${RUNTIME_META_MARKER}" <<'PY'
+import json
+import sys
+
+meta_path, previous_marker = sys.argv[1], sys.argv[2]
+try:
+    with open(meta_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+current_marker = f"{payload.get('pid')}|{payload.get('started_at')}"
+if current_marker == previous_marker:
+    raise SystemExit(1)
+
+port = payload.get("console_port")
+try:
+    port = int(port)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if port <= 0 or port > 65535:
+    raise SystemExit(1)
+
+host = payload.get("console_host") or "127.0.0.1"
+if host in {"0.0.0.0", "::"}:
+    host = "127.0.0.1"
+print(f"http://{host}:{port}")
+PY
+}
+
 latest_launch_config_from_new_log() {
   log_since "${MAIN_LOG}" "${MAIN_LOG_SIZE}" "${MAIN_LOG_ID}" | grep 'launch config ' | tail -n 1
 }
@@ -189,10 +250,19 @@ fail_on_new_core_errors() {
   fi
 }
 
+clear_persistent_state_prompt() {
+  local bundle_id="$1"
+  local saved_state_dir="${HOME}/Library/Saved Application State/${bundle_id}.savedState"
+  defaults write "${bundle_id}" ApplePersistenceIgnoreState -bool YES >/dev/null 2>&1 || true
+  rm -rf "${saved_state_dir}"
+}
+
 [[ -d "${APP_PATH}" ]] || fail "missing app bundle: ${APP_PATH}"
 APP_ABS_PATH="$(absolute_app_path "${APP_PATH}")" || fail "cannot resolve app bundle path: ${APP_PATH}"
 INFO_PLIST="${APP_ABS_PATH}/Contents/Info.plist"
 [[ -f "${INFO_PLIST}" ]] || fail "missing Info.plist: ${INFO_PLIST}"
+BUNDLE_ID="$(read_plist_value "${INFO_PLIST}" "CFBundleIdentifier")" || fail "missing CFBundleIdentifier in ${INFO_PLIST}"
+[[ -n "${BUNDLE_ID}" ]] || fail "empty CFBundleIdentifier in ${INFO_PLIST}"
 BUNDLE_EXECUTABLE="$(read_plist_value "${INFO_PLIST}" "CFBundleExecutable")" || fail "missing CFBundleExecutable in ${INFO_PLIST}"
 [[ -n "${BUNDLE_EXECUTABLE}" ]] || fail "empty CFBundleExecutable in ${INFO_PLIST}"
 require_url_scheme "${INFO_PLIST}" "${DEEP_LINK_SCHEME}" || fail "Info.plist missing URL scheme ${DEEP_LINK_SCHEME}"
@@ -209,11 +279,13 @@ if (( RUNNING_APP_STATUS == 2 )); then
   fail "could not determine whether Ava.app is already running from ${APP_ABS_PATH}; pgrep failed and lsof found no matching executable."
 fi
 codesign --verify --deep --strict --verbose=1 "${APP_ABS_PATH}" >/dev/null
+clear_persistent_state_prompt "${BUNDLE_ID}"
 
 MAIN_LOG_SIZE="$(log_size "${MAIN_LOG}")"
 CORE_LOG_SIZE="$(log_size "${CORE_LOG}")"
 MAIN_LOG_ID="$(log_identity "${MAIN_LOG}")"
 CORE_LOG_ID="$(log_identity "${CORE_LOG}")"
+RUNTIME_META_MARKER="$(runtime_meta_marker "${RUNTIME_META}")"
 
 echo "Opening ${APP_ABS_PATH}"
 if ! open -n "${APP_ABS_PATH}"; then
@@ -223,15 +295,15 @@ fi
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   fail_on_new_core_errors
-  endpoint="$(latest_endpoint_from_new_log || true)"
+  endpoint="$(latest_endpoint_from_new_log || latest_endpoint_from_runtime_meta || true)"
   if fresh_core_required_but_reused_existing; then
     fail "fresh core was required, but Ava reused an existing core. Stop the current Ava core or clear stale runtime metadata before rerunning this verifier."
   fi
   if [[ -n "${endpoint}" ]] && forbidden_endpoint_port_selected "${endpoint}"; then
     fail "Ava selected forbidden endpoint port ${FORBID_ENDPOINT_PORT}; expected a dynamic port while that port is occupied by the acceptance probe."
   fi
-  if [[ -n "${endpoint}" ]] && health_ready "${endpoint}"; then
-    echo "Ava Console is healthy at ${endpoint}"
+  if [[ -n "${endpoint}" ]] && health_ready "${endpoint}" && auth_interface_ready "${endpoint}"; then
+    echo "Ava Console startup interfaces are healthy at ${endpoint}"
     exit 0
   fi
   sleep 1
@@ -242,4 +314,6 @@ echo "--- new main.log ---" >&2
 log_since "${MAIN_LOG}" "${MAIN_LOG_SIZE}" "${MAIN_LOG_ID}" >&2 || true
 echo "--- new core.log ---" >&2
 log_since "${CORE_LOG}" "${CORE_LOG_SIZE}" "${CORE_LOG_ID}" >&2 || true
+echo "--- runtime metadata ---" >&2
+cat "${RUNTIME_META}" >&2 2>/dev/null || true
 exit 1

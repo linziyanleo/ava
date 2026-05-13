@@ -1,37 +1,45 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+
+const CURL = '/usr/bin/curl';
 
 export function endpoint(host, port) {
   return `http://${host}:${port}`;
 }
 
-export function httpGetJson(url, timeoutMs = 2_000) {
+function curlMaxTime(timeoutMs) {
+  return String(Math.max(timeoutMs / 1000, 0.001));
+}
+
+function runCurl(args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { timeout: timeoutMs }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => {
-        body += chunk;
-      });
-      response.on('end', () => {
-        if (!response.statusCode || response.statusCode >= 400) {
-          reject(new Error(`healthcheck ${response.statusCode || 'unknown'}`));
-          return;
-        }
-        try {
-          resolve(JSON.parse(body || '{}'));
-        } catch (error) {
-          reject(error);
-        }
-      });
+    const result = spawnSync(CURL, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: timeoutMs + 500,
     });
-    request.on('timeout', () => {
-      request.destroy(new Error('healthcheck timeout'));
-    });
-    request.on('error', reject);
+    if (result.error) {
+      reject(result.error);
+      return;
+    }
+    if (result.status === 0) {
+      resolve(result.stdout || '');
+      return;
+    }
+    reject(new Error(`curl failed with ${result.signal || `exit ${result.status}`}: ${result.stderr || result.stdout || ''}`));
   });
+}
+
+export async function httpGetJson(url, timeoutMs = 2_000) {
+  const body = await runCurl(['-fsS', '--max-time', curlMaxTime(timeoutMs), url], timeoutMs);
+  return JSON.parse(body || '{}');
+}
+
+export function httpGetStatus(url, timeoutMs = 2_000) {
+  return runCurl(['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', curlMaxTime(timeoutMs), url], timeoutMs)
+    .then((status) => Number(status.trim() || 0));
 }
 
 export function isHealthyCorePayload(health) {

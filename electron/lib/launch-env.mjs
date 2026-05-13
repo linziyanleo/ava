@@ -78,15 +78,35 @@ export function findExecutable(command, env) {
   return null;
 }
 
+export function venvSitePackages(repoRoot, pythonExecutable = '') {
+  const match = path.basename(pythonExecutable).match(/^python(\d+\.\d+)$/);
+  if (!match) {
+    return '';
+  }
+  return path.join(repoRoot, '.venv', 'lib', `python${match[1]}`, 'site-packages');
+}
+
 export function buildCoreEnv(config, nanobotRoot) {
-  return {
+  const pythonPath = [config.repoRoot, nanobotRoot, venvSitePackages(config.repoRoot, config.pythonExecutable), config.env.PYTHONPATH]
+    .filter(Boolean)
+    .join(path.delimiter);
+  const env = {
     ...config.env,
     AVA_DESKTOP: '1',
     AVA_REPO_ROOT: config.repoRoot,
     AVA_NANOBOT_ROOT: nanobotRoot,
+    VIRTUAL_ENV: path.join(config.repoRoot, '.venv'),
+    PYTHONPATH: pythonPath,
     CAFE_CONSOLE_HOST: config.host,
     CAFE_CONSOLE_PORT: String(config.port),
     AVA_DESKTOP_CONSOLE_HOST: config.host,
     AVA_DESKTOP_CONSOLE_PORT: String(config.port),
   };
+  if (Number.isInteger(config.gatewayPort)) {
+    env.AVA_DESKTOP_GATEWAY_PORT = String(config.gatewayPort);
+  }
+  if (Number.isInteger(config.websocketPort)) {
+    env.AVA_DESKTOP_WEBSOCKET_PORT = String(config.websocketPort);
+  }
+  return env;
 }
