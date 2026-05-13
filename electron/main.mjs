@@ -714,13 +714,74 @@ function stopAvaCore() {
 
 function installAppMenu() {
   const menu = Menu.buildFromTemplate([
-    { role: 'appMenu' },
-    { role: 'editMenu' },
-    { role: 'viewMenu' },
-    { role: 'windowMenu' },
+    ...(process.platform === 'darwin'
+      ? [
+        {
+          label: app.name,
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        },
+      ]
+      : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(process.platform === 'darwin'
+          ? [
+            { type: 'separator' },
+            { role: 'front' },
+          ]
+          : [
+            { role: 'close' },
+          ]),
+      ],
+    },
     {
       label: 'Help',
       submenu: [
+        {
+          label: 'Retry Core',
+          click: () => {
+            retryCore().catch(showFatalStartupError);
+          },
+        },
         {
           label: 'Open Logs',
           click: () => {
@@ -731,6 +792,32 @@ function installAppMenu() {
     },
   ]);
   Menu.setApplicationMenu(menu);
+}
+
+async function showMainWindow() {
+  const config = await createLaunchConfig();
+  const hadWindow = mainWindow && !mainWindow.isDestroyed();
+  const appWindow = createBootstrapWindow(config);
+  if (appWindow.isMinimized()) {
+    appWindow.restore();
+  }
+  appWindow.show();
+  appWindow.focus();
+
+  if (consoleLoaded) {
+    if (!hadWindow) {
+      await appWindow.loadURL(config.coreEndpoint);
+    }
+    return;
+  }
+
+  await bootstrapAndStart(config);
+}
+
+async function retryCore() {
+  const config = await createLaunchConfig();
+  await bootstrapAndStart(config);
+  return { ok: true };
 }
 
 ipcMain.handle('ava:getAppConfig', () => getAvaConfig());
@@ -756,9 +843,7 @@ ipcMain.handle('ava:setNanobotRoot', (_event, root) => {
   return setNanobotRoot(root);
 });
 ipcMain.handle('ava:retryCore', async () => {
-  const config = await createLaunchConfig();
-  await bootstrapAndStart(config);
-  return { ok: true };
+  return retryCore();
 });
 ipcMain.handle('ava:cancelBootstrap', () => cancelBootstrap());
 ipcMain.handle('ava:showNotification', (_event, payload) => {
@@ -788,7 +873,13 @@ app.whenReady().then(async () => {
 }).catch(showFatalStartupError);
 
 app.on('window-all-closed', () => {
-  app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  showMainWindow().catch(showFatalStartupError);
 });
 
 app.on('before-quit', async (event) => {
