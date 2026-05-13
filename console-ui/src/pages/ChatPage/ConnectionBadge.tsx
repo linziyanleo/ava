@@ -38,11 +38,20 @@ interface ConnectionBadgeProps {
   status: ChatStreamStatus
 }
 
+interface AvaDesktopApi {
+  retryCore?: () => Promise<{ ok: boolean; error?: string }>
+}
+
+function desktopApi(): AvaDesktopApi | null {
+  return (window as unknown as { avaDesktop?: AvaDesktopApi }).avaDesktop || null
+}
+
 export function ConnectionBadge({ transport, status }: ConnectionBadgeProps) {
   if (transport === 'none') return null
 
   const meta = STATUS_META[status]
   const isPulsing = status === 'connecting' || status === 'reconnecting' || status === 'error'
+  const canRetryCore = Boolean(desktopApi()?.retryCore) && (status === 'closed' || status === 'error')
 
   return (
     <span
@@ -61,6 +70,18 @@ export function ConnectionBadge({ transport, status }: ConnectionBadgeProps) {
       <span>{TRANSPORT_LABELS[transport]}</span>
       <span className="opacity-60">·</span>
       <span>{meta.label}</span>
+      {canRetryCore && (
+        <>
+          <span className="opacity-60">·</span>
+          <button
+            type="button"
+            onClick={() => { void desktopApi()?.retryCore?.() }}
+            className="rounded px-1 text-[10px] font-semibold text-current underline-offset-2 hover:underline"
+          >
+            Retry Core
+          </button>
+        </>
+      )}
     </span>
   )
 }

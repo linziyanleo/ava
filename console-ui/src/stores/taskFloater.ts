@@ -63,3 +63,29 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
     chainId: null,
   }),
 }))
+
+interface AvaDesktopApi {
+  onOpenTaskFloater?: (callback: (payload?: { taskId?: string | null }) => void) => () => void
+}
+
+let uninstallDesktopBridge: (() => void) | null = null
+
+export function installTaskFloaterDesktopBridge() {
+  if (uninstallDesktopBridge) return uninstallDesktopBridge
+
+  const api = (window as unknown as { avaDesktop?: AvaDesktopApi }).avaDesktop
+  if (!api?.onOpenTaskFloater) return () => {}
+
+  uninstallDesktopBridge = api.onOpenTaskFloater((payload) => {
+    useTaskFloater.getState().open({
+      panel: 'background',
+      bgView: 'all',
+      taskId: payload?.taskId ?? null,
+    })
+  })
+
+  return () => {
+    uninstallDesktopBridge?.()
+    uninstallDesktopBridge = null
+  }
+}

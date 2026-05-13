@@ -7,6 +7,7 @@ const api = {
   getAppConfig: () => ipcRenderer.invoke('ava:getAppConfig'),
   getCoreEndpoint: () => ipcRenderer.invoke('ava:getCoreEndpoint'),
   getAuthToken: () => ipcRenderer.invoke('ava:getAuthToken'),
+  getBootstrapState: () => ipcRenderer.invoke('ava:getBootstrapState'),
   readDesktopConfig: () => ipcRenderer.invoke('ava:readDesktopConfig'),
   setNanobotRoot: (root) => ipcRenderer.invoke('ava:setNanobotRoot', root),
   retryCore: () => ipcRenderer.invoke('ava:retryCore'),
@@ -17,6 +18,12 @@ const api = {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('ava:bootstrapState', listener);
     return () => ipcRenderer.removeListener('ava:bootstrapState', listener);
+  },
+  onOpenTaskFloater: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('ava:openTaskFloater', listener);
+    return () => ipcRenderer.removeListener('ava:openTaskFloater', listener);
   },
 };
 

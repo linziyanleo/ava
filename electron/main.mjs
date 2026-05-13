@@ -823,6 +823,7 @@ async function retryCore() {
 ipcMain.handle('ava:getAppConfig', () => getAvaConfig());
 ipcMain.handle('ava:getCoreEndpoint', () => getAvaConfig().coreEndpoint);
 ipcMain.handle('ava:getAuthToken', () => null);
+ipcMain.handle('ava:getBootstrapState', () => bootstrapState);
 ipcMain.handle('ava:selectDirectory', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   return result.canceled ? null : result.filePaths[0] || null;
@@ -849,8 +850,17 @@ ipcMain.handle('ava:cancelBootstrap', () => cancelBootstrap());
 ipcMain.handle('ava:showNotification', (_event, payload) => {
   const title = typeof payload?.title === 'string' ? payload.title : 'Ava';
   const body = typeof payload?.body === 'string' ? payload.body : '';
+  const taskId = typeof payload?.taskId === 'string' ? payload.taskId : null;
   if (Notification.isSupported()) {
-    new Notification({ title, body }).show();
+    const notification = new Notification({ title, body });
+    notification.on('click', () => {
+      showMainWindow()
+        .then(() => {
+          mainWindow?.webContents.send('ava:openTaskFloater', { taskId });
+        })
+        .catch(showFatalStartupError);
+    });
+    notification.show();
   }
   return { ok: true };
 });

@@ -2,10 +2,13 @@ import { useRef, useEffect } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
+import { useBgTaskNotifications } from '../../hooks/useBgTaskNotifications'
 import { useAuth } from '../../stores/auth'
+import { installTaskFloaterDesktopBridge } from '../../stores/taskFloater'
 import { filterNavItems } from './navItems'
 import TaskFloater from '../tasks/TaskFloater'
 import TopBar from './TopBar'
+import BootstrapBanner from './BootstrapBanner'
 
 function MobileBottomNav() {
   const location = useLocation()
@@ -58,10 +61,14 @@ function MobileBottomNav() {
 export default function Layout() {
   const { isMobile } = useResponsiveMode()
   const { user } = useAuth()
+  useBgTaskNotifications()
+
+  useEffect(() => installTaskFloaterDesktopBridge(), [])
 
   if (isMobile) {
     return (
       <div className="flex flex-col h-dvh">
+        <BootstrapBanner />
         <main className="flex-1 min-h-0 overflow-y-auto">
           {user?.role === 'mock_tester' && (
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
@@ -79,6 +86,7 @@ export default function Layout() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
+      <BootstrapBanner />
       <main className="min-h-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
