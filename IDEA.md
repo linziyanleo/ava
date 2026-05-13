@@ -1,6 +1,6 @@
 # IDEA.md — AVA 多 Agent 协同平面
 
-> 最后更新：2026-05-08
+> 最后更新：2026-05-12
 > 状态：Living Concept Spec（已按当前实现对齐）
 
 ## 核心愿景
@@ -38,8 +38,11 @@ ava-core 是产品核心——一个可 headless 运行的 Agent 控制平面服
 | ------- | ----------------------------------------- | ---------------------------------------- |
 | **P1a** | **Desktop Shell + ava-core 独立化**          | Electron 壳、ava-core sidecar、Nanobot 子进程化 |
 | **P1b** | **Agent Control Plane** — 看得见、管得住         | Agent 注册/状态/配置/单任务派发/线程控制、轻量任务链与产物可视化 |
-| **P2**  | **Multi-Agent Workflow Runner** — 编得起来    | fan-out/fan-in、可保存 workflow、step 间 artifact 传递、失败重试 |
-| **P3**  | **Multi-Agent Coordination Plane** — 自动协同 | 条件分支、循环审批、并行执行、可视化编排                     |
+| **P1c** | **产品体验补强** — 让人懂 Ava 在做什么            | 首启动向导、记忆/任务可解释性、任务统一回放、桌面壳启动体验          |
+| **P2a** | **Durable Workflow Run + 契约** — 跑得稳       | workflow run 持久化、artifact contract、workspace lease / worktree / branch authority |
+| **P2b** | **Fan-out / Fan-in** — 跑得开                | parallel / join、并发上限、子任务聚合显示                                              |
+| **P2c** | **可保存 Workflow + 编辑入口** — 编得起来          | workflow definition 存储、版本、模板、导入导出、Workflow Detail UI                      |
+| **P3**  | **Multi-Agent Coordination Plane** — 自动协同 | 条件分支、循环、approval、可视化编排                                                     |
 
 
 P1 的成功标准：用户能启动/停止/重启 Agent，能观察状态，能派发任务，能取消任务，能查看事件和产物。
@@ -83,12 +86,220 @@ P1 的成功标准：用户能启动/停止/重启 Agent，能观察状态，能
 - [x] Skill 触发双入口：`@skill_name` 显式触发 + Nanobot 自然语言匹配，并把触发结果注册为 chain
 - [x] Context Size：显示 token 占用、手动压缩、压缩前后对比
 
+### P1c 待落地
+
+- [ ] 首启动向导：environment check + Agent Registry 健康检查 + model provider 录入 + 渠道接入（可选）+ 示例任务；每次启动复用 health check，缺关键依赖自动回到对应步骤
+- [ ] 记忆条目可解释字段：`source` / `created_by_agent` / `confidence` / `last_used_at` / `last_used_in` / `pinned`；Memory 列表按"用户确认 / Agent 推断 / 不确定"分组
+- [ ] 任务条目可解释字段：触发来源、依据 memory id、参考 artifact id、决策日志（模型 output 摘要 + 工具调用参数）
+- [ ] 任务统一回放：Task Overlay 任务详情内整合 ChainBubble / BackgroundTask / Trace spans / Browser screencast / Artifact 五源时间线，并补 `GET /api/tasks/{task_id}/replay` 聚合接口
+- [ ] 桌面壳启动体验：macOS `.app` 启动无 terminal 闪烁、首次启动衔接首启动向导、Dock/Cmd+Q 行为；快捷键 `Cmd+Shift+D` 以系统浏览器打开同一份 Console（不绕认证，不依赖 LAN Access）
+
 ### P2 / P3 后续增强
 
 - [ ] AVA-25 / AVA-26 / AVA-28 / AVA-29 / AVA-30：已在 Linear 标记 `deferred`，不进入当前 P1b 验收。
 - [ ] AVA-31 / AVA-32 / AVA-33 / AVA-34 / AVA-35 / AVA-36：已在 Linear 标记 `deferred`，保留为 P3 backlog，不作为当前可见 UI 或 passing acceptance。
 - [ ] 设备侧 LAN Access P2 验收：手机扫码、中国大陆 WiFi、iOS/Android 添加主屏、家用路由器 mDNS 实测；人工验收步骤见 `docs/control-plane-manual-acceptance.md`
 - [ ] 移动端原生重设计验收：iPhone 13+ / Pixel 4+ 流畅度、关键场景、横竖屏切换；人工验收步骤见 `docs/control-plane-manual-acceptance.md`
+
+## P1c — 产品体验补强
+
+P1b 已经把"控制面"立住：Agent 状态、任务派发、cancel/retry、artifact 预览、LAN Access、Electron 壳都可用。P1c 不再叠功能，而是把已有数据暴露成用户能看懂的产品表达。四件事互相独立，可分别落地。
+
+### 首启动向导
+
+当前接入门槛：用户按 README 5 步（`nvm use` / 准备 `nanobot` checkout / `uv sync` / `npm install` / `start-ava.sh`），再手工配 `AVA_NANOBOT_ROOT`、模型 provider key、渠道 token。Electron 壳进入 P1b 后，README 驱动的接入流程是非 contributor 的最大障碍。
+
+向导覆盖 5 步：
+
+1. **环境探测**：外部 `nanobot` checkout、`AVA_NANOBOT_ROOT`、`AVA_HOME`、Python venv、Node version
+2. **Agent 健康检查**：复用 Agent Registry，列出 4 个内置 Agent kind 的安装状态、版本、缺失项；未安装项给出官网跳转
+3. **Model provider 配置**：OpenAI / Anthropic / Gemini key 录入与本地保存（写入 ava-core 配置，不进 git）
+4. **渠道接入（可选）**：Telegram / Feishu / 微信 / Discord 等 channel token；用户可全部跳过
+5. **示例任务**：生成 3–5 条"你现在可以让 Ava 做什么"的可点击示例，跳到 Chat 并预填 prompt
+
+向导不是一次性页面。每次启动 Ava 都做 environment health check：关键依赖缺失（`nanobot` checkout 不存在 / core 模型 provider 未配置）则回到向导对应步骤；全部就绪则直接进 Chat。
+
+向导只负责"让 Ava 可用"，不引入新的产品概念，不替代 Settings → Agents Config。
+
+### 记忆与任务可解释性
+
+`MemoryPage` / `BgTasksPage` 已存在，但目前主要展示"是什么"（内容、状态、时间），缺"为什么"（来源、依据、最近被使用）。Agent Control Plane 定位下，用户对 AI 的信任来自"我能看懂 Ava 在依据什么做事"。
+
+**记忆条目** — 在已有 Memory 详情上补字段，不新增独立页面：
+
+| 字段                 | 说明                                              |
+| ------------------ | ----------------------------------------------- |
+| `source`           | 来源：chat / task / manual / channel / file       |
+| `created_by_agent` | 是哪个 Agent 写入的                                   |
+| `confidence`       | inferred / confirmed / uncertain                |
+| `last_used_at`     | 最近一次被读入上下文的时间                                   |
+| `last_used_in`     | 最近一次被使用的 task / chain id                        |
+| `pinned`           | 用户显式 pin，不参与自动失效                                |
+
+Memory 列表按"用户确认 / Agent 推断 / 不确定"分组；每条支持 approve / edit / delete / pin。
+
+**任务条目** — 在 Task Overlay 任务详情上补：
+
+- 触发来源：chat 消息 id / channel 消息 / cron / 上游 chain / direct task
+- 依据：当时使用的 memory 条目 id 列表、参考 artifact id 列表
+- 决策日志：Agent 在哪几步做了选择（model output 摘要 + 工具调用参数）
+
+**字段来源差异**：
+
+- **任务条目**字段大多已在 `BackgroundTaskStore` / `WorkflowStore` / `trace_spans` 里有原始数据（trace_id、parent_span_id、dispatch_span_id、tool call、模型 raw output），P1c 主要是 projection 与 UI 层工作
+- **记忆条目**的 `source` / `created_by_agent` / `confidence` / `last_used_at` / `last_used_in` / `pinned` 在当前 memory schema 里不存在，需要对现有 memory 表做**最小字段扩展**（safe ALTER，参考 `schema_version` 既有迁移机制），不新增独立 store
+
+P1c 的边界是：不引入新的长期 store / authoritative source，但允许对现有 memory / task schema 做最小字段扩展以暴露 provenance。
+
+### 任务统一回放
+
+当前任务上下文分散在四处：ChainBubble（对话内联）、Task Overlay（任务详情）、BrowserPage（screencast）、TraceTimelineDrawer（trace 时间线）。重看一条任务需要在多个入口跳转。
+
+任务统一回放在 Task Overlay 任务详情页内整合五源：
+
+| 源                  | 提供                              |
+| ------------------ | ------------------------------- |
+| ChainBubble        | chain 9 状态、节点关系、step 状态         |
+| BackgroundTask     | task 执行进度、stdout / stderr       |
+| Trace spans        | tool call、token、耗时、错误           |
+| Browser screencast | 浏览器步骤截图、DOM 目标、URL              |
+| Artifact           | 产物预览与版本                         |
+
+回放视图给出 3 个核心问题的答案：
+
+1. **Ava 当时看到了什么** — 输入 prompt、依据 memory、上游 artifact、浏览器页面
+2. **Ava 做了什么** — 每一步 tool call、模型决策、子任务派发
+3. **Ava 为什么这么做** — 决策日志、引用的 memory、参考 artifact
+
+P1c 阶段不引入新的存储模型。后端补一个 `GET /api/tasks/{task_id}/replay` 聚合接口，把五源拼成一条时间线返回；前端在 Task Overlay 任务详情内做时间线 UI。
+
+### 桌面壳启动体验
+
+P1b 已经提供 macOS `.app` 壳（见 Checklist Electron shell P1b），双击启动 → 拉起 sidecar → 加载 Console 全链路已通。但当前 `.app` 仍依赖本机 git checkout、external `nanobot` checkout 与本地 venv —— **真·"拷到另一台机器双击就能用"依赖 Python sidecar 打包，属于 P2 范围，不在 P1c 承诺**。
+
+P1c 只补两件让现有 `.app` 用起来更接近"日常桌面应用"的事：
+
+**Finder 双击启动体验打磨**
+
+- macOS 下确保启动时不闪 terminal 窗口，stderr 不出现在用户视线
+- 首次启动检测到环境不完整时直接进首启动向导，不抛 stderr 让用户去看 Console.app
+- Dock icon、应用菜单、`Cmd+Q` 行为按 macOS 习惯走，不依赖 terminal 终止进程
+- 双击 `.app` → 启动 sidecar → 加载 Console → 退出时清理子进程，全链路无 terminal 介入
+
+**快捷键进入 web 模式**
+
+- Electron 注册全局快捷键（默认 `Cmd+Shift+D`），按下时用系统默认浏览器打开同一份 Console（`http://127.0.0.1:<core_port>/`）
+- **不依赖 LAN Access 开启** —— 本机 `127.0.0.1` 始终可用；LAN Access 控制的是是否绑 `0.0.0.0` 给其他设备
+- **不绕过认证** —— 浏览器走完整登录流程，token 不从 Electron renderer 复用
+- 用途：用 Chrome / Safari DevTools 调试网络 / WebSocket / 性能；与 Electron 窗口并行操作同一后端，验证 WS 推送的多端一致性
+- production build 与 dev build 都启用，不在生产隐藏
+
+这两件事都不引入新的产品概念，只是把 Electron 模块和 ava-core 已经具备的能力暴露给用户。
+
+## P2a / P2b / P2c — Multi-Agent Workflow Runner 详解
+
+P1b 的 `WorkflowStore` 只支持线性 chain（9 状态、`parent_task_ids` 一对一）。P2 把它扩展成完整的 Workflow Runner，承接 S2 / S3 跨 Agent 串行与并行场景，但**拆成三个可独立验收的子阶段**，避免一次性交付一个无法验证的大 runner：
+
+- **P2a**：durable workflow run + artifact contract + workspace 写入冲突契约
+- **P2b**：fan-out / fan-in、并发与 join 策略、子任务聚合显示
+- **P2c**：可保存 workflow definition、模板、导入导出、Workflow Detail UI
+
+P2 任何子阶段的 step kind 都**只支持** `agent_task / parallel / join`；`approval / branch / loop` 与嵌套 workflow / 可视化编排为 **P3 reserved**，不在 P2 引入。
+
+### P2a — Durable Workflow Run + 契约
+
+#### Workflow 模型（P2a 范围）
+
+```
+Workflow
+├─ id, name, version, owner
+├─ definition (DSL or graph JSON)
+├─ inputs schema / outputs schema
+├─ shared workspace ref
+└─ steps[]
+    ├─ id, name, kind (agent_task / parallel / join)
+    ├─ agent (claude_code / codex / nanobot / image_gen / ...)
+    ├─ inputs (artifact refs / literal values / upstream step outputs)
+    ├─ outputs (artifact contract)
+    ├─ retry policy (max_attempts / backoff / on_error)
+    └─ depends_on[]
+```
+
+Workflow 定义存 `agent_workflows` 表；每次执行实例化为 `workflow_runs`，run 持有当前 step 状态、artifact 引用、workspace lease。P2a 允许 workflow 通过 API / 内置模板触发，但还没有编辑 UI（编辑入口在 P2c）。
+
+#### Workspace 写入冲突契约（P2a 第一硬约束）
+
+fan-out 一旦上线，并发写同一个 repo 会立刻出事。这条契约必须在 P2a 立住，才能让 P2b 安全引入并行：
+
+- **Workspace lease**：每个 step 启动前显式 acquire workspace lease（粒度按 workspace path）。未持有 lease 不能写入。lease 在 step settle（success / fail / cancel）时释放，超时由 Runner GC
+- **Worktree 策略**：默认每个 agent step 在独立 git worktree 内运行，避免与 main worktree 的脏树污染。多个并发 step 拿到独立 worktree 路径
+- **Branch authority**：fan-out 子任务在独立分支（`workflow/<run_id>/<step_id>`）；join step 决定合并策略（fast-forward / squash / 选择其一 / 丢弃），合并策略由 step 定义声明
+- **Dirty tree 处理**：step 启动前若 workspace 有未提交变更，按 step 定义 `on_dirty: fail | stash | require_clean` 处理；默认 `fail`，强制让用户感知
+- **跨 step artifact 仍走显式传递**：worktree / branch 是隔离手段，artifact 是契约手段；两者不互相替代，不允许通过 worktree 文件路径偷传上下文
+
+#### step 间 artifact 传递
+
+- 每个 step 输出按 artifact contract 写入 `ArtifactStore`，run 持有 artifact id 引用
+- 下游 step 通过 `inputs.upstream_step_id.output_name` 显式拿到 artifact，不依赖隐式上下文
+- 序列化策略沿用 P1b：text 入 DB、file / image / log 存本地 artifact directory、workspace 存引用
+- 引用过期 artifact（已被 GC / workspace 已重置）必须立即报错；Runner 不做"找不到就跳过"的回退
+- Artifact contract 在 step 定义里声明类型与必要字段，运行时不匹配立即 fail，不静默喂垃圾数据下游
+
+#### 失败重试
+
+- **Step 级 retry policy**：`max_attempts` / `backoff (exponential / fixed)` / `retry_on (error_types)`；超过 max_attempts 进入 `failed`
+- **Workflow 级失败策略**：`fail_fast`（默认，首个 step 失败立刻取消未启动 step、保留运行中 step 直到 settle）/ `continue_on_error`（标记 step 失败但继续后续不依赖它的 step）
+- **手动 retry**：从任意 failed step 继续；Runner 复用上游成功 artifact，不重跑已成功 step
+- **修复重试**：重试时 inputs 可被用户修改（修复 prompt、补 artifact），形成新的 attempt；attempt 历史保留可对比
+- **诊断信息**：失败 step 的 last error / stack / tool call args / 模型 raw output 作为 step 详情字段（编辑 UI 在 P2c 暴露）
+
+#### 数据库扩展（P2a 范围）
+
+- `agent_workflows`：workflow 定义（id / name / version / definition_json / owner / created_at）
+- `workflow_runs`：执行实例（id / workflow_id / version / status / started_at / ended_at / trigger）
+- `workflow_steps`：step 状态（id / run_id / step_name / status / attempt / started_at / ended_at / artifact_outputs / error）
+- `workflow_artifacts`：run 内 step 输出引用，复用 P1b `artifacts` 表 + run/step 索引
+- `workspace_leases`：workspace lease 持有记录（path / holder_run_id / holder_step_id / acquired_at / expires_at / released_at）
+
+### P2b — Fan-out / Fan-in
+
+P2a 已经能跑单 step 串行 workflow。P2b 加并行：
+
+- **fan-out**：一个 step 输出 N 个 artifact，下游 step 声明 `for_each: artifact_collection`，Runner 为每个 artifact 派发独立子任务；子任务获得独立 AgentInstance（或排队复用 instance），取决于 `AgentCapabilities.max_concurrent_tasks`
+- **fan-in**：N 个并行子任务全部 settle 后触发 join step；join 策略由 step 定义声明：`all_success` / `at_least_n` / `best_effort` / `first_success`
+- 并发上限 = AgentInstance 数量 × `max_concurrent_tasks`；超出排队
+- 每个 fan-out 子任务在独立 worktree / branch 内运行（依赖 P2a workspace 契约）
+- Runner 维护 `barrier` 状态：未达到 fan-in 条件的 join step 阻塞，直到上游全部 settle（success / fail / cancel）
+- fan-out 子任务在 Chat 的 ChainBubble 内聚合显示一个折叠组，点击展开看每个子任务，不让对话流被批量任务淹没
+
+### P2c — 可保存 Workflow + 编辑入口
+
+P2a / P2b 已经能跑 workflow，但定义还只能通过 API / 模板进入。P2c 把定义面做完整：
+
+- **持久化与版本**：定义文件存 `agent_workflows` 表；同一 workflow 多版本通过 `version` 号管理；run 始终指向具体 version，已开始的 run 不被新版本影响
+- **编辑入口**：Settings → Tools → Workflows（新增）；P2c 以表单 + JSON 编辑为主，可视化编排留给 P3
+- **触发入口**：Skill / Chat slash / cron / API；触发参数遵循 workflow inputs schema
+- **内置模板**：常用 workflow（codex_review → nanobot_apply、image_gen_batch → telegram_publish）作为复制起点，用户基于模板改写
+- **导入/导出**：workflow 定义可作为 JSON 文件导出 / 导入，便于团队内复用与 git 版本管理
+- **Workflow Detail UI**：Timeline / Steps / Artifacts / Coordinator Report / Logs（已在 P1b 信息架构中预留路由）
+- **Chat 集成**：Workflow 触发的 ChainBubble 升级为多分支显示，fan-out 子任务在 bubble 内合并展示，点击进入 Workflow Detail
+- **Task Overlay ↔ Workflow Detail 互跳**：单 step 详情仍走 Task Overlay 的任务统一回放视图（P1c 已交付）
+
+### P3 reserved
+
+明确以下能力**不属于 P2 任何子阶段**，在 P3 Multi-Agent Coordination Plane 引入：
+
+- **`approval` step kind**：人工 approve / reject + 走分支
+- **`branch` step kind**：基于 step output 的条件分支
+- **`loop` step kind**：循环执行直到条件满足
+- **嵌套 workflow**：workflow 调用另一个 workflow
+- **可视化编排**：拖拽节点图编辑器
+
+### 与 P1b 的边界
+
+- P1b 的 `WorkflowStore`（线性 chain、9 状态、cancel / retry）不被废弃，作为 P2 Workflow Runner 在"单 step / 无 fan-out"场景下的 fast path 保留
+- 新 `workflow_runs` 与旧 chain 并存：旧 chain 继续承接 Skill 触发的简单任务链；新 workflow 处理多 step / 并行场景
+- P2a 期间，Skill 触发仍走旧 chain；P2c 期间可考虑把部分 Skill 迁到 workflow definition，但不强制
 
 ## 架构思路
 
@@ -105,7 +316,7 @@ React Renderer (复用当前 console-ui)
 ├─ Chat
 ├─ Settings (Agents Config / Statistics / Tools / Users / System)
 ├─ Task Overlay (P1b)
-└─ Workflow Detail (P2，当前未路由)
+└─ Workflow Detail (P2c，当前未路由)
 
 ava-core Python Sidecar (FastAPI + WebSocket)
 ├─ AgentRegistry
@@ -164,7 +375,7 @@ P1 采用 Electron，以最大化复用现有 Vite + React 前端并降低迁移
 - `ArtifactStore`（P1b light）：任务产物引用，先覆盖 text / file / diff / image / log / json
 - `ChatStore`：用户与 Agent 的对话
 
-P1b 的 WorkflowStore 只服务“看得见、管得住”的体验闭环：ChainBubble、TaskCard、任务 overlay、HUD Artifacts。P2 再扩展为完整 Workflow Runner，不把条件、循环、嵌套、复杂 fan-in 策略提前塞进 P1b。
+P1b 的 WorkflowStore 只服务"看得见、管得住"的体验闭环：ChainBubble、TaskCard、任务 overlay、HUD Artifacts。P2a/P2b/P2c 才扩展为完整 Workflow Runner；条件 / 循环 / 嵌套 / approval / 可视化编排是 P3 reserved，不在 P2 任何子阶段引入。
 
 逻辑分离，物理上可共用存储。不让 BackgroundTaskStore 继续膨胀成万能状态容器。
 
@@ -173,12 +384,17 @@ P1b 的 WorkflowStore 只服务“看得见、管得住”的体验闭环：Chai
 - 默认每个 AgentInstance 同时只执行一个 task。并发能力通过 `AgentCapabilities.max_concurrent_tasks` 声明
 - 需要并发就启动多个 AgentInstance，而不是在一个 instance 内部多线程
 - Workflow 拥有共享 workspace；Agent 可拥有私有 scratch workspace；跨 Agent 传递必须通过 Artifact 显式表达
+- P2a 引入 workspace 写入冲突契约（lease / worktree / branch authority / dirty tree 处理），fan-out 在 P2b 才被允许引入，详见 "P2a — Durable Workflow Run + 契约" 一节
 
 ### Agent 自动检测与启动
 
-AVA 启动时自动检测本地已安装的 Agent（Claude Code CLI、Codex CLI、Nanobot），已安装的自动带起，未安装的在 Settings → Agents Config 显示；未安装的 Agent 在对应卡片上显示下载按钮跳转到官网。
+AVA 启动时**自动检测**全部本地 Agent，但**只自动启动 long-running 主体**（Nanobot / sidecar），不对 CLI 类 Agent 在启动时拉起进程。
 
-检测方式：PATH 查找（`claude` / `codex`）、版本命令验证、Nanobot 使用现有 discovery 机制。检测结果持久化到 `AgentRuntimeStore`，启动时刷新。
+- **自动启动**：Nanobot 是默认主回复者且自身是 long-running server，启动 ava-core 时一并拉起；未来形态相同的 sidecar agent 同理
+- **按任务触发**：Claude Code CLI、Codex CLI、Image Gen 是 per-invocation 形态，启动 = 调用模型 API = 触达外部网络与消费 quota，仅在 direct task / workflow step 触发时启动子进程
+- **检测但不启动**：未安装的 Agent 在 Settings → Agents Config 显示下载按钮跳到官网；已安装但未触发的 Agent 显示"可用，未运行"，不消耗任何外部资源
+
+检测方式：PATH 查找（`claude` / `codex`）、版本命令验证、Nanobot 使用现有 discovery 机制。检测结果持久化到 `agent_registry` projection 表，启动时刷新。`AgentProcessManager` 的自动 start 行为按 Agent kind 区分；显式 `start/stop/restart/healthcheck` 入口对所有 Agent kind 保留。
 
 ### 聊天界面
 
@@ -216,7 +432,7 @@ Task Overlay (P1b)：
 ├─ 定时任务
 └─ 产物视图
 
-Workflow Detail (P2)：
+Workflow Detail (P2c)：
 ├─ Timeline
 ├─ Steps
 ├─ Artifacts
@@ -232,7 +448,7 @@ Workflow Detail (P2)：
 - **session_messages 扩展**：当前多 Agent 会话通过 participants、default responder 与消息 metadata 支撑；`target_agent` / `source_agent` / `mention_agents` / `context_message_ids` 拆成独立字段仍是后续 schema hardening
 - **bg_tasks 扩展 / workflow_chains 表（P1b light）**：支持 `chain_id`、`parent_task_ids`、9 状态、trace 归属与线性 chain 推进
 - **artifacts 表（P1b light）**：产物记录（id / type / uri / metadata / chain_id / task_id），供 Chat 任务 overlay 与 HUD Artifacts 读取
-- **agent_workflows 表**（P2）：存储用户自定义的 Agent 流程定义
+- **agent_workflows / workflow_runs / workflow_steps / workflow_artifacts / workspace_leases 表**（P2a）：workflow 定义、执行实例、step 状态、artifact 引用与 workspace lease；编辑入口与版本化在 P2c 引入
 
 迁移策略：使用现有的 `schema_version` 机制做增量迁移，不破坏现有数据。
 
