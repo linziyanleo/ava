@@ -1,0 +1,72 @@
+Evidence log: docs/desktop-acceptance-port-
+Date: 2026-05-13T02:33:18Z
+Command: scripts/verify-desktop-acceptance.sh --skip-build --with-port-conflict --evidence-log docs/desktop-acceptance-port-
+App path: /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+Skip build: 1
+With port conflict: 1
+Conflict port: 6688
+Handoff readiness preflight: passed before evidence logging
+
+==> codesign --verify --deep --strict --verbose=1 /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+/Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app: valid on disk
+/Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app: satisfies its Designated Requirement
+
+==> scripts/verify-desktop-setup-surface.sh /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+Desktop setup surface is wired and packaged in /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+
+==> node scripts/verify-desktop-setup-dom.mjs
+Desktop setup DOM behavior verified
+
+==> starting non-Ava server on 127.0.0.1:6688
+127.0.0.1:6688 is occupied by temporary non-Ava server
+
+==> env AVA_DESKTOP_VERIFY_REQUIRE_FRESH_CORE=1 AVA_DESKTOP_VERIFY_FORBID_ENDPOINT_PORT=6688 scripts/verify-desktop-launch.sh /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+Main executable: /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app/Contents/MacOS/Ava
+Main executable type: /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app/Contents/MacOS/Ava: Mach-O 64-bit executable arm64
+/Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app: valid on disk
+/Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app: satisfies its Designated Requirement
+Opening /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+Ava Console is healthy at http://127.0.0.1:52508
+
+Automated desktop acceptance checks passed.
+Full desktop acceptance is not complete until the manual visual fields below are filled.
+
+Manual visual checks still required in this normal macOS desktop session:
+- Finder double-click Ava.app: no Terminal window is required.
+- Happy path: Console loads after double-click.
+- Setup path: local setup surface appears before Console when nanobot or .venv is missing.
+- Cancel path: Cancel stops an active uv sync, and Retry starts a new attempt.
+- Logs path: Help -> Open Logs opens ~/Library/Logs/Ava.
+- Before running the port-conflict handoff, quit the Ava.app instance opened by the previous handoff and make sure 127.0.0.1:6688 is free; run scripts/verify-desktop-handoff-ready.sh --port-conflict first.
+
+Acceptance record fields:
+- Date: 2026-05-13T02:33:30Z
+- Command: scripts/verify-desktop-acceptance.sh --skip-build --with-port-conflict --evidence-log docs/desktop-acceptance-port-
+- App path: /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+- Evidence log: docs/desktop-acceptance-port-
+- Conflict port: 6688
+- Console happy path: automated LaunchServices verifier passed
+- Dynamic-port path: automated --with-port-conflict verifier passed; fresh core required and endpoint port != 6688
+- Finder double-click, no Terminal:
+- Setup surface visible before Console:
+- Cancel stops uv sync, Retry starts again:
+- Help -> Open Logs opens ~/Library/Logs/Ava:
+- Notes / log excerpts:
+
+Paste-ready result record:
+```text
+Date: 2026-05-13T02:33:30Z
+Command: scripts/verify-desktop-acceptance.sh --skip-build --with-port-conflict --evidence-log docs/desktop-acceptance-port-
+App path: /Users/fanghu/Documents/Test/ava/electron/dist/Ava-darwin-arm64/Ava.app
+Evidence log: docs/desktop-acceptance-port-
+Conflict port: 6688
+Console happy path: automated LaunchServices verifier passed
+Dynamic-port path: automated --with-port-conflict verifier passed; fresh core required and endpoint port != 6688
+Finder double-click, no Terminal:
+Setup surface visible before Console:
+Cancel stops uv sync, Retry starts again:
+Help -> Open Logs opens ~/Library/Logs/Ava:
+Notes / log excerpts:
+```
+
+Record these fields in docs/desktop-launch-acceptance.md and the active Task Spec before closing the goal.
