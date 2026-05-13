@@ -659,13 +659,19 @@ def test_ava21_electron_shell_checklist_is_covered() -> None:
     readme = read("electron/README.md") + read("README.md")
     desktop_tests = read("tests/desktop/test_electron_shell_contract.py")
 
-    assert_contains_all(root_package, ["\"electron:build\": \"pnpm --dir electron build\"", "\"electron:dry-run\""])
+    assert_contains_all(
+        root_package,
+        [
+            "\"electron:build\": \"pnpm --dir electron install --frozen-lockfile && pnpm --dir electron build\"",
+            "\"electron:dry-run\": \"pnpm --dir electron install --frozen-lockfile && pnpm --dir electron build -- --dry-run\"",
+        ],
+    )
     assert_contains_all(electron_package, ["\"main\": \"main.mjs\"", "\"build\": \"node scripts/build.mjs\"", "\"electron\": \"latest\""])
     assert_contains_all(
         main,
         [
             "spawn('/bin/bash', [wrapper]",
-            "waitForAvaCore(config.healthEndpoint)",
+            "waitForAvaCoreOrExit(child, config)",
             "/api/gateway/health",
             "mainWindow.loadURL(config.coreEndpoint)",
             "child.kill('SIGTERM')",
@@ -688,7 +694,16 @@ def test_ava21_electron_shell_checklist_is_covered() -> None:
     )
     assert_contains_all(wrapper, ["scripts/start-ava.sh gateway", "trap shutdown INT TERM", "wait \"${core_pid}\""])
     assert_contains_all(build_script, ["--dry-run", "AVA Electron dry-run passed", "electron-packager", "--platform=darwin"])
-    assert_contains_all(readme, ["pnpm electron:build", "pnpm electron:dry-run", "open electron/dist/Ava-darwin-arm64/Ava.app"])
+    assert_contains_all(
+        readme,
+        [
+            "pnpm electron:build",
+            "pnpm electron:dry-run",
+            "docs/desktop-launch-acceptance.md",
+            "scripts/verify-desktop-closeout-records.sh",
+        ],
+    )
+    assert "open electron/dist/Ava-darwin-arm64/Ava.app" not in readme
     assert_contains_all(
         desktop_tests,
         [
