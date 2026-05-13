@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "electron:build": "pnpm --dir electron build",
-    "electron:dry-run": "pnpm --dir electron build -- --dry-run"
+    "electron:build": "pnpm --dir electron install --frozen-lockfile && pnpm --dir electron build",
+    "electron:dry-run": "pnpm --dir electron install --frozen-lockfile && pnpm --dir electron build -- --dry-run"
   }
 }

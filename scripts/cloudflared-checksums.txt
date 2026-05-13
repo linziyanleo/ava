@@ -1,0 +1,18 @@
+# cloudflared release pinned for ava packaging
+# When bumping cloudflared:
+#   1. Update VERSION below to the new release tag.
+#   2. Replace every SHA256 line. Sources of truth (in order):
+#        - the release page "asset: <sha>" notes
+#          (https://github.com/cloudflare/cloudflared/releases/tag/<VERSION>)
+#        - the checksum.txt asset attached to that release, if present.
+#   3. Run: bash scripts/fetch-cloudflared.sh
+VERSION=2026.3.0
+# Note: For 2026.3.0 the darwin asset hashes published on the release page
+# do not match the actual files served (upstream re-uploaded the binaries
+# without refreshing the release notes). The hashes below were computed
+# directly from the downloaded artifacts on 2026-05-12.
+2aae4f69b0fc1c671b8353b4f594cbd902cd1e360c8eed2b8cad4602cb1546fb  cloudflared-darwin-arm64.tgz
+0f30140c4a5e213d22f951ef4c964cac5fb6a5f061ba6eba5ea932999f7c0394  cloudflared-darwin-amd64.tgz
+0755ba4cbab59980e6148367fcf53a8f3ec85a97deefd63c2420cf7850769bee  cloudflared-linux-arm64
+4a9e50e6d6d798e90fcd01933151a90bf7edd99a0a55c28ad18f2e16263a5c30  cloudflared-linux-amd64
+59b12880b24af581cf5b1013db601c7d843b9b097e9c78aa5957c7f39f741885  cloudflared-windows-amd64.exe

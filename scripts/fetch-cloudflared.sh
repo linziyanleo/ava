@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${CLOUDFLARED_VERSION:-2026.3.0}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHECKSUMS_FILE="$ROOT_DIR/scripts/cloudflared-checksums.txt"
+
+if [ ! -f "$CHECKSUMS_FILE" ]; then
+  echo "missing checksums file: $CHECKSUMS_FILE" >&2
+  exit 1
+fi
+
+PINNED_VERSION="$(awk -F= '/^VERSION=/{print $2; exit}' "$CHECKSUMS_FILE")"
+if [ -z "$PINNED_VERSION" ]; then
+  echo "VERSION not declared in $CHECKSUMS_FILE" >&2
+  exit 1
+fi
+
+VERSION="${CLOUDFLARED_VERSION:-$PINNED_VERSION}"
+if [ "$VERSION" != "$PINNED_VERSION" ]; then
+  echo "CLOUDFLARED_VERSION=$VERSION does not match pinned $PINNED_VERSION." >&2
+  echo "Update $CHECKSUMS_FILE before bumping cloudflared." >&2
+  exit 1
+fi
+
 VENDOR_DIR="$ROOT_DIR/vendor/cloudflared"
 TMP_DIR="${TMPDIR:-/tmp}/ava-cloudflared-${VERSION}"
 OFFLINE_PATH="${CLOUDFLARED_OFFLINE_PATH:-}"
@@ -25,20 +44,17 @@ asset_for_platform() {
 
 checksum_for_asset() {
   local asset="$1"
-  python3 - "$asset" "$VERSION" <<'PY'
-import re
-import sys
-import urllib.request
+  local sha
+  sha="$(awk -v target="$asset" '$2==target{print $1; exit}' "$CHECKSUMS_FILE")"
+  if [ -z "$sha" ]; then
+    echo "no pinned SHA256 for $asset in $CHECKSUMS_FILE" >&2
+    return 1
+  fi
+  printf '%s' "$sha"
+}
 
-asset = sys.argv[1]
-version = sys.argv[2]
-url = f"https://github.com/cloudflare/cloudflared/releases/tag/{version}"
-html = urllib.request.urlopen(url, timeout=30).read().decode("utf-8", errors="replace")
-match = re.search(rf"{re.escape(asset)}:\s*([0-9a-f]{{64}})", html)
-if not match:
-    raise SystemExit(f"missing SHA256 checksum for {asset} in {url}")
-print(match.group(1))
-PY
+sha256_of() {
+  shasum -a 256 "$1" | awk '{print $1}'
 }
 
 install_asset() {
@@ -56,16 +72,21 @@ install_asset() {
       exit 1
     fi
     archive="$OFFLINE_PATH"
-  elif [ ! -f "$archive" ]; then
-    curl -fsSL "$url" -o "$archive"
-  fi
-  if [ -z "$OFFLINE_PATH" ]; then
+  else
     local expected
     expected="$(checksum_for_asset "$asset")"
+    if [ -f "$archive" ] && [ "$(sha256_of "$archive")" != "$expected" ]; then
+      echo "stale cache for $asset, redownloading" >&2
+      rm -f "$archive"
+    fi
+    if [ ! -f "$archive" ]; then
+      curl -fsSL "$url" -o "$archive"
+    fi
     local actual
-    actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+    actual="$(sha256_of "$archive")"
     if [ "$actual" != "$expected" ]; then
       echo "checksum mismatch for $asset: expected $expected, got $actual" >&2
+      echo "Verify $CHECKSUMS_FILE matches the upstream release ${VERSION}." >&2
       exit 1
     fi
   fi
