@@ -16,7 +16,7 @@ async def query_logs(
     size: int = Query(50, ge=1, le=200),
     user: str | None = Query(None),
     action: str | None = Query(None),
-    current_user: UserInfo = Depends(auth.require_role("admin")),
+    current_user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
     return get_services().audit.query(page=page, size=size, user=user, action=action)

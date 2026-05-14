@@ -62,7 +62,7 @@ async def get_agent_version(
 @router.post("/agents/{agent_name}/process/start")
 async def start_agent_process(
     agent_name: str,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     try:
         return _registry_service_for_user(user).start_agent(agent_name)
@@ -76,7 +76,7 @@ async def start_agent_process(
 async def stop_agent_process(
     agent_name: str,
     force: bool = False,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     try:
         return _registry_service_for_user(user).stop_agent(agent_name, force=force)
@@ -90,7 +90,7 @@ async def stop_agent_process(
 async def restart_agent_process(
     agent_name: str,
     force: bool = False,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     try:
         return _registry_service_for_user(user).restart_agent(agent_name, force=force)

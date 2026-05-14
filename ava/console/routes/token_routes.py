@@ -110,7 +110,7 @@ async def get_token_timeline(
 
 @router.post("/tokens/reset")
 async def reset_token_stats(
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     """Reset all token stats (admin only)."""
     _get_collector(user).reset()

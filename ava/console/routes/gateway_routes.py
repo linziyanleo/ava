@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 @router.post("/console/rebuild")
 async def console_rebuild(
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     """触发 console-ui 前端重建（零中断，不影响 gateway 进程）。"""
     from ava.console.app import get_services
@@ -53,7 +53,7 @@ async def gateway_health():
 async def gateway_restart(
     body: GatewayRestartRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 

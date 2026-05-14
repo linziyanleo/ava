@@ -359,7 +359,6 @@ def create_console_app(
         lan_access_routes,
         chat_routes,
         media_routes,
-        user_routes,
         audit_routes,
         token_routes,
         trace_routes,
@@ -379,7 +378,6 @@ def create_console_app(
     app.include_router(chat_routes.router)
     app.include_router(chat_routes.messages_router)
     app.include_router(media_routes.router)
-    app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(token_routes.router)
     app.include_router(trace_routes.router)
@@ -566,7 +564,6 @@ def create_console_app_standalone(
         gateway_routes,
         lan_access_routes,
         media_routes,
-        user_routes,
         audit_routes,
         token_routes,
         trace_routes,
@@ -581,7 +578,6 @@ def create_console_app_standalone(
     app.include_router(gateway_routes.router)
     app.include_router(lan_access_routes.router)
     app.include_router(media_routes.router)
-    app.include_router(user_routes.router)
     app.include_router(audit_routes.router)
     app.include_router(token_routes.router)
     app.include_router(trace_routes.router)

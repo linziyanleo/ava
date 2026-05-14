@@ -14,7 +14,6 @@ from ava.console.routes import (
     media_routes,
     skills_routes,
     token_routes,
-    user_routes,
     workflow_routes,
 )
 
@@ -32,6 +31,5 @@ __all__ = [
     "media_routes",
     "skills_routes",
     "token_routes",
-    "user_routes",
     "workflow_routes",
 ]

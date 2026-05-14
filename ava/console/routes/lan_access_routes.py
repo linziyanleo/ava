@@ -74,7 +74,7 @@ async def lan_access_discovery(
 async def update_lan_access_config(
     body: LanAccessUpdateRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -104,7 +104,7 @@ async def update_lan_access_config(
 @router.post("/pin")
 async def create_pairing_pin(
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -206,7 +206,7 @@ async def pair_device(body: LanPairRequest, request: Request, response: Response
 async def revoke_device(
     device_id: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -230,7 +230,7 @@ async def update_device_capabilities(
     device_id: str,
     body: DeviceCapabilitiesRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -256,7 +256,7 @@ async def update_device_capabilities(
 async def renew_device(
     device_id: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -280,7 +280,7 @@ async def renew_device(
 async def tunnel_action(
     action: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -307,7 +307,7 @@ async def tunnel_action(
 async def https_action(
     action: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 
@@ -333,7 +333,7 @@ async def https_action(
 
 
 @router.get("/cert/ca.crt")
-async def download_ca_certificate(user: UserInfo = Depends(auth.require_role("admin"))):
+async def download_ca_certificate(user: UserInfo = Depends(auth.require_role("owner"))):
     from ava.console.app import get_services
 
     path = get_services().lan_https.ca_certificate_path()

@@ -212,7 +212,7 @@ async def list_sessions(user: UserInfo = Depends(auth.require_console_role_or_de
 @router.post("/sessions")
 async def create_session(
     body: ChatSessionCreateRequest,
-    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("read",))),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("owner",), device_capabilities=("read",))),
 ):
     return _get_chat_service(user).create_session(
         user.username,
@@ -262,7 +262,7 @@ async def stop_session(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("read",))),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("owner",), device_capabilities=("read",))),
 ):
     if not _get_chat_service(user).delete_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
@@ -354,7 +354,7 @@ async def get_messages(
 async def upload_chat_files(
     request: Request,
     files: list[UploadFile] = File(...),
-    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "viewer", "mock_tester"), device_capabilities=("operate",))),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("owner",), device_capabilities=("operate",))),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
@@ -401,14 +401,6 @@ async def list_conversations(
 async def observe_ws(websocket: WebSocket, session_key: str):
     """只读 WebSocket，订阅 MessageBus observe listener 推送非 Console 会话的实时事件。"""
     user = await auth.get_ws_user(websocket)
-    if user.role == "mock_tester":
-        await websocket.accept()
-        try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
-        return
     await websocket.accept()
 
     svc_chat = _get_chat_service(user)
@@ -442,14 +434,6 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     user = await auth.get_ws_user(websocket)
     if getattr(websocket.state, "device_id", None) and "operate" not in set(getattr(websocket.state, "device_capabilities", [])):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    if user.role == "mock_tester":
-        await websocket.accept()
-        try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
         return
     await websocket.accept()
 

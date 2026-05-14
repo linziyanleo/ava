@@ -25,7 +25,7 @@ async def read_config(
     from ava.console.app import get_services_for_user
 
     try:
-        return get_services_for_user(user).config.read_config(name, mask=(user.role != "admin"))
+        return get_services_for_user(user).config.read_config(name, mask=False)
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -35,7 +35,7 @@ async def update_config(
     name: str,
     body: ConfigUpdateRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services_for_user
 
@@ -57,7 +57,7 @@ async def reveal_secret(
     name: str,
     body: RevealRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services
 

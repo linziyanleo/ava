@@ -68,7 +68,7 @@ async def get_file(
 async def delete_record(
     record_id: str,
     request: Request,
-    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("admin", "editor", "mock_tester"), device_capabilities=("operate",))),
+    user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=("owner",), device_capabilities=("operate",))),
 ):
     """Delete a media record and its associated image files."""
     from ava.console.app import get_services_for_user

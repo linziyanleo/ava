@@ -28,7 +28,7 @@ def _get_page_agent_tool():
 
 
 @router.get("/sessions")
-async def list_sessions(user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer"))):
+async def list_sessions(user: UserInfo = Depends(auth.require_role("owner"))):
     """返回当前活跃的 page-agent session 列表。"""
     tool = _get_page_agent_tool()
     if not tool:
@@ -37,7 +37,7 @@ async def list_sessions(user: UserInfo = Depends(auth.require_role("admin", "edi
 
 
 @router.post("/restart-runner")
-async def restart_runner(user: UserInfo = Depends(auth.require_role("admin", "editor", "viewer"))):
+async def restart_runner(user: UserInfo = Depends(auth.require_role("owner"))):
     """停止 page-agent runner 进程，下次调用时自动重启。"""
     tool = _get_page_agent_tool()
     if not tool:
@@ -50,9 +50,6 @@ async def restart_runner(user: UserInfo = Depends(auth.require_role("admin", "ed
 async def page_agent_ws(websocket: WebSocket, session_id: str):
     """WebSocket 端点：实时转发 screencast 帧和 activity 事件。"""
     user = await auth.get_ws_user(websocket)
-    if user.role == "mock_tester":
-        await websocket.close(code=1008)
-        return
     await websocket.accept()
 
     tool = _get_page_agent_tool()

@@ -82,7 +82,7 @@ async def mcp_test(
 @router.post("/mcp/reconnect")
 async def mcp_reconnect(
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     """Reconnect MCP servers if the runtime supports it."""
     from ava.console.app import get_services
@@ -233,7 +233,7 @@ async def install_from_upload(
 async def delete_skill(
     body: DeleteSkillRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     """Delete an ava/skills/ skill."""
     from ava.console.app import get_services

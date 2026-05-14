@@ -44,7 +44,7 @@ async def read_file(
 async def write_file(
     body: FileWriteRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services_for_user
 
@@ -65,7 +65,7 @@ async def write_file(
 async def delete_file(
     body: FileDeleteRequest,
     request: Request,
-    user: UserInfo = Depends(auth.require_role("admin", "editor", "mock_tester")),
+    user: UserInfo = Depends(auth.require_role("owner")),
 ):
     from ava.console.app import get_services_for_user
 
