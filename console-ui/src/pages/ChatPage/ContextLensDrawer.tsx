@@ -198,10 +198,10 @@ function NowSendingTab({ preview, loading }: { preview: ContextPreview | null; l
 
   const { totals, system_sections, runtime_context, messages, tools } = preview
   const sections = [
-    { key: 'system', label: 'System', tokens: totals.system_tokens, color: 'text-sky-400', items: system_sections },
-    { key: 'runtime', label: 'Runtime', tokens: totals.runtime_tokens, color: 'text-emerald-400' },
-    { key: 'history', label: 'History', tokens: totals.history_tokens, color: 'text-amber-400', count: messages.length },
-    { key: 'tools', label: 'Tools', tokens: totals.tool_tokens, color: 'text-fuchsia-400', count: tools.count },
+    { key: 'system', label: 'System', tokens: totals.system_tokens, color: 'text-[var(--ava-running)]', items: system_sections },
+    { key: 'runtime', label: 'Runtime', tokens: totals.runtime_tokens, color: 'text-[var(--ava-success)]' },
+    { key: 'history', label: 'History', tokens: totals.history_tokens, color: 'text-[var(--ava-warning)]', count: messages.length },
+    { key: 'tools', label: 'Tools', tokens: totals.tool_tokens, color: 'text-[var(--ava-queued)]', count: tools.count },
   ]
 
   return (
@@ -215,16 +215,16 @@ function NowSendingTab({ preview, loading }: { preview: ContextPreview | null; l
           </span>
         </div>
         <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-          <BarSegment pct={(totals.system_tokens / totals.ctx_budget) * 100} color="bg-sky-500" />
-          <BarSegment pct={(totals.runtime_tokens / totals.ctx_budget) * 100} color="bg-emerald-500" />
-          <BarSegment pct={(totals.history_tokens / totals.ctx_budget) * 100} color="bg-amber-500" />
-          <BarSegment pct={(totals.tool_tokens / totals.ctx_budget) * 100} color="bg-fuchsia-500" />
+          <BarSegment pct={(totals.system_tokens / totals.ctx_budget) * 100} color="bg-[#8FB6FF]" />
+          <BarSegment pct={(totals.runtime_tokens / totals.ctx_budget) * 100} color="bg-[#7DD3B0]" />
+          <BarSegment pct={(totals.history_tokens / totals.ctx_budget) * 100} color="bg-[#E3B15F]" />
+          <BarSegment pct={(totals.tool_tokens / totals.ctx_budget) * 100} color="bg-[#D7B5FF]" />
         </div>
         <div className="mt-2 flex flex-wrap gap-3 text-[10px]">
-          <Legend color="bg-sky-500" label="System" />
-          <Legend color="bg-emerald-500" label="Runtime" />
-          <Legend color="bg-amber-500" label="History" />
-          <Legend color="bg-fuchsia-500" label="Tools" />
+          <Legend color="bg-[#8FB6FF]" label="System" />
+          <Legend color="bg-[#7DD3B0]" label="Runtime" />
+          <Legend color="bg-[#E3B15F]" label="History" />
+          <Legend color="bg-[#D7B5FF]" label="Tools" />
         </div>
       </div>
 

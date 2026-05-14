@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { ExternalLink, GitBranch } from 'lucide-react'
 import { List, type RowComponentProps } from 'react-window'
 import { api } from '../../api/client'
+import { StatusBadge } from '../../components/ui/StatusBadge'
+import { statusToneClasses } from '../../lib/statusSemantics'
 import { cn } from '../../lib/utils'
 import { useTaskFloater } from '../../stores/taskFloater'
 import type { DirectTaskMessage, DirectTaskStatus } from './types'
@@ -49,8 +51,9 @@ export function ChainBubble({
   const [actionError, setActionError] = useState('')
   const orderedTasks = useMemo(() => orderTasks(tasks), [tasks])
   const status = chainStatus(orderedTasks)
+  const statusConfig = TASK_STATUS_CONFIG[visibleTaskStatus(status)]
+  const statusTone = statusToneClasses(statusConfig.kind)
   const failed = status === 'failed'
-  const succeeded = status === 'succeeded'
   const cancellable = orderedTasks.some((task) => ACTIVE_TASK_STATUSES.has(task.status))
   const retryable = orderedTasks.some((task) => RETRYABLE_TASK_STATUSES.has(task.status)) || failed
   const traceId = orderedTasks.find((task) => task.trace_id)?.trace_id || ''
@@ -105,7 +108,7 @@ export function ChainBubble({
                     type="button"
                     onClick={handleCancelChain}
                     disabled={busyAction !== ''}
-                    className="text-[10px] text-red-300 hover:text-red-200 disabled:opacity-50"
+                    className="text-[10px] text-[var(--ava-danger)] hover:opacity-80 disabled:opacity-50"
                   >
                     Cancel Chain
                   </button>
@@ -150,11 +153,7 @@ export function ChainBubble({
       data-match-kind={skillTask ? "matched_by: 'natural_language'" : undefined}
       className={cn(
         'max-w-full overflow-hidden rounded-lg border bg-[var(--bg-secondary)] text-xs',
-        failed
-          ? 'border-red-500/40'
-          : succeeded
-            ? 'border-emerald-500/30'
-            : 'border-[var(--border)]',
+        statusTone.border,
       )}
     >
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--bg-tertiary,var(--bg-secondary))] px-3 py-2">
@@ -164,6 +163,7 @@ export function ChainBubble({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="font-medium text-[var(--text-primary)]">Task Chain</span>
+            <StatusBadge kind={statusConfig.kind} label={statusConfig.label} />
             <span className="rounded bg-[var(--bg-primary)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
               {chainId.slice(0, 12)}
             </span>
@@ -186,7 +186,7 @@ export function ChainBubble({
             type="button"
             onClick={handleCancelChain}
             disabled={busyAction !== ''}
-            className="inline-flex items-center gap-1 rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/15 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded border border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] px-1.5 py-0.5 text-[10px] text-[var(--ava-danger)] hover:opacity-80 disabled:opacity-50"
           >
             Cancel Chain
           </button>
@@ -203,7 +203,7 @@ export function ChainBubble({
         )}
       </div>
       {actionError && (
-        <div className="border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-300">
+        <div className="border-b border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] px-3 py-1.5 text-[10px] text-[var(--ava-danger)]">
           {actionError}
         </div>
       )}

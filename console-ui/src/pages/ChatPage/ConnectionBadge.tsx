@@ -1,29 +1,30 @@
 import { cn } from '../../lib/utils'
+import { StatusBadge, type StatusKind } from '../../components/ui/StatusBadge'
 import type { ActiveChatTransport, ChatStreamStatus } from './types'
 
-const STATUS_META: Record<ChatStreamStatus, { color: string; label: string }> = {
+const STATUS_META: Record<ChatStreamStatus, { kind: StatusKind; label: string }> = {
   idle: {
-    color: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
+    kind: 'idle',
     label: '空闲',
   },
   connecting: {
-    color: 'bg-amber-500/10 text-amber-400',
+    kind: 'retrying',
     label: '连接中',
   },
   open: {
-    color: 'bg-emerald-500/10 text-emerald-400',
+    kind: 'available',
     label: '已连接',
   },
   reconnecting: {
-    color: 'bg-amber-500/10 text-amber-400',
+    kind: 'retrying',
     label: '重连中',
   },
   closed: {
-    color: 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
+    kind: 'disconnected',
     label: '已关闭',
   },
   error: {
-    color: 'bg-rose-500/10 text-rose-400',
+    kind: 'failed',
     label: '异常',
   },
 }
@@ -50,26 +51,17 @@ export function ConnectionBadge({ transport, status }: ConnectionBadgeProps) {
   if (transport === 'none') return null
 
   const meta = STATUS_META[status]
-  const isPulsing = status === 'connecting' || status === 'reconnecting' || status === 'error'
   const canRetryCore = Boolean(desktopApi()?.retryCore) && (status === 'closed' || status === 'error')
 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-medium',
-        meta.color,
+        'inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)]',
       )}
       aria-live="polite"
     >
-      <span className="relative flex h-1.5 w-1.5" aria-hidden>
-        {isPulsing && (
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-75" />
-        )}
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
-      </span>
       <span>{TRANSPORT_LABELS[transport]}</span>
-      <span className="opacity-60">·</span>
-      <span>{meta.label}</span>
+      <StatusBadge kind={meta.kind} label={meta.label} className="-my-0.5" />
       {canRetryCore && (
         <>
           <span className="opacity-60">·</span>

@@ -1164,7 +1164,7 @@ export default function ChatPage() {
   return (
     <div className={isMobile ? 'mobile-chat-shell relative flex flex-col overflow-hidden' : 'relative flex h-full min-h-0 flex-col overflow-hidden'}>
       {(mockMode || !canMutateChat) && (
-        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
+        <div className="border-b border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] px-4 py-2 text-xs font-medium text-[var(--ava-warning)]">
           只读模式 · 申请权限
         </div>
       )}

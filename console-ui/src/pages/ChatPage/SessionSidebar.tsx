@@ -197,7 +197,7 @@ export function SessionSidebar({
                           }}
                           className="w-full px-1 py-0.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded text-[var(--text-primary)] outline-none"
                         />
-                        <button onClick={() => confirmRename(s.key)} className="p-0.5 text-green-500 hover:text-green-400">
+                        <button onClick={() => confirmRename(s.key)} className="p-0.5 text-[var(--ava-success)] hover:text-[var(--ava-success)]">
                           <Check className="w-3 h-3" />
                         </button>
                         <button onClick={cancelRename} className="p-0.5 text-[var(--text-secondary)] hover:text-[var(--danger)]">
@@ -265,7 +265,7 @@ export function SessionSidebar({
                       <span className="text-[10px] text-[var(--danger)]">Delete?</span>
                       <button
                         onClick={() => { onDeleteSession(s.key); setConfirmDelete(null) }}
-                        className="p-0.5 text-[var(--danger)] hover:text-red-400"
+                        className="p-0.5 text-[var(--danger)] hover:text-[var(--ava-danger)]"
                       >
                         <Check className="w-3 h-3" />
                       </button>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Ban, Check, CheckCircle2, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, Puzzle, Terminal, XOctagon, Zap } from 'lucide-react'
+import { Check, Copy, ExternalLink, Image as ImageIcon, Puzzle, Terminal, Zap } from 'lucide-react'
 import { MarkdownRenderer } from '../../components/markdown/MarkdownRenderer'
+import { StatusBadge, type StatusKind } from '../../components/ui/StatusBadge'
 import { cn } from '../../lib/utils'
 import { buildTokenStatsNavUrl } from '../../lib/tokenStatsNav'
 import { useTaskFloater } from '../../stores/taskFloater'
@@ -20,28 +21,26 @@ export const TASK_TYPE_CONFIG: Record<DirectTaskType, {
   accent: string
   bg: string
 }> = {
-  claude_code: { icon: Terminal, label: 'Claude Code', accent: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  codex: { icon: Zap, label: 'Codex', accent: 'text-sky-500', bg: 'bg-sky-500/10' },
-  image_gen: { icon: ImageIcon, label: 'Image Gen', accent: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10' },
-  skill: { icon: Puzzle, label: 'Skill', accent: 'text-amber-500', bg: 'bg-amber-500/10' },
+  claude_code: { icon: Terminal, label: 'Claude Code', accent: 'text-[var(--ava-primary)]', bg: 'bg-[var(--ava-primary-soft)]' },
+  codex: { icon: Zap, label: 'Codex', accent: 'text-[var(--ava-primary)]', bg: 'bg-[var(--ava-primary-soft)]' },
+  image_gen: { icon: ImageIcon, label: 'Image Gen', accent: 'text-[var(--ava-primary)]', bg: 'bg-[var(--ava-primary-soft)]' },
+  skill: { icon: Puzzle, label: 'Skill', accent: 'text-[var(--ava-primary)]', bg: 'bg-[var(--ava-primary-soft)]' },
 }
 
 export const TASK_STATUS_CONFIG: Record<VisibleTaskStatus, {
-  icon: typeof Clock
   label: string
-  color: string
-  bg: string
+  kind: StatusKind
   line: string
 }> = {
-  pending: { icon: Loader2, label: 'pending', color: 'text-gray-400', bg: 'bg-gray-400/10', line: 'border-gray-500/40 border-dashed' },
-  awaiting_deps: { icon: Clock, label: 'awaiting deps', color: 'text-amber-400', bg: 'bg-amber-500/10', line: 'border-amber-500/40 border-dashed' },
-  queued: { icon: Clock, label: 'queued', color: 'text-blue-300', bg: 'bg-blue-500/10', line: 'border-blue-500/40 border-dashed' },
-  running: { icon: Loader2, label: 'running', color: 'text-blue-400', bg: 'bg-blue-500/10', line: 'border-blue-500/60' },
-  streaming: { icon: Loader2, label: 'streaming', color: 'text-sky-300', bg: 'bg-sky-500/10', line: 'border-sky-500/60' },
-  succeeded: { icon: CheckCircle2, label: 'succeeded', color: 'text-emerald-400', bg: 'bg-emerald-500/10', line: 'border-emerald-500/60' },
-  failed: { icon: XOctagon, label: 'failed', color: 'text-red-400', bg: 'bg-red-500/10', line: 'border-red-500/60' },
-  cancelled: { icon: Ban, label: 'cancelled', color: 'text-gray-400', bg: 'bg-gray-400/10', line: 'border-gray-500/40' },
-  skipped: { icon: Ban, label: 'skipped', color: 'text-gray-500', bg: 'bg-gray-500/10', line: 'border-gray-500/40 border-dashed' },
+  pending: { label: 'pending', kind: 'queued', line: 'border-[var(--ava-queued-border)] border-dashed' },
+  awaiting_deps: { label: 'awaiting deps', kind: 'waiting', line: 'border-[var(--ava-warning-border)] border-dashed' },
+  queued: { label: 'queued', kind: 'queued', line: 'border-[var(--ava-queued-border)] border-dashed' },
+  running: { label: 'running', kind: 'running', line: 'border-[var(--ava-running-border)]' },
+  streaming: { label: 'streaming', kind: 'running', line: 'border-[var(--ava-running-border)]' },
+  succeeded: { label: 'succeeded', kind: 'completed', line: 'border-[var(--ava-success-border)]' },
+  failed: { label: 'failed', kind: 'failed', line: 'border-[var(--ava-danger-border)]' },
+  cancelled: { label: 'cancelled', kind: 'cancelled', line: 'border-[var(--ava-idle-border)]' },
+  skipped: { label: 'skipped', kind: 'cancelled', line: 'border-[var(--ava-idle-border)] border-dashed' },
 }
 
 export function visibleTaskStatus(status: DirectTaskStatus): VisibleTaskStatus {
@@ -99,7 +98,6 @@ export function ConversationTaskCard({
   const typeConfig = TASK_TYPE_CONFIG[task.task_type]
   const statusConfig = TASK_STATUS_CONFIG[visibleTaskStatus(task.status)]
   const TypeIcon = typeConfig.icon
-  const StatusIcon = statusConfig.icon
   const progress = taskProgress(task)
   const active = ACTIVE_TASK_STATUSES.has(task.status)
   const body = details?.body || ''
@@ -158,7 +156,7 @@ export function ConversationTaskCard({
       className={cn(
         'max-w-full overflow-hidden rounded-lg border bg-[var(--bg-secondary)] text-xs transition-all duration-500',
         highlighted
-          ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/30 bg-[var(--accent)]/5'
+          ? 'border-[var(--ava-primary-border)] bg-[var(--ava-primary-soft)]'
           : 'border-[var(--border)]',
       )}
     >
@@ -167,10 +165,7 @@ export function ConversationTaskCard({
           <TypeIcon className="h-4 w-4" />
         </span>
         <span className="font-medium text-[var(--text-primary)]">{typeConfig.label}</span>
-        <span className={cn('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium', statusConfig.bg, statusConfig.color)}>
-          <StatusIcon className={cn('h-3 w-3', active && 'animate-spin')} />
-          {statusConfig.label}
-        </span>
+        <StatusBadge kind={statusConfig.kind} label={statusConfig.label} withDot={active} />
         {task.chain_id && variant !== 'chain' && (
           <span className="rounded bg-[var(--bg-primary)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
             chain:{task.chain_id.slice(0, 8)}
@@ -202,7 +197,7 @@ export function ConversationTaskCard({
               className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
               title="Copy trace link"
             >
-              {traceCopied ? <Check className="h-3 w-3 text-[var(--success)]" /> : <Copy className="h-3 w-3" />}
+              {traceCopied ? <Check className="h-3 w-3 text-[var(--ava-success)]" /> : <Copy className="h-3 w-3" />}
               Link
             </button>
           </>
@@ -223,14 +218,14 @@ export function ConversationTaskCard({
         {(task.status === 'streaming' || typeof task.progress_percent === 'number') && (
           <div className="flex items-center gap-2">
             <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-              <div className="h-full rounded-full bg-sky-400 transition-[width]" style={{ width: `${progress}%` }} />
+              <div className="h-full rounded-full bg-[var(--ava-running)] transition-[width]" style={{ width: `${progress}%` }} />
             </div>
             <span className="w-8 text-right font-mono text-[10px] text-[var(--text-secondary)]">{progress}%</span>
           </div>
         )}
 
         {task.error_message && (
-          <div className="rounded-md border border-red-500/20 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-400">
+          <div className="rounded-md border border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] px-2 py-1.5 text-[11px] text-[var(--ava-danger)]">
             {task.error_message}
           </div>
         )}

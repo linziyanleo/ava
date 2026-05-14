@@ -49,8 +49,8 @@ export function SubagentResultBlock({ content }: SubagentResultBlockProps) {
     <div className={cn(
       'my-1.5 rounded-lg border text-xs overflow-hidden',
       isCompleted
-        ? 'border-emerald-500/30 bg-emerald-500/5'
-        : 'border-red-500/30 bg-red-500/5',
+        ? 'border-[var(--ava-success-border)] bg-[var(--ava-success-soft)]'
+        : 'border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)]',
     )}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2">
@@ -59,8 +59,8 @@ export function SubagentResultBlock({ content }: SubagentResultBlockProps) {
         <span className={cn(
           'ml-auto shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
           isCompleted
-            ? 'bg-emerald-500/15 text-emerald-400'
-            : 'bg-red-500/15 text-red-400',
+            ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]'
+            : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]',
         )}>
           {isCompleted
             ? <CheckCircle className="w-3 h-3" />

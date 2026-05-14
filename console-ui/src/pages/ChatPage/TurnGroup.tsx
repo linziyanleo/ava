@@ -67,8 +67,8 @@ export function TurnGroupComponent({
   return (
     <div
       className={cn(
-        'space-y-2 rounded-md transition-all duration-500',
-        turnHighlighted && 'ring-1 ring-[var(--accent)]/40 bg-[var(--accent)]/5',
+        'space-y-2 rounded-md border border-transparent transition-all duration-500',
+        turnHighlighted && 'border-[var(--ava-primary-border)] bg-[var(--ava-primary-soft)]',
       )}
       id={turnSeq != null ? `turn-seq-${turnSeq}` : index != null ? `turn-${index}` : undefined}
       data-turn-seq={turnSeq ?? undefined}

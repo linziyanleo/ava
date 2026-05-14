@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Wrench, Loader2, Image, Eye, Mic, Globe, ExternalLink, Clock } from 'lucide-react'
+import { StatusBadge, type StatusKind } from '../../components/ui/StatusBadge'
+import { statusToneClasses } from '../../lib/statusSemantics'
 import { cn } from '../../lib/utils'
 import type { ToolCallWithResult, TurnTokenStats, IterationTokenStats } from './types'
 import { getContentText, imageUrl, extractImagePaths, formatTokenCount, formatTimestamp, calcDuration } from './utils'
@@ -32,10 +34,10 @@ interface ToolCallBlockProps {
 }
 
 const MEDIA_TOOLS: Record<string, { icon: typeof Image; label: string; color: string }> = {
-  image_gen: { icon: Image, label: 'Image Generation', color: 'text-purple-400' },
-  vision: { icon: Eye, label: 'Image Analysis', color: 'text-blue-400' },
-  analyze_image: { icon: Eye, label: 'Image Analysis', color: 'text-blue-400' },
-  transcribe: { icon: Mic, label: 'Voice Transcription', color: 'text-green-400' },
+  image_gen: { icon: Image, label: 'Image Generation', color: 'text-[var(--ava-primary)]' },
+  vision: { icon: Eye, label: 'Image Analysis', color: 'text-[var(--ava-primary)]' },
+  analyze_image: { icon: Eye, label: 'Image Analysis', color: 'text-[var(--ava-primary)]' },
+  transcribe: { icon: Mic, label: 'Voice Transcription', color: 'text-[var(--ava-primary)]' },
 }
 
 interface ClaudeCodeResult {
@@ -138,6 +140,13 @@ function stringifyToolResult(content: unknown): string | null {
   } catch {
     return String(content)
   }
+}
+
+function resultStatusKind(status: string | undefined): StatusKind {
+  if (status === 'SUCCESS') return 'completed'
+  if (status === 'TIMEOUT') return 'retrying'
+  if (status === 'ERROR' || status === 'FAILED') return 'failed'
+  return 'running'
 }
 
 function TokenStatsLink({
@@ -281,29 +290,31 @@ export function ToolCallBlock({
     const sessionArg = (parsedArgs.session_id || '') as string
     const ccResult = resultText ? parseClaudeCodeResult(resultText) : null
     const isSuccess = ccResult?.status === 'SUCCESS'
+    const resultKind = resultStatusKind(ccResult?.status)
+    const resultTone = statusToneClasses(resultKind)
 
     return (
       <div>
         {metaBar}
         <div className={cn(
           'rounded-lg border text-xs overflow-hidden',
-          isSuccess ? 'border-cyan-500/30 bg-cyan-500/5' : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
+          isSuccess ? resultTone.surface : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
         )}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 transition-colors"
         >
           {isLoading ? (
-            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-cyan-400" />
+            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-[var(--ava-running)]" />
           ) : expanded ? (
             <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
           ) : (
             <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
           )}
           <span className="text-base shrink-0">💻</span>
-          <span className="font-medium text-cyan-400">Claude Code</span>
+          <span className="font-medium text-[var(--ava-primary)]">Claude Code</span>
           {mode === 'readonly' && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-blue-500/15 text-blue-400">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-[var(--ava-idle-soft)] text-[var(--ava-idle)]">
               readonly
             </span>
           )}
@@ -311,7 +322,7 @@ export function ToolCallBlock({
             <span className="flex items-center gap-2 ml-2 text-[var(--text-secondary)]">
               <span>{ccResult.turns} turns</span>
               <span>{ccResult.duration}</span>
-              <span className="text-amber-400">{ccResult.cost}</span>
+              <span className="text-[var(--ava-warning)]">{ccResult.cost}</span>
             </span>
           )}
           {!expanded && prompt && (
@@ -324,12 +335,7 @@ export function ToolCallBlock({
             {/* Metadata bar */}
             {ccResult && (
               <div className="flex flex-wrap gap-3 pt-2 text-[10px]">
-                <div className={cn(
-                  'px-2 py-1 rounded-md font-medium',
-                  isSuccess ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400',
-                )}>
-                  {ccResult.status}
-                </div>
+                <StatusBadge kind={resultKind} label={ccResult.status} />
                 <div className="flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>Turns:</span>
                   <span className="text-[var(--text-primary)] font-medium">{ccResult.turns}</span>
@@ -340,7 +346,7 @@ export function ToolCallBlock({
                 </div>
                 <div className="flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>Cost:</span>
-                  <span className="text-amber-400 font-medium">{ccResult.cost}</span>
+                  <span className="text-[var(--ava-warning)] font-medium">{ccResult.cost}</span>
                 </div>
                 {ccResult.session && (
                   <div className="flex items-center gap-1 text-[var(--text-secondary)]">
@@ -396,7 +402,7 @@ export function ToolCallBlock({
               </div>
             )}
             {isLoading && !resultText && (
-              <div className="flex items-center gap-1.5 text-cyan-400 py-1">
+              <div className="flex items-center gap-1.5 text-[var(--ava-running)] py-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span>Claude Code is working...</span>
               </div>
@@ -414,29 +420,31 @@ export function ToolCallBlock({
     const projectPath = (parsedArgs.project_path || '') as string
     const codexResult = resultText ? parseCodexResult(resultText) : null
     const isSuccess = codexResult?.status === 'SUCCESS'
+    const resultKind = resultStatusKind(codexResult?.status)
+    const resultTone = statusToneClasses(resultKind)
 
     return (
       <div>
         {metaBar}
         <div className={cn(
           'rounded-lg border text-xs overflow-hidden',
-          isSuccess ? 'border-sky-500/30 bg-sky-500/5' : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
+          isSuccess ? resultTone.surface : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
         )}>
           <button
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 transition-colors"
           >
             {isLoading ? (
-              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-sky-400" />
+              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-[var(--ava-running)]" />
             ) : expanded ? (
               <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
             ) : (
               <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
             )}
             <span className="text-base shrink-0">💻</span>
-            <span className="font-medium text-sky-400">Codex</span>
+            <span className="font-medium text-[var(--ava-primary)]">Codex</span>
             {mode === 'readonly' && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-blue-500/15 text-blue-400">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium ml-1 bg-[var(--ava-idle-soft)] text-[var(--ava-idle)]">
                 readonly
               </span>
             )}
@@ -458,12 +466,7 @@ export function ToolCallBlock({
             <div className="px-3 pb-3 space-y-2 border-t border-[var(--border)]">
               {codexResult && (
                 <div className="flex flex-wrap gap-3 pt-2 text-[10px]">
-                  <div className={cn(
-                    'px-2 py-1 rounded-md font-medium',
-                    isSuccess ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400',
-                  )}>
-                    {codexResult.status}
-                  </div>
+                  <StatusBadge kind={resultKind} label={codexResult.status} />
                   <div className="flex items-center gap-1 text-[var(--text-secondary)]">
                     <span>Turns:</span>
                     <span className="text-[var(--text-primary)] font-medium">{codexResult.turns}</span>
@@ -519,7 +522,7 @@ export function ToolCallBlock({
                 </div>
               )}
               {isLoading && !resultText && (
-                <div className="flex items-center gap-1.5 text-sky-400 py-1">
+                <div className="flex items-center gap-1.5 text-[var(--ava-running)] py-1">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   <span>Codex is working...</span>
                 </div>
@@ -536,14 +539,15 @@ export function ToolCallBlock({
     const paResult = resultText ? parsePageAgentResult(resultText) : null
     const isSuccess = paResult?.status === 'SUCCESS'
     const isError = paResult?.status === 'ERROR' || paResult?.status === 'TIMEOUT'
+    const resultKind = resultStatusKind(paResult?.status)
+    const resultTone = statusToneClasses(resultKind)
 
     return (
       <div>
         {metaBar}
         <div className={cn(
           'rounded-lg border text-xs overflow-hidden',
-          isSuccess ? 'border-emerald-500/30 bg-emerald-500/5'
-            : isError ? 'border-red-500/30 bg-red-500/5'
+          isSuccess || isError ? resultTone.surface
             : 'border-[var(--border)] bg-[var(--bg-primary)]/50',
         )}>
         <button
@@ -551,24 +555,17 @@ export function ToolCallBlock({
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 transition-colors"
         >
           {isLoading && !resultText ? (
-            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-emerald-400" />
+            <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-[var(--ava-running)]" />
           ) : expanded ? (
             <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
           ) : (
             <ChevronRight className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
           )}
-          <Globe className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-          <span className="font-medium text-emerald-400">Page Agent</span>
+          <Globe className="w-3.5 h-3.5 shrink-0 text-[var(--ava-primary)]" />
+          <span className="font-medium text-[var(--ava-primary)]">Page Agent</span>
           {paResult && (
             <>
-              <span className={cn(
-                'px-1.5 py-0.5 rounded text-[10px] font-medium ml-1',
-                isSuccess ? 'bg-emerald-500/15 text-emerald-400'
-                  : paResult.status === 'TIMEOUT' ? 'bg-amber-500/15 text-amber-400'
-                  : 'bg-red-500/15 text-red-400',
-              )}>
-                {paResult.status}
-              </span>
+              <StatusBadge kind={resultKind} label={paResult.status} className="ml-1" />
               <span className="flex items-center gap-2 ml-2 text-[var(--text-secondary)]">
                 <span>{paResult.steps} steps</span>
                 <span>{paResult.duration}</span>
@@ -579,7 +576,7 @@ export function ToolCallBlock({
             </>
           )}
           {isLoading && !resultText && (
-            <span className="text-emerald-400 ml-2">Browsing...</span>
+            <span className="text-[var(--ava-running)] ml-2">Browsing...</span>
           )}
           {!expanded && instruction && !isLoading && (
             <span className="text-[var(--text-secondary)] truncate ml-2">— {instruction.slice(0, 60)}{instruction.length > 60 ? '...' : ''}</span>
@@ -590,14 +587,7 @@ export function ToolCallBlock({
           <div className="px-3 pb-3 space-y-2 border-t border-[var(--border)]">
             {paResult && (
               <div className="flex flex-wrap gap-3 pt-2 text-[10px]">
-                <div className={cn(
-                  'px-2 py-1 rounded-md font-medium',
-                  isSuccess ? 'bg-emerald-500/15 text-emerald-400'
-                    : paResult.status === 'TIMEOUT' ? 'bg-amber-500/15 text-amber-400'
-                    : 'bg-red-500/15 text-red-400',
-                )}>
-                  {paResult.status}
-                </div>
+                <StatusBadge kind={resultKind} label={paResult.status} />
                 <div className="flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>Steps:</span>
                   <span className="text-[var(--text-primary)] font-medium">{paResult.steps}</span>
@@ -674,7 +664,7 @@ export function ToolCallBlock({
               </div>
             )}
             {isLoading && !resultText && (
-              <div className="flex items-center gap-1.5 text-emerald-400 py-1">
+              <div className="flex items-center gap-1.5 text-[var(--ava-running)] py-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span>Browsing...</span>
               </div>
