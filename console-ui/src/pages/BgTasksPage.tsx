@@ -6,11 +6,8 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronLeft,
-  CheckCircle2,
-  XOctagon,
   Loader2,
   Clock,
-  Ban,
   Wifi,
   WifiOff,
   History,
@@ -27,9 +24,11 @@ import {
   X,
 } from 'lucide-react'
 import { api, wsUrl } from '../api/client'
+import { StatusBadge as StatusBadgePrimitive, type StatusKind } from '../components/ui/StatusBadge'
 import { useAuth } from '../stores/auth'
 import { displayImagePath, extractImagePaths, imageUrl } from './ChatPage/utils'
 import { buildTokenStatsNavUrl } from '../lib/tokenStatsNav'
+import { statusToneClasses } from '../lib/statusSemantics'
 import { cn } from '../lib/utils'
 
 interface TimelineEvent {
@@ -113,47 +112,47 @@ const TASK_TYPE_STYLE: Record<string, {
 }> = {
   claude_code: {
     icon: Terminal,
-    accent: 'text-emerald-500',
-    accentBg: 'bg-emerald-500/10',
+    accent: 'text-[var(--ava-primary)]',
+    accentBg: 'bg-[var(--ava-primary-soft)]',
     label: 'Claude Code',
   },
   codex: {
     icon: Zap,
-    accent: 'text-sky-500',
-    accentBg: 'bg-sky-500/10',
+    accent: 'text-[var(--ava-primary)]',
+    accentBg: 'bg-[var(--ava-primary-soft)]',
     label: 'Codex',
   },
   coding: {
     icon: Code,
-    accent: 'text-violet-500',
-    accentBg: 'bg-violet-500/10',
+    accent: 'text-[var(--ava-primary)]',
+    accentBg: 'bg-[var(--ava-primary-soft)]',
     label: 'Coding',
   },
   image_gen: {
     icon: ImageIcon,
-    accent: 'text-fuchsia-500',
-    accentBg: 'bg-fuchsia-500/10',
+    accent: 'text-[var(--ava-primary)]',
+    accentBg: 'bg-[var(--ava-primary-soft)]',
     label: 'Image Gen',
   },
 }
 
 const DEFAULT_TYPE_STYLE = {
   icon: Code,
-  accent: 'text-gray-400',
-  accentBg: 'bg-gray-400/10',
+  accent: 'text-[var(--ava-idle)]',
+  accentBg: 'bg-[var(--ava-idle-soft)]',
   label: 'Unknown',
 }
 
-const STATUS_CONFIG: Record<VisibleTaskStatus, { icon: typeof Clock; color: string; bg: string; label: string }> = {
-  pending: { icon: Loader2, color: 'text-gray-400', bg: 'bg-gray-400/10', label: '待解析' },
-  awaiting_deps: { icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10', label: '等待前置' },
-  queued: { icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10', label: '排队中' },
-  running: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', label: '运行中' },
-  streaming: { icon: Loader2, color: 'text-sky-400', bg: 'bg-sky-500/10', label: '产出中' },
-  succeeded: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: '成功' },
-  failed: { icon: XOctagon, color: 'text-red-500', bg: 'bg-red-500/10', label: '失败' },
-  cancelled: { icon: Ban, color: 'text-gray-400', bg: 'bg-gray-400/10', label: '已取消' },
-  skipped: { icon: Ban, color: 'text-gray-500', bg: 'bg-gray-500/10', label: '已跳过' },
+const STATUS_CONFIG: Record<VisibleTaskStatus, { kind: StatusKind; label: string }> = {
+  pending: { kind: 'queued', label: '待解析' },
+  awaiting_deps: { kind: 'waiting', label: '等待前置' },
+  queued: { kind: 'queued', label: '排队中' },
+  running: { kind: 'running', label: '运行中' },
+  streaming: { kind: 'running', label: '产出中' },
+  succeeded: { kind: 'completed', label: '成功' },
+  failed: { kind: 'failed', label: '失败' },
+  cancelled: { kind: 'cancelled', label: '已取消' },
+  skipped: { kind: 'cancelled', label: '已跳过' },
 }
 
 function visibleStatus(status: TaskStatus): VisibleTaskStatus {
@@ -228,17 +227,11 @@ function groupByWorkspace(tasks: TaskItem[]): WorkspaceGroup[] {
 
 // --- Components ---
 
-function StatusBadge({ status }: { status: TaskItem['status'] }) {
+function TaskStatusBadge({ status }: { status: TaskItem['status'] }) {
   const displayStatus = visibleStatus(status)
   const cfg = STATUS_CONFIG[displayStatus]
-  const Icon = cfg.icon
   const isSpinning = displayStatus === 'pending' || displayStatus === 'running' || displayStatus === 'streaming'
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
-      <Icon className={`w-3 h-3 ${isSpinning ? 'animate-spin' : ''}`} />
-      {cfg.label}
-    </span>
-  )
+  return <StatusBadgePrimitive kind={cfg.kind} label={cfg.label} withDot={isSpinning} />
 }
 
 // --- Module C: Todo progress bar ---
@@ -257,10 +250,10 @@ function TodoProgressBar({ summary }: { summary: Record<string, number> }) {
     <div className="flex items-center gap-2 mt-1.5">
       <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
         {donePct > 0 && (
-          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${donePct}%` }} />
+          <div className="h-full bg-[var(--ava-success)] transition-all" style={{ width: `${donePct}%` }} />
         )}
         {doingPct > 0 && (
-          <div className="h-full bg-blue-500 transition-all" style={{ width: `${doingPct}%` }} />
+          <div className="h-full bg-[var(--ava-running)] transition-all" style={{ width: `${doingPct}%` }} />
         )}
       </div>
       <span className="text-[10px] text-[var(--text-secondary)] whitespace-nowrap">
@@ -382,7 +375,7 @@ function WorkspaceGroupHeader({ group, collapsed, onToggle }: {
       )}
       <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
         group.isolationMode === 'worktree'
-          ? 'bg-amber-500/10 text-amber-500'
+          ? 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]'
           : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
       }`}>
         {group.isolationMode}
@@ -435,6 +428,7 @@ function TaskCard({
 
   const typeStyle = TASK_TYPE_STYLE[task.task_type] || DEFAULT_TYPE_STYLE
   const TypeIcon = typeStyle.icon
+  const taskTone = statusToneClasses(STATUS_CONFIG[visibleStatus(task.status)].kind)
 
   const handleToggle = () => {
     const next = !expanded
@@ -503,9 +497,9 @@ function TaskCard({
       className={cn(
         'rounded-xl border transition-all duration-500',
         isHighlighted
-          ? 'border-[var(--accent)] bg-[var(--accent)]/5 ring-1 ring-[var(--accent)]/30 shadow-sm'
+          ? 'border-[var(--ava-primary-border)] bg-[var(--ava-primary-soft)]'
           : isActive
-          ? 'border-blue-500/30 bg-blue-500/5 shadow-sm'
+          ? taskTone.surface
           : 'border-[var(--border)] bg-[var(--bg-secondary)]',
       )}
     >
@@ -517,7 +511,7 @@ function TaskCard({
         <div className="flex-1 min-w-0">
           {/* Module B: type icon + accent badge */}
           <div className="flex items-center gap-2 mb-1">
-            <StatusBadge status={task.status} />
+            <TaskStatusBadge status={task.status} />
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${typeStyle.accentBg} ${typeStyle.accent}`}>
               <TypeIcon className="w-3 h-3" />
               {typeStyle.label}
@@ -536,7 +530,7 @@ function TaskCard({
             <span>{formatTime(task.started_at)}</span>
             {/* Module C: elapsed badge */}
             {isActive ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--ava-running-soft)] text-[var(--ava-running)] font-medium">
                 <Clock className="w-3 h-3" />
                 {formatElapsed(task.started_at)}
               </span>
@@ -606,7 +600,7 @@ function TaskCard({
                 e.stopPropagation();
                 onCancel(task.task_id);
               }}
-              className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] transition-colors"
               title="取消任务"
             >
               <XCircle className="w-3.5 h-3.5" />
@@ -628,7 +622,7 @@ function TaskCard({
                     onClick={handleCopyPrompt}
                     className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
                   >
-                    {copiedPrompt ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                    {copiedPrompt ? <Check className="w-3 h-3 text-[var(--ava-success)]" /> : <Copy className="w-3 h-3" />}
                     {copiedPrompt ? '已复制' : '复制'}
                   </button>
                 </div>
@@ -694,8 +688,8 @@ function TaskCard({
             )}
             {task.error_message && (
               <div>
-                <h4 className="text-xs font-medium text-red-400 mb-1">错误</h4>
-                <pre className="text-xs bg-red-500/5 border border-red-500/20 rounded-lg p-3 overflow-x-auto text-red-300 whitespace-pre-wrap break-all">
+                <h4 className="text-xs font-medium text-[var(--ava-danger)] mb-1">错误</h4>
+                <pre className="text-xs bg-[var(--ava-danger-soft)] border border-[var(--ava-danger-border)] rounded-lg p-3 overflow-x-auto text-[var(--ava-danger)] whitespace-pre-wrap break-all">
                   {task.error_message}
                 </pre>
               </div>
@@ -712,7 +706,7 @@ function TaskCard({
                   </span>
                   <span className={`px-1.5 py-0.5 rounded font-medium ${
                     task.isolation_mode === 'worktree'
-                      ? 'bg-amber-500/10 text-amber-500'
+                      ? 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]'
                       : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                   }`}>
                     {task.isolation_mode}
@@ -774,7 +768,7 @@ function TaskCard({
                         className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                         title="复制 Trace ID"
                       >
-                        {copiedTrace ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                        {copiedTrace ? <Check className="w-3 h-3 text-[var(--ava-success)]" /> : <Copy className="w-3 h-3" />}
                         {copiedTrace ? '已复制' : '复制'}
                       </button>
                     </>
@@ -1158,6 +1152,8 @@ export default function BgTasksPage({
   const showCurrentSections = taskView !== 'history'
   const showHistorySection = taskView !== 'current'
   const showRecentFinishedSection = taskView === 'current'
+  const connectionKind: StatusKind = mockMode ? 'idle' : wsConnected ? 'available' : 'disconnected'
+  const connectionLabel = mockMode ? 'Mock' : wsConnected ? 'Live' : 'Offline'
 
   return (
     <div className={cn(embedded ? 'h-full' : 'h-[calc(100vh-3rem)]', 'flex flex-col')}>
@@ -1171,16 +1167,13 @@ export default function BgTasksPage({
         <div className="flex items-center gap-3">
           <h1 className={cn(embedded ? 'text-lg' : 'text-2xl', 'font-bold')}>后台任务</h1>
           {data && data.running > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              {data.running} 运行中
-            </span>
+            <StatusBadgePrimitive kind="running" label={`${data.running} 运行中`} />
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1 text-xs ${wsConnected ? 'text-green-400' : 'text-[var(--text-secondary)]'}`}>
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--text-secondary)]">
             {mockMode ? <Clock className="w-3 h-3" /> : wsConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-            {mockMode ? 'Mock' : wsConnected ? 'Live' : 'Offline'}
+            <StatusBadgePrimitive kind={connectionKind} label={connectionLabel} withDot={false} />
           </span>
           <button
             onClick={fetchOnce}
@@ -1201,7 +1194,7 @@ export default function BgTasksPage({
       />
 
       {error && (
-        <div className="mb-3 p-3 rounded-lg text-sm bg-[var(--danger)]/10 text-[var(--danger)]">
+        <div className="mb-3 p-3 rounded-lg text-sm bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]">
           {error}
         </div>
       )}
@@ -1251,7 +1244,7 @@ export default function BgTasksPage({
             {showCurrentSections && workspaceGroups.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2 flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  <div className="w-2 h-2 rounded-full bg-[var(--ava-running)] motion-safe:animate-pulse" />
                   活跃 Workspace ({workspaceGroups.length})
                 </h2>
                 <div className="space-y-3">

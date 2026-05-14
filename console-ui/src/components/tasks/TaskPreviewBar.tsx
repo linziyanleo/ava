@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, Loader2, Timer } from 'lucide-react'
 import { api } from '../../api/client'
+import { normalizeStatusKind, statusToneClasses } from '../../lib/statusSemantics'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../stores/auth'
 
@@ -25,11 +26,7 @@ interface TaskPreviewBarProps {
 const ACTIVE_STATUSES = new Set(['pending', 'awaiting_deps', 'queued', 'running', 'streaming'])
 
 function statusClass(status: string) {
-  if (status === 'failed') return 'border-red-500/30 bg-red-500/10 text-red-300'
-  if (status === 'awaiting_deps') return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-  if (status === 'queued' || status === 'pending') return 'border-blue-500/25 bg-blue-500/10 text-blue-300'
-  if (status === 'streaming' || status === 'running') return 'border-blue-400/40 bg-blue-500/15 text-blue-200'
-  return 'border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+  return statusToneClasses(normalizeStatusKind(status)).badge
 }
 
 export function TaskPreviewBar({ onOpenTask, onOpenList, density = 'inline' }: TaskPreviewBarProps) {

@@ -11,17 +11,17 @@ function formatDuration(ms: number | null): string {
 }
 
 function statusClass(status: string): string {
-  if (status === 'error') return 'bg-rose-500 text-white'
-  if (status === 'interrupted') return 'bg-zinc-500 text-white'
-  if (status === 'running') return 'bg-amber-500 text-zinc-950'
-  return 'bg-emerald-500 text-zinc-950'
+  if (status === 'error') return 'bg-[var(--ava-danger)] text-white'
+  if (status === 'interrupted') return 'bg-[var(--ava-idle)] text-white'
+  if (status === 'running') return 'bg-[var(--ava-running)] text-white'
+  return 'bg-[var(--ava-success)] text-white'
 }
 
 function spanBarClass(status: string): string {
-  if (status === 'error') return 'bg-rose-500/80'
-  if (status === 'interrupted') return 'bg-zinc-500/80'
-  if (status === 'running') return 'bg-amber-500/80'
-  return 'bg-emerald-500/80'
+  if (status === 'error') return 'bg-[var(--ava-danger)]'
+  if (status === 'interrupted') return 'bg-[var(--ava-idle)]'
+  if (status === 'running') return 'bg-[var(--ava-running)]'
+  return 'bg-[var(--ava-success)]'
 }
 
 function formatJson(value: unknown): string {
@@ -46,7 +46,7 @@ function CopyButton({ text }: { text: string }) {
       className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
       title="复制"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-[var(--ava-success)]" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   )
 }
@@ -169,7 +169,7 @@ export default function TraceTimelineDrawer({ traceId, onClose }: { traceId: str
             {loading ? (
               <div className="p-6 text-sm text-[var(--text-secondary)]">加载中...</div>
             ) : error ? (
-              <div className="p-6 text-sm text-rose-400">{error}</div>
+              <div className="p-6 text-sm text-[var(--ava-danger)]">{error}</div>
             ) : trace && trace.spans.length > 0 ? (
               <div>
                 <div className="grid grid-cols-[minmax(180px,280px)_1fr_72px] gap-3 border-b border-[var(--border)] px-3 py-2 text-[10px] uppercase text-[var(--text-secondary)]">
@@ -203,7 +203,7 @@ export default function TraceTimelineDrawer({ traceId, onClose }: { traceId: str
                       {selected.status}
                     </span>
                   </div>
-                  {selected.status_message && <p className="text-rose-300">{selected.status_message}</p>}
+                  {selected.status_message && <p className="text-[var(--ava-danger)]">{selected.status_message}</p>}
                 </div>
 
                 <div className="space-y-1 font-mono text-[11px] text-[var(--text-secondary)]">

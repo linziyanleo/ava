@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, MessageSquare, Play, Power, RefreshCw, Send, Settings, Terminal, X, XCircle, Zap } from 'lucide-react'
+import { Bot, ExternalLink, FileText, Image as ImageIcon, Loader2, MessageSquare, Play, Power, RefreshCw, Send, Settings, Terminal, X, Zap } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { StatusBadge } from '../components/ui/StatusBadge'
+import { normalizeStatusKind } from '../lib/statusSemantics'
 import { cn } from '../lib/utils'
 import { useAuth } from '../stores/auth'
 import { useTaskFloater } from '../stores/taskFloater'
@@ -88,10 +90,10 @@ const AGENT_ICON: Record<AgentName, typeof Bot> = {
   image_gen: ImageIcon,
 }
 
-const STATUS_STYLE: Record<AgentStatus, { label: string; icon: typeof CheckCircle2; className: string }> = {
-  running: { label: 'running', icon: Loader2, className: 'bg-blue-500/10 text-blue-400' },
-  available: { label: 'available', icon: CheckCircle2, className: 'bg-emerald-500/10 text-emerald-400' },
-  unavailable: { label: 'unavailable', icon: XCircle, className: 'bg-red-500/10 text-red-400' },
+const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
+  running: 'running',
+  available: 'available',
+  unavailable: 'unavailable',
 }
 
 const ROUTE_AGENT_NAME: Record<string, AgentName> = {
@@ -158,8 +160,7 @@ function AgentCard({
   const navigate = useNavigate()
   const { open: openTaskFloater } = useTaskFloater()
   const Icon = AGENT_ICON[agent.name] || Bot
-  const status = STATUS_STYLE[agent.status]
-  const StatusIcon = status.icon
+  const statusKind = normalizeStatusKind(agent.status)
   const artifacts = agent.capabilities.supported_artifact_types
 
   return (
@@ -171,10 +172,7 @@ function AgentCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-[var(--text-primary)]">{agent.display_name}</h2>
-            <span className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium', status.className)}>
-              <StatusIcon className={cn('h-3.5 w-3.5', agent.status === 'running' && 'animate-spin')} />
-              {status.label}
-            </span>
+            <StatusBadge kind={statusKind} label={AGENT_STATUS_LABEL[agent.status]} />
           </div>
           <p className="mt-1 break-all font-mono text-xs text-[var(--text-secondary)]">{agent.instance_id}</p>
         </div>
@@ -202,7 +200,7 @@ function AgentCard({
           </div>
         )}
         {agent.detail && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2 py-1.5 text-xs text-red-300">
+          <div className="rounded-lg border border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] px-2 py-1.5 text-xs text-[var(--ava-danger)]">
             {agent.detail}
           </div>
         )}
@@ -289,7 +287,7 @@ function AgentCard({
           <button
             type="button"
             onClick={() => onCancelTasks(agent)}
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-500/30 px-3 text-sm text-red-300 hover:bg-red-500/10"
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--ava-danger-border)] px-3 text-sm text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)]"
           >
             Cancel
           </button>
@@ -338,8 +336,7 @@ function AgentDetail({
   const navigate = useNavigate()
   const { open: openTaskFloater } = useTaskFloater()
   const Icon = AGENT_ICON[agent.name] || Bot
-  const status = STATUS_STYLE[agent.status]
-  const StatusIcon = status.icon
+  const statusKind = normalizeStatusKind(agent.status)
   const meta = AGENT_DETAIL_META[agent.name]
 
   return (
@@ -352,10 +349,7 @@ function AgentDetail({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-bold text-[var(--text-primary)]">{agent.display_name}</h1>
-              <span className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium', status.className)}>
-                <StatusIcon className={cn('h-3.5 w-3.5', agent.status === 'running' && 'animate-spin')} />
-                {status.label}
-              </span>
+              <StatusBadge kind={statusKind} label={AGENT_STATUS_LABEL[agent.status]} size="md" />
             </div>
             <p className="mt-1 break-all font-mono text-xs text-[var(--text-secondary)]">{agent.instance_id}</p>
           </div>
@@ -492,11 +486,11 @@ function AgentDetail({
           )}
           {agent.active_tasks > 0 && agent.capabilities.supports_cancel && (
             <button
-              type="button"
-              onClick={() => onCancelTasks(agent)}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-500/30 px-3 text-sm text-red-300 hover:bg-red-500/10"
-            >
-              Cancel
+            type="button"
+            onClick={() => onCancelTasks(agent)}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--ava-danger-border)] px-3 text-sm text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)]"
+          >
+            Cancel
             </button>
           )}
           {canRestart && agent.capabilities.supports_restart && (
