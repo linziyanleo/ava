@@ -6,7 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ConsoleRole = Literal["admin", "editor", "viewer", "read_only", "mock_tester"]
+ConsoleRole = Literal["owner"]
+UserInfoRole = Literal["owner", "read_only"]
 
 
 class LoginRequest(BaseModel):
@@ -16,7 +17,7 @@ class LoginRequest(BaseModel):
 
 class UserInfo(BaseModel):
     username: str
-    role: ConsoleRole
+    role: UserInfoRole
     created_at: str
 
 
@@ -30,7 +31,7 @@ class LoginResponse(BaseModel):
 class UserCreateRequest(BaseModel):
     username: str
     password: str
-    role: ConsoleRole = "viewer"
+    role: ConsoleRole = "owner"
 
 
 class UserUpdateRequest(BaseModel):

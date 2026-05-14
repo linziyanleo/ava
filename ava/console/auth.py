@@ -18,8 +18,8 @@ _cookie_secure: bool = False
 _cookie_samesite: str = "strict"
 _device_token_validator: Callable[[dict[str, Any]], bool] | None = None
 
-READ_ROLES = ("admin", "editor", "viewer", "read_only", "mock_tester")
-EDIT_ROLES = ("admin", "editor")
+READ_ROLES: tuple[str, ...] = ("owner",)
+EDIT_ROLES: tuple[str, ...] = ("owner",)
 
 
 def configure(
@@ -99,8 +99,15 @@ def _user_from_payload(payload: dict) -> UserInfo:
     username = payload.get("sub")
     role = payload.get("role")
     created_at = payload.get("created_at", "")
+    kind = payload.get("kind")
     if not username or not role:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    if kind == "device":
+        if role != "read_only":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device token role")
+    else:
+        if role != "owner":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token role no longer valid, please re-login")
     return UserInfo(username=username, role=role, created_at=created_at)
 
 
@@ -150,11 +157,17 @@ async def get_ws_user(websocket: WebSocket) -> UserInfo:
     username = payload.get("sub")
     role = payload.get("role")
     created_at = payload.get("created_at", "")
+    kind = payload.get("kind")
     if not username or not role:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
-    if payload.get("kind") == "device":
+    if kind == "device":
+        if role != "read_only":
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
         websocket.state.device_id = payload.get("device_id")
         websocket.state.device_capabilities = payload.get("capabilities", [])
+    else:
+        if role != "owner":
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
     return UserInfo(username=username, role=role, created_at=created_at)
 
 
