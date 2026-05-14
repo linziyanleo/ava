@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 - Unreleased
+## 0.2.0 - 2026-05-14
 
 - PR-1 / AVA-40: Cleaned up ChatPage static legacy paths, removed the old context inspector file, normalized Context Lens naming, removed duplicate token UI, and marked legacy redirects for removal after 0.3.0.
 - PR-2 / AVA-41: Moved layout padding ownership to pages, removed ChatPage and SettingsPage shell offset hacks, and collapsed Settings navigation into a recursive tree.
