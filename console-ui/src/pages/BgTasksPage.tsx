@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { api, wsUrl } from '../api/client'
 import { StatusBadge as StatusBadgePrimitive, type StatusKind } from '../components/ui/StatusBadge'
-import { useAuth } from '../stores/auth'
+import { IS_MOCK_SANDBOX } from '../lib/env'
 import { displayImagePath, extractImagePaths, imageUrl } from './ChatPage/utils'
 import { buildTokenStatsNavUrl } from '../lib/tokenStatsNav'
 import { statusToneClasses } from '../lib/statusSemantics'
@@ -885,9 +885,8 @@ export default function BgTasksPage({
   const [historyPage, setHistoryPage] = useState(1)
   const [historyLoading, setHistoryLoading] = useState(false)
   const PAGE_SIZE = 15
-  const { canEdit, isMockTester } = useAuth()
-  const mockMode = isMockTester()
-  const canCancelTasks = canEdit()
+  const mockMode = IS_MOCK_SANDBOX
+  const canCancelTasks = true
 
   useEffect(() => {
     setShowHistory(taskView !== 'current')

@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
 import { UserCog, Save, RefreshCw, Users, Heart, Wrench, User } from 'lucide-react'
 import { api } from '../api/client'
-import { useAuth } from '../stores/auth'
 import { cn } from '../lib/utils'
 
 interface FileData {
@@ -36,7 +35,6 @@ export default function PersonaPage() {
   })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const { canEdit } = useAuth()
 
   const loadFiles = useCallback(async () => {
     try {
@@ -151,7 +149,7 @@ export default function PersonaPage() {
               <p className="text-xs text-[var(--text-secondary)]">{currentFileInfo.description}</p>
             </div>
           </div>
-          {canEdit() && files[activeFile] && (
+          {files[activeFile] && (
             <button
               onClick={saveFile}
               disabled={!hasChanges || saving}
@@ -179,7 +177,6 @@ export default function PersonaPage() {
               options={{
                 minimap: { enabled: false },
                 fontSize: 13,
-                readOnly: !canEdit(),
                 wordWrap: 'on',
                 scrollBeyondLastLine: false,
                 lineNumbers: 'on',

@@ -12,7 +12,6 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { useAuth } from '../stores/auth';
 import { cn } from '../lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -132,7 +131,6 @@ export default function MediaPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [jumpToPage, setJumpToPage] = useState('');
-  const { canEdit } = useAuth();
 
   const loadRecords = useCallback(async () => {
     const params = new URLSearchParams({ page: String(page), size: '18' });
@@ -318,7 +316,7 @@ export default function MediaPage() {
                 key={record.id}
                 record={record}
                 onSelect={setSelected}
-                onDelete={canEdit() ? handleDelete : undefined}
+                onDelete={handleDelete}
                 deleting={deleting}
               />
             ))}

@@ -11,7 +11,6 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { useAuth } from '../stores/auth';
 import { cn } from '../lib/utils';
 import { useResponsiveMode } from '../hooks/useResponsiveMode';
 import yaml from 'js-yaml';
@@ -111,7 +110,6 @@ function MemoryContent({ scope }: { scope: MemoryScope }) {
   const [memoryEdit, setMemoryEdit] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const { canEdit } = useAuth();
 
   const basePath = scope.type === 'global' ? 'workspace/memory' : `workspace/memory/persons/${scope.key}`;
 
@@ -215,7 +213,7 @@ function MemoryContent({ scope }: { scope: MemoryScope }) {
         <div className="flex-1 flex flex-col min-h-0 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold">MEMORY.md</h3>
-            {canEdit() && memoryData && (
+            {memoryData && (
               <button
                 onClick={saveMemory}
                 disabled={!memoryChanged || saving}
@@ -236,7 +234,6 @@ function MemoryContent({ scope }: { scope: MemoryScope }) {
                 options={{
                   minimap: { enabled: false },
                   fontSize: 13,
-                  readOnly: !canEdit(),
                   wordWrap: 'on',
                   scrollBeyondLastLine: false,
                 }}
@@ -283,7 +280,6 @@ function DiaryTab({ isMobile }: { isMobile?: boolean }) {
   const [editing, setEditing] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const { canEdit } = useAuth();
 
   const loadDiaryList = useCallback(async () => {
     try {
@@ -387,7 +383,7 @@ function DiaryTab({ isMobile }: { isMobile?: boolean }) {
           )}
           <h3 className="text-sm font-semibold">{selected ? `${selected} 日记` : '选择日期'}</h3>
         </div>
-        {canEdit() && content && (
+        {content && (
           <button
             onClick={saveFile}
             disabled={!hasChanges || saving}
@@ -415,7 +411,6 @@ function DiaryTab({ isMobile }: { isMobile?: boolean }) {
             options={{
               minimap: { enabled: false },
               fontSize: 13,
-              readOnly: !canEdit(),
               wordWrap: 'on',
               scrollBeyondLastLine: false,
             }}

@@ -2,16 +2,14 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { Bot } from 'lucide-react'
 import { TaskPreviewBar } from '../tasks/TaskPreviewBar'
 import { useTaskFloater } from '../../stores/taskFloater'
-import { useAuth } from '../../stores/auth'
 import { cn } from '../../lib/utils'
-import { filterNavItems } from './navItems'
+import { IS_MOCK_SANDBOX } from '../../lib/env'
+import { navItems } from './navItems'
 import AvatarMenu from './AvatarMenu'
 
 export default function TopBar() {
   const location = useLocation()
-  const { user } = useAuth()
   const { open } = useTaskFloater()
-  const navItems = filterNavItems(user?.role ?? null)
 
   return (
     <header className="z-30 flex h-14 shrink-0 items-center border-b border-[var(--border)] bg-[var(--bg-secondary)]">
@@ -20,7 +18,7 @@ export default function TopBar() {
           <Bot className="h-6 w-6 text-[var(--accent)]" />
           <span className="font-semibold tracking-normal text-[var(--text-primary)]">AVA</span>
         </NavLink>
-        {user?.role === 'mock_tester' && (
+        {IS_MOCK_SANDBOX && (
           <span className="inline-flex rounded-full bg-[var(--ava-warning-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--ava-warning)]">
             MOCK SANDBOX
           </span>

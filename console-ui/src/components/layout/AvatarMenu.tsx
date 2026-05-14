@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, LogOut, Moon, Settings, Sun, User, Users } from 'lucide-react'
+import { ChevronDown, LogOut, Moon, Settings, Sun, User } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useAuth } from '../../stores/auth'
 import { useTheme } from '../../stores/theme'
@@ -10,7 +10,7 @@ function userInitial(username?: string) {
 }
 
 export default function AvatarMenu() {
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout } = useAuth()
   const { isDark, toggleTheme } = useTheme()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -47,7 +47,6 @@ export default function AvatarMenu() {
         </span>
         <span className="hidden min-w-0 text-left sm:block">
           <span className="block max-w-28 truncate text-xs font-medium">{user?.username}</span>
-          <span className="block text-[10px] capitalize text-[var(--text-secondary)]">{user?.role}</span>
         </span>
         <ChevronDown className={cn('h-3.5 w-3.5 text-[var(--text-secondary)] transition-transform', open && 'rotate-180')} />
       </button>
@@ -63,7 +62,6 @@ export default function AvatarMenu() {
             </span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{user?.username}</span>
-              <span className="block text-xs capitalize text-[var(--text-secondary)]">{user?.role}</span>
             </span>
           </div>
 
@@ -79,13 +77,6 @@ export default function AvatarMenu() {
             {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             {isDark ? '切换到白天模式' : '切换到黑夜模式'}
           </button>
-
-          {isAdmin() && (
-            <Link to="/settings/users" className={itemClass} role="menuitem" onClick={() => setOpen(false)}>
-              <Users className="h-4 w-4" />
-              用户管理
-            </Link>
-          )}
 
           <Link to="/settings" className={itemClass} role="menuitem" onClick={() => setOpen(false)}>
             <Settings className="h-4 w-4" />

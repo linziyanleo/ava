@@ -32,7 +32,6 @@ import {
   Legend,
 } from 'recharts';
 import { api } from '../api/client';
-import { useAuth } from '../stores/auth';
 import { cn } from '../lib/utils';
 
 interface TokenRecord {
@@ -477,7 +476,6 @@ export default function TokenStatsPage() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(searchParams.get('trace_id'));
   const [loading, setLoading] = useState(false);
-  useAuth();
   const pageSize = 50;
 
   const [filterSessionKey, setFilterSessionKey] = useState(searchParams.get('session_key') || '');

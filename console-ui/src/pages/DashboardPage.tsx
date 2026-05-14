@@ -24,7 +24,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useResponsiveMode } from '../hooks/useResponsiveMode'
 import { useVersionCheck } from '../hooks/useVersionCheck'
-import { useAuth } from '../stores/auth'
+import { IS_MOCK_SANDBOX } from '../lib/env'
 import { useTaskFloater } from '../stores/taskFloater'
 
 interface GatewayStatusData {
@@ -95,8 +95,7 @@ export default function DashboardPage() {
   const { open: openTaskFloater } = useTaskFloater()
   const { isMobile } = useResponsiveMode()
   const { currentVersion, updateAvailable, dismiss, refresh } = useVersionCheck()
-  const { user, isAdmin, isMockTester } = useAuth()
-  const mockMode = isMockTester()
+  const mockMode = IS_MOCK_SANDBOX
 
   const loadStatus = useCallback(() => {
     api<GatewayStatusData>('/gateway/status').then(setStatus).catch(() => {})
@@ -288,7 +287,6 @@ export default function DashboardPage() {
     <div className="p-4 md:p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">控制台</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">当前登录用户：{user?.username}</p>
       </div>
 
       {mockMode && (
@@ -415,7 +413,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {isAdmin() && !mockMode && (
+          {!mockMode && (
             <div className="flex gap-1.5">
               <button
                 onClick={handleRebuild}
@@ -555,11 +553,7 @@ export default function DashboardPage() {
           <Activity className="h-4 w-4 text-[var(--accent)]" />
           <h2 className="text-sm font-semibold">快捷信息</h2>
         </div>
-        <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-          <div>
-            <p className="text-[var(--text-secondary)]">角色</p>
-            <p className="font-medium capitalize">{user?.role}</p>
-          </div>
+        <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-3">
           <div>
             <p className="text-[var(--text-secondary)]">模式</p>
             <p className="font-medium">{mockMode ? '模拟沙盒' : '实时运行'}</p>

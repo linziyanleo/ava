@@ -5,7 +5,6 @@ import { api } from '../api/client'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { normalizeStatusKind } from '../lib/statusSemantics'
 import { cn } from '../lib/utils'
-import { useAuth } from '../stores/auth'
 import { useTaskFloater } from '../stores/taskFloater'
 
 type AgentStatus = 'running' | 'available' | 'unavailable'
@@ -649,9 +648,8 @@ export default function AgentDashboardPage() {
   const [message, setMessage] = useState('')
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null)
   const [submittingTask, setSubmittingTask] = useState(false)
-  const { isAdmin, user } = useAuth()
-  const canRestart = isAdmin()
-  const canRunTasks = user?.role === 'admin' || user?.role === 'editor'
+  const canRestart = true
+  const canRunTasks = true
 
   const loadAgents = useCallback(() => {
     setLoading(true)

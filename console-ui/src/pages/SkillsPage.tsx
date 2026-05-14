@@ -5,7 +5,7 @@ import {
   Package, Pencil, Upload, Bot, ExternalLink, Server, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
 import { api } from '../api/client'
-import { useAuth } from '../stores/auth'
+import { IS_MOCK_SANDBOX } from '../lib/env'
 import { cn } from '../lib/utils'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ function ToolsSection() {
   const [docEdit, setDocEdit] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const { canEdit } = useAuth()
+  const canEdit = !IS_MOCK_SANDBOX
 
   const loadTools = useCallback(async () => {
     try {
@@ -195,7 +195,7 @@ function ToolsSection() {
             <span className="text-sm font-semibold">TOOLS.md</span>
             <span className="text-xs text-[var(--text-secondary)]">工具文档</span>
           </div>
-          {canEdit() && toolsDoc && (
+          {canEdit && toolsDoc && (
             <button
               onClick={saveDoc}
               disabled={!docChanged || saving}
@@ -213,7 +213,7 @@ function ToolsSection() {
               theme="vs-dark"
               value={docEdit}
               onChange={(v) => setDocEdit(v || '')}
-              options={{ minimap: { enabled: false }, fontSize: 13, readOnly: !canEdit(), wordWrap: 'on', scrollBeyondLastLine: false }}
+              options={{ minimap: { enabled: false }, fontSize: 13, readOnly: !canEdit, wordWrap: 'on', scrollBeyondLastLine: false }}
             />
           ) : (
             <div className="h-full flex items-center justify-center text-[var(--text-secondary)]">
@@ -245,8 +245,7 @@ function MCPSection() {
   const [reconnecting, setReconnecting] = useState(false)
   const [probeResults, setProbeResults] = useState<Record<string, MCPProbeResult>>({})
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const { canEdit, isAdmin, isMockTester } = useAuth()
-  const canProbe = canEdit() && !isMockTester()
+  const canProbe = !IS_MOCK_SANDBOX
 
   const loadStatus = useCallback(async () => {
     setLoading(true)
@@ -319,7 +318,7 @@ function MCPSection() {
           >
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>
-          {isAdmin() && (
+          {!IS_MOCK_SANDBOX && (
             <button
               onClick={reconnectAll}
               disabled={reconnecting}
@@ -449,9 +448,8 @@ function SkillsSection() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const { canEdit, isAdmin, isMockTester } = useAuth()
-  const mockMode = isMockTester()
-  const canMutateRegistry = canEdit() && !mockMode
+  const mockMode = IS_MOCK_SANDBOX
+  const canMutateRegistry = !mockMode
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null)
 
@@ -616,7 +614,7 @@ function SkillsSection() {
 
       {mockMode && (
         <div className="rounded-xl border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-3 text-sm text-[var(--ava-warning)]">
-          `mock_tester` 可以查看工具/技能状态，并编辑 mock `TOOLS.md`；启用、安装、删除技能仍保持禁用，避免影响真实 runtime。
+          沙箱模式下可以查看工具/技能状态，并编辑示例 `TOOLS.md`；启用、安装、删除技能仍保持禁用，避免影响真实 runtime。
         </div>
       )}
 
@@ -765,7 +763,7 @@ function SkillsSection() {
           icon={<Package className="w-4 h-4" />}
           skills={avaSkills}
           onToggle={canMutateRegistry ? toggleSkill : undefined}
-          onDelete={isAdmin() && !mockMode ? deleteSkill : undefined}
+          onDelete={!mockMode ? deleteSkill : undefined}
           toggling={toggling}
           deleting={deleting}
           colorClass="text-[var(--ava-queued)]"

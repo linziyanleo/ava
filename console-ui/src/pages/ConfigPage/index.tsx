@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Save, RefreshCw, FileJson } from 'lucide-react';
 import { api } from '../../api/client'
-import { useAuth } from '../../stores/auth'
 import { RawConfigEditor } from '../../components/settings/RawConfigEditor'
 import type { ConfigData, NanobotConfig, ChannelBase, GatewayConfig } from './types'
 import { Section } from './FormWidgets'
@@ -81,7 +80,6 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [dirty, setDirty] = useState(false);
-  const { canEdit } = useAuth();
   const agentConfigMode = isAgentConfigMode(mode);
 
   const originalRef = useRef<string>('');
@@ -145,7 +143,7 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
     }
   };
 
-  const readOnly = !canEdit();
+  const readOnly = false;
 
   const TABS = [
     { id: 'main' as const, label: PAGE_COPY[mode].tab, icon: FileJson, desc: CONFIG_PATH[mode] },
@@ -178,16 +176,14 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
               <RefreshCw className="w-4 h-4" />
               重载
             </button>
-            {canEdit() && (
-              <button
-                onClick={saveConfig}
-                disabled={!dirty || saving}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-40"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? '保存中...' : '保存'}
-              </button>
-            )}
+            <button
+              onClick={saveConfig}
+              disabled={!dirty || saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-40"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? '保存中...' : '保存'}
+            </button>
           </div>
         )}
       </div>

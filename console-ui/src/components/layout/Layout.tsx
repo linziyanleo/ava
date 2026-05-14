@@ -3,9 +3,9 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { cn } from '../../lib/utils'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 import { useBgTaskNotifications } from '../../hooks/useBgTaskNotifications'
-import { useAuth } from '../../stores/auth'
 import { installTaskFloaterDesktopBridge } from '../../stores/taskFloater'
-import { filterNavItems } from './navItems'
+import { IS_MOCK_SANDBOX } from '../../lib/env'
+import { navItems } from './navItems'
 import TaskFloater from '../tasks/TaskFloater'
 import TopBar from './TopBar'
 import BootstrapBanner from './BootstrapBanner'
@@ -14,8 +14,6 @@ function MobileBottomNav() {
   const location = useLocation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeRef = useRef<HTMLAnchorElement>(null)
-  const { user } = useAuth()
-  const navItems = filterNavItems(user?.role ?? null)
 
   useEffect(() => {
     if (activeRef.current && scrollRef.current) {
@@ -60,7 +58,6 @@ function MobileBottomNav() {
 
 export default function Layout() {
   const { isMobile } = useResponsiveMode()
-  const { user } = useAuth()
   const location = useLocation()
   const isSettingsRoute = location.pathname.startsWith('/settings')
   useBgTaskNotifications()
@@ -72,7 +69,7 @@ export default function Layout() {
       <div className="flex flex-col h-dvh">
         <BootstrapBanner />
         <main className="flex-1 min-h-0 overflow-y-auto">
-          {user?.role === 'mock_tester' && (
+          {IS_MOCK_SANDBOX && (
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] px-3 py-1 text-xs font-medium text-[var(--ava-warning)]">
               MOCK SANDBOX
             </div>

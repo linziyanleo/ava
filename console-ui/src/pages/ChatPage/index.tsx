@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type TouchEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, wsUrl } from '../../api/client'
-import { useAuth } from '../../stores/auth'
+import { IS_MOCK_SANDBOX } from '../../lib/env'
 import { useResponsiveMode } from '../../hooks/useResponsiveMode'
 import type { ChatComposePayload, ChatFileUpload, DirectTaskMessage, DirectTaskStatus, DirectTaskSubmitParams, DirectTaskType, SceneType, SessionMeta, ConversationMeta, RawMessage, TurnGroup, ChatStreamStatus, ActiveChatTransport } from './types'
 import { getNextTurnSeq, groupTurns } from './utils'
@@ -150,9 +150,8 @@ export default function ChatPage() {
   const initializedRef = useRef(false)
   const mobileSessionSwipeStart = useRef<{ x: number; y: number } | null>(null)
   const { isMobile } = useResponsiveMode()
-  const { isMockTester, canEdit } = useAuth()
-  const mockMode = isMockTester()
-  const canMutateChat = canEdit()
+  const mockMode = IS_MOCK_SANDBOX
+  const canMutateChat = true
   const activeTransportRef = useRef<ActiveChatTransport>(activeTransport)
   activeTransportRef.current = activeTransport
   const consoleBusyRef = useRef(false)

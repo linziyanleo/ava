@@ -22,11 +22,9 @@ export const legacyRedirectMatrix: LegacyRedirectRule[] = [
   { from: '/tasks', to: '/', deprecatedAfter: '0.3.0', defaults: { view: 'tasks', task_view: 'scheduled' } },
   { from: '/bg-tasks', to: '/', deprecatedAfter: '0.3.0', defaults: { view: 'tasks', task_view: 'history' } },
   { from: '/tokens', to: '/settings/statistics', deprecatedAfter: '0.3.0' },
-  { from: '/users', to: '/settings/users', deprecatedAfter: '0.3.0' },
   { from: '/browser', to: '/settings/system/browser', deprecatedAfter: '0.3.0' },
   { from: '/gateway', to: '/settings/system/gateway', deprecatedAfter: '0.3.0' },
   { from: '/files', to: '/settings/agents-config/nanobot/memory', deprecatedAfter: '0.3.0' },
-  { from: '/audit', to: '/settings/users', deprecatedAfter: '0.3.0' },
 ]
 
 export function resolveLegacyRedirect(pathname: string, search: string): RedirectLocation | null {

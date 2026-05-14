@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(username, password)
+      await login(password)
       navigate('/')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed')

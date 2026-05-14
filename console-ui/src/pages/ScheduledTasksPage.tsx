@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Save, RefreshCw, Timer, Heart } from 'lucide-react'
 import { api } from '../api/client'
-import { useAuth } from '../stores/auth'
 import { cn } from '../lib/utils'
 import type { ConfigData, NanobotConfig, CronStore } from './ConfigPage/types'
 import { CronJobsEditor } from './ConfigPage/CronJobsEditor'
@@ -18,8 +17,6 @@ export default function ScheduledTasksPage({ embedded = false }: { embedded?: bo
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [dirty, setDirty] = useState(false)
-  const { canEdit } = useAuth()
-  const readOnly = !canEdit()
 
   const loadCron = useCallback(async () => {
     try {
@@ -108,16 +105,14 @@ export default function ScheduledTasksPage({ embedded = false }: { embedded?: bo
           >
             <RefreshCw className="w-4 h-4" /> 重载
           </button>
-          {canEdit() && (
-            <button
-              onClick={handleSave}
-              disabled={!dirty || saving}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-40"
-            >
-              <Save className="w-4 h-4" />
-              {saving ? '保存中...' : '保存'}
-            </button>
-          )}
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium transition-colors disabled:opacity-40"
+          >
+            <Save className="w-4 h-4" />
+            {saving ? '保存中...' : '保存'}
+          </button>
         </div>
       </div>
 
@@ -156,11 +151,11 @@ export default function ScheduledTasksPage({ embedded = false }: { embedded?: bo
         {!hasContent ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">加载中...</div>
         ) : tab === 'cron' && cronStore ? (
-          <CronJobsEditor store={cronStore} readOnly={readOnly} onChange={updateCronStore} />
+          <CronJobsEditor store={cronStore} readOnly={false} onChange={updateCronStore} />
         ) : tab === 'heartbeat' && parsed ? (
           <HeartbeatEditor
             heartbeatConfig={parsed.agents?.defaults?.heartbeat}
-            readOnly={readOnly}
+            readOnly={false}
             onConfigChange={heartbeat => updateParsed(p => ({
               ...p,
               agents: { ...p.agents, defaults: { ...p.agents.defaults, heartbeat } },

@@ -3,7 +3,7 @@ import { ExternalLink, Loader2, Timer } from 'lucide-react'
 import { api } from '../../api/client'
 import { normalizeStatusKind, statusToneClasses } from '../../lib/statusSemantics'
 import { cn } from '../../lib/utils'
-import { useAuth } from '../../stores/auth'
+import { IS_MOCK_SANDBOX } from '../../lib/env'
 
 interface ActiveTask {
   task_id: string
@@ -30,8 +30,7 @@ function statusClass(status: string) {
 }
 
 export function TaskPreviewBar({ onOpenTask, onOpenList, density = 'inline' }: TaskPreviewBarProps) {
-  const { isMockTester } = useAuth()
-  const mockMode = isMockTester()
+  const mockMode = IS_MOCK_SANDBOX
   const [tasks, setTasks] = useState<ActiveTask[]>([])
 
   useEffect(() => {
