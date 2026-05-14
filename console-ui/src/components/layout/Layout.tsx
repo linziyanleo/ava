@@ -61,6 +61,8 @@ function MobileBottomNav() {
 export default function Layout() {
   const { isMobile } = useResponsiveMode()
   const { user } = useAuth()
+  const location = useLocation()
+  const isSettingsRoute = location.pathname.startsWith('/settings')
   useBgTaskNotifications()
 
   useEffect(() => installTaskFloaterDesktopBridge(), [])
@@ -87,7 +89,7 @@ export default function Layout() {
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar />
       <BootstrapBanner />
-      <main className="min-h-0 flex-1 overflow-y-auto">
+      <main className={cn('min-h-0 flex-1', isSettingsRoute ? 'overflow-hidden' : 'overflow-y-auto')}>
         <Outlet />
       </main>
       <TaskFloater />

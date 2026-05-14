@@ -337,8 +337,8 @@ export default function SettingsPage() {
   const activeRoot = visibleItems.find((item) => isNodeActive(item, location.pathname))
 
   return (
-    <div className="flex min-h-full flex-col bg-[var(--bg-primary)] md:h-full md:min-h-0 md:flex-row">
-      <aside className="w-full shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)] p-4 md:w-72 md:border-b-0 md:border-r">
+    <div className="flex min-h-full flex-col bg-[var(--bg-primary)] md:h-full md:min-h-0 md:flex-row md:overflow-hidden">
+      <aside className="w-full shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)] p-4 md:h-full md:min-h-0 md:w-72 md:overflow-y-auto md:border-b-0 md:border-r">
         <div className="mb-4">
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h1>
         </div>
@@ -380,7 +380,7 @@ export default function SettingsPage() {
         )}
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6">
+      <main className="min-w-0 flex-1 overflow-y-auto p-4 md:min-h-0 md:p-6">
         <Outlet />
       </main>
     </div>
