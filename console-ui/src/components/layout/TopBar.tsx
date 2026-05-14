@@ -21,7 +21,7 @@ export default function TopBar() {
           <span className="font-semibold tracking-normal text-[var(--text-primary)]">AVA</span>
         </NavLink>
         {user?.role === 'mock_tester' && (
-          <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+          <span className="inline-flex rounded-full bg-[var(--ava-warning-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--ava-warning)]">
             MOCK SANDBOX
           </span>
         )}

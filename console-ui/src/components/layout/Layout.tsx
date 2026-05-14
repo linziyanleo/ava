@@ -49,7 +49,7 @@ function MobileBottomNav() {
                 : 'text-[var(--text-secondary)]',
             )}
           >
-            <item.icon className={cn('w-5 h-5', isActive && 'drop-shadow-sm')} />
+            <item.icon className="w-5 h-5" />
             <span className={cn('text-[10px] leading-tight', isActive ? 'font-semibold' : 'font-medium')}>{item.label}</span>
           </NavLink>
         )
@@ -73,7 +73,7 @@ export default function Layout() {
         <BootstrapBanner />
         <main className="flex-1 min-h-0 overflow-y-auto">
           {user?.role === 'mock_tester' && (
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] px-3 py-1 text-xs font-medium text-[var(--ava-warning)]">
               MOCK SANDBOX
             </div>
           )}

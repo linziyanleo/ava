@@ -306,7 +306,7 @@ function MCPSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Server className="w-5 h-5 text-cyan-400" />
+          <Server className="w-5 h-5 text-[var(--ava-running)]" />
           MCP servers
           <span className="text-sm text-[var(--text-secondary)] font-normal">({servers.length} 个)</span>
         </h2>
@@ -410,7 +410,7 @@ function MCPSection() {
                   {server.registered_tools.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {server.registered_tools.map(tool => (
-                        <span key={tool} className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 font-mono">
+                        <span key={tool} className="px-1.5 py-0.5 rounded bg-[var(--ava-running-soft)] text-[var(--ava-running)] font-mono">
                           {tool}
                         </span>
                       ))}
@@ -585,7 +585,7 @@ function SkillsSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Puzzle className="w-5 h-5 text-purple-400" />
+          <Puzzle className="w-5 h-5 text-[var(--ava-queued)]" />
           技能
           <span className="text-sm text-[var(--text-secondary)] font-normal">({skills.length} 个)</span>
         </h2>
@@ -615,7 +615,7 @@ function SkillsSection() {
       )}
 
       {mockMode && (
-        <div className="rounded-xl border border-amber-500/25 bg-amber-500/8 p-3 text-sm text-amber-200">
+        <div className="rounded-xl border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-3 text-sm text-[var(--ava-warning)]">
           `mock_tester` 可以查看工具/技能状态，并编辑 mock `TOOLS.md`；启用、安装、删除技能仍保持禁用，避免影响真实 runtime。
         </div>
       )}
@@ -768,8 +768,8 @@ function SkillsSection() {
           onDelete={isAdmin() && !mockMode ? deleteSkill : undefined}
           toggling={toggling}
           deleting={deleting}
-          colorClass="text-purple-400"
-          badgeClass="bg-purple-500/10 text-purple-400"
+          colorClass="text-[var(--ava-queued)]"
+          badgeClass="bg-[var(--ava-queued-soft)] text-[var(--ava-queued)]"
         />
       )}
 
@@ -782,8 +782,8 @@ function SkillsSection() {
           onToggle={canMutateRegistry ? toggleSkill : undefined}
           toggling={toggling}
           deleting={deleting}
-          colorClass="text-amber-400"
-          badgeClass="bg-amber-500/10 text-amber-400"
+          colorClass="text-[var(--ava-warning)]"
+          badgeClass="bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]"
         />
       )}
 

@@ -34,8 +34,8 @@ const ACTION_COLORS: Record<string, string> = {
   'file.update': 'text-[var(--accent)]',
   'gateway.restart': 'text-[var(--warning)]',
   'secret.reveal': 'text-[var(--danger)]',
-  'user.create': 'text-purple-400',
-  'user.update': 'text-purple-400',
+  'user.create': 'text-[var(--ava-queued)]',
+  'user.update': 'text-[var(--ava-queued)]',
   'user.delete': 'text-[var(--danger)]',
   'chat.send': 'text-[var(--text-secondary)]',
   'media.delete': 'text-[var(--danger)]',
@@ -336,7 +336,7 @@ export default function UsersPage() {
                       : u.role === 'editor'
                         ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
                         : u.role === 'read_only'
-                          ? 'bg-slate-500/10 text-slate-400'
+                          ? 'bg-[var(--ava-idle-soft)] text-[var(--ava-idle)]'
                           : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                   }`}
                 >

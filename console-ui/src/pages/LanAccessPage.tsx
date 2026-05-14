@@ -320,7 +320,7 @@ export default function LanAccessPage() {
                   <td className="py-3 pr-3 text-right">
                     <div className="flex justify-end gap-2">
                       <button type="button" onClick={() => renew(device.device_id)} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:border-[var(--accent)]">Renew</button>
-                      <button type="button" onClick={() => revoke(device.device_id)} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-red-400 hover:border-red-400">Revoke</button>
+                      <button type="button" onClick={() => revoke(device.device_id)} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--ava-danger)] hover:border-[var(--ava-danger-border)]">Revoke</button>
                     </div>
                   </td>
                 </tr>

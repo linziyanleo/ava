@@ -68,7 +68,7 @@ export default function MobilePairPage() {
             Pair
           </button>
         </form>
-        {message && <div className="mt-4 text-sm text-red-400">{message}</div>}
+        {message && <div className="mt-4 text-sm text-[var(--ava-danger)]">{message}</div>}
       </section>
     </main>
   )

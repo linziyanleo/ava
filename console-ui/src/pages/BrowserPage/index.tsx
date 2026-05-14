@@ -125,7 +125,7 @@ export default function BrowserPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-gray-400'}`} />
+          <span className={`w-2 h-2 rounded-full ${connected ? 'bg-[var(--ava-success)]' : 'bg-[var(--ava-idle)]'}`} />
           {connected ? '已连接' : '未连接'}
         </div>
       </div>

@@ -124,7 +124,7 @@ function StatusBadge({ status }: { status: string | null }) {
   const map: Record<string, { icon: React.ReactNode; cls: string; label: string }> = {
     ok: { icon: <CheckCircle2 className="w-3 h-3" />, cls: 'text-[var(--success)]', label: '成功' },
     error: { icon: <XCircle className="w-3 h-3" />, cls: 'text-[var(--danger)]', label: '失败' },
-    skipped: { icon: <AlertCircle className="w-3 h-3" />, cls: 'text-yellow-400', label: '跳过' },
+    skipped: { icon: <AlertCircle className="w-3 h-3" />, cls: 'text-[var(--ava-warning)]', label: '跳过' },
   };
   const s = map[status] ?? { icon: null, cls: 'text-[var(--text-secondary)]', label: status };
   return (
@@ -366,7 +366,7 @@ function JobCard({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {job.deleteAfterRun && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] bg-yellow-500/15 text-yellow-400">一次性</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]">一次性</span>
             )}
             <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
               {job.source === 'schedule' ? '预设' : 'CLI'}

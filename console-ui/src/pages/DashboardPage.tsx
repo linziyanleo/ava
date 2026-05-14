@@ -189,7 +189,7 @@ export default function DashboardPage() {
           label: '定时任务',
           value: 'Mock Cron',
           sub: '定时任务在模拟数据目录下',
-          color: 'text-cyan-400',
+          color: 'text-[var(--ava-running)]',
           onClick: () => openTaskFloater({ panel: 'scheduled' }),
         },
         {
@@ -197,7 +197,7 @@ export default function DashboardPage() {
           label: '后台任务',
           value: 'Mock Tasks',
           sub: '查看空/模拟安全的任务状态',
-          color: 'text-blue-400',
+          color: 'text-[var(--ava-running)]',
           onClick: () => openTaskFloater({ panel: 'background', bgView: 'history' }),
         },
         {
@@ -205,7 +205,7 @@ export default function DashboardPage() {
           label: '记忆',
           value: 'Mock Memory',
           sub: '预览人设和记忆文档',
-          color: 'text-amber-400',
+          color: 'text-[var(--ava-warning)]',
           onClick: () => navigate('/settings/agents-config/nanobot/memory'),
         },
         {
@@ -213,7 +213,7 @@ export default function DashboardPage() {
           label: '生成图片',
           value: 'Mock Media',
           sub: '图片库限定在模拟数据目录内',
-          color: 'text-emerald-400',
+          color: 'text-[var(--ava-success)]',
           onClick: () => openTaskFloater({ panel: 'artifacts' }),
         },
         {
@@ -221,7 +221,7 @@ export default function DashboardPage() {
           label: '人设',
           value: 'Mock Persona',
           sub: '在沙盒中编辑工作区身份文件',
-          color: 'text-violet-400',
+          color: 'text-[var(--ava-queued)]',
           onClick: () => navigate('/settings/agents-config/nanobot/persona'),
         },
         {
@@ -229,7 +229,7 @@ export default function DashboardPage() {
           label: '技能和工具',
           value: 'Mock Skills',
           sub: '查看工具注册表和模拟 TOOLS.md',
-          color: 'text-fuchsia-400',
+          color: 'text-[var(--ava-queued)]',
           onClick: () => navigate('/settings/tools/skills'),
         },
         {
@@ -245,7 +245,7 @@ export default function DashboardPage() {
           label: 'Token 统计',
           value: 'Mock Stats',
           sub: 'Token 图表来自模拟数据库',
-          color: 'text-sky-400',
+          color: 'text-[var(--ava-running)]',
           onClick: () => navigate('/settings/statistics'),
         },
       ]
@@ -263,7 +263,7 @@ export default function DashboardPage() {
           label: '记忆',
           value: '记忆',
           sub: '浏览全局和个人记忆文件',
-          color: 'text-amber-400',
+          color: 'text-[var(--ava-warning)]',
           onClick: () => navigate('/settings/agents-config/nanobot/memory'),
         },
         {
@@ -271,7 +271,7 @@ export default function DashboardPage() {
           label: '人设',
           value: '人设',
           sub: '查看核心 Agent 身份文件',
-          color: 'text-emerald-400',
+          color: 'text-[var(--ava-success)]',
           onClick: () => navigate('/settings/agents-config/nanobot/persona'),
         },
         {
@@ -279,7 +279,7 @@ export default function DashboardPage() {
           label: '聊天',
           value: '聊天',
           sub: '打开实时 Agent 会话和调试流程',
-          color: 'text-fuchsia-400',
+          color: 'text-[var(--ava-queued)]',
           onClick: () => navigate('/'),
         },
       ]
@@ -292,12 +292,12 @@ export default function DashboardPage() {
       </div>
 
       {mockMode && (
-        <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+        <div className="mb-4 rounded-2xl border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-4">
           <div className="flex items-start gap-3">
-            <Shield className="mt-0.5 h-5 w-5 text-amber-400" />
+            <Shield className="mt-0.5 h-5 w-5 text-[var(--ava-warning)]" />
             <div>
-              <p className="text-sm font-semibold text-amber-300">模拟沙盒</p>
-              <p className="mt-1 text-sm text-amber-100/80">
+              <p className="text-sm font-semibold text-[var(--ava-warning)]">模拟沙盒</p>
+              <p className="mt-1 text-sm text-[var(--ava-warning)]/80">
                 当前账号只能读取和编辑 `~/.nanobot/console/mock_data/`。真实 workspace、真实 `~/.nanobot`、live agent
                 执行与 gateway 控制都不会暴露给这个账号；聊天与后台任务页面也只展示 mock-safe 数据或空态。
               </p>
@@ -500,14 +500,14 @@ export default function DashboardPage() {
       </div>
 
       {!mockMode && activeTasks && activeTasks.running > 0 && (
-        <div className="mb-6 rounded-xl border border-blue-500/30 bg-[var(--bg-secondary)] p-5">
+        <div className="mb-6 rounded-xl border border-[var(--ava-running-border)] bg-[var(--bg-secondary)] p-5">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-blue-500/10 p-2">
-                <Cpu className="h-4 w-4 text-blue-400" />
+              <div className="rounded-lg bg-[var(--ava-running-soft)] p-2">
+                <Cpu className="h-4 w-4 text-[var(--ava-running)]" />
               </div>
               <h2 className="text-sm font-semibold">后台任务</h2>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ava-running-soft)] px-2 py-0.5 text-xs font-medium text-[var(--ava-running)]">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 {activeTasks.running} 运行中
               </span>
@@ -535,7 +535,7 @@ export default function DashboardPage() {
                     className="flex w-full items-center gap-3 rounded-lg bg-[var(--bg-primary)] p-3 text-left transition-colors hover:bg-[var(--bg-tertiary)]"
                   >
                     <StatusIcon
-                      className={`h-4 w-4 ${task.status === 'running' ? 'animate-spin text-blue-400' : 'text-yellow-500'}`}
+                      className={`h-4 w-4 ${task.status === 'running' ? 'animate-spin text-[var(--ava-running)]' : 'text-[var(--ava-warning)]'}`}
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{task.prompt_preview || '(no prompt)'}</p>

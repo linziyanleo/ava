@@ -123,7 +123,7 @@ type TokenStatsView = 'records' | 'turns' | 'charts';
 type ConversationScope = string | null;
 type ChatTurnMap = Record<string, ChatTurnGroup>;
 
-const PIE_COLORS = ['#3b82f6', '#8b5cf6'];
+const PIE_COLORS = ['#8FB6FF', '#D7B5FF'];
 
 function fmtTooltip(v: number | string | ReadonlyArray<number | string> | undefined): string {
   const raw = Array.isArray(v) ? v[0] : v;
@@ -232,12 +232,12 @@ function getTurnStatus(
 } {
   const source = records.length > 0 ? records : iterations;
   if (source.some(item => item.model_role === 'pending')) {
-    return { label: 'Processing', className: 'bg-amber-500/15 text-amber-400' };
+    return { label: 'Processing', className: 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]' };
   }
   if (source.some(item => item.model_role === 'error' || /error/i.test(item.finish_reason || ''))) {
-    return { label: 'Error', className: 'bg-rose-500/15 text-rose-400' };
+    return { label: 'Error', className: 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]' };
   }
-  return { label: 'Completed', className: 'bg-emerald-500/15 text-emerald-400' };
+  return { label: 'Completed', className: 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' };
 }
 
 function sortTurnRecords(records: TokenRecord[]): TokenRecord[] {
@@ -314,16 +314,16 @@ function getCallLabel(toolNames: string, finishReason: string): string {
 }
 
 function getCallLabelTone(toolNames: string, finishReason: string): string {
-  if (normalizeToolNames(toolNames)) return 'bg-amber-500/15 text-amber-400';
-  if (finishReason === 'end_turn' || finishReason === 'stop') return 'bg-emerald-500/15 text-emerald-400';
-  return 'bg-gray-500/15 text-gray-400';
+  if (normalizeToolNames(toolNames)) return 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]';
+  if (finishReason === 'end_turn' || finishReason === 'stop') return 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]';
+  return 'bg-[var(--ava-idle-soft)] text-[var(--ava-idle)]';
 }
 
 function CallLabelBadge({
   label,
   className,
   widthClass = 'max-w-[80px]',
-  toneClass = 'bg-amber-500/15 text-amber-400',
+  toneClass = 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]',
 }: {
   label: string;
   className?: string;
@@ -354,7 +354,7 @@ function formatCacheStatus(cachedTokens: number, cacheCreationTokens: number): R
 
   if (cacheCreationTokens > 0) {
     parts.push(
-      <span key="write" className="text-amber-400" title={`写入缓存 ${cacheCreationTokens.toLocaleString()} tokens`}>
+      <span key="write" className="text-[var(--ava-warning)]" title={`写入缓存 ${cacheCreationTokens.toLocaleString()} tokens`}>
         ✍️ {formatTokens(cacheCreationTokens)}
       </span>,
     );
@@ -362,7 +362,7 @@ function formatCacheStatus(cachedTokens: number, cacheCreationTokens: number): R
 
   if (cachedTokens > 0) {
     parts.push(
-      <span key="hit" className="text-emerald-400" title={`命中缓存 ${cachedTokens.toLocaleString()} tokens`}>
+      <span key="hit" className="text-[var(--ava-success)]" title={`命中缓存 ${cachedTokens.toLocaleString()} tokens`}>
         🎯 {formatTokens(cachedTokens)}
       </span>,
     );
@@ -936,7 +936,7 @@ export default function TokenStatsPage() {
           <span
             className={cn(
               'inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium',
-              isSessionMode ? 'bg-cyan-500/15 text-cyan-400' : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
+              isSessionMode ? 'bg-[var(--ava-running-soft)] text-[var(--ava-running)]' : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
             )}
           >
             {isSessionMode ? '单 Session 调试' : '全局审计'}
@@ -1019,12 +1019,12 @@ export default function TokenStatsPage() {
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
               <span className="text-[var(--text-secondary)]">Turns:</span>{' '}
-              <span className="font-semibold text-cyan-400">{sessionTurnCount}</span>
+              <span className="font-semibold text-[var(--ava-running)]">{sessionTurnCount}</span>
             </span>
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
               <span className="text-[var(--text-secondary)]">Calls:</span>{' '}
-              <span className="font-semibold text-purple-400">{sessionLlmCalls}</span>
+              <span className="font-semibold text-[var(--ava-queued)]">{sessionLlmCalls}</span>
             </span>
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
@@ -1042,11 +1042,11 @@ export default function TokenStatsPage() {
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">Turn 数</p>
-              <p className="text-xl font-bold text-cyan-400">{sessionTurnCount}</p>
+              <p className="text-xl font-bold text-[var(--ava-running)]">{sessionTurnCount}</p>
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">LLM 调用</p>
-              <p className="text-xl font-bold text-purple-400">{sessionLlmCalls}</p>
+              <p className="text-xl font-bold text-[var(--ava-queued)]">{sessionLlmCalls}</p>
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">Session Token</p>
@@ -1065,17 +1065,17 @@ export default function TokenStatsPage() {
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
               <span className="text-[var(--text-secondary)]">Calls:</span>{' '}
-              <span className="font-semibold text-purple-400">{summary.totals.total_calls}</span>
+              <span className="font-semibold text-[var(--ava-queued)]">{summary.totals.total_calls}</span>
             </span>
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
               <span className="text-[var(--text-secondary)]">In:</span>{' '}
-              <span className="font-semibold text-cyan-400">{formatTokens(summary.totals.prompt_tokens)}</span>
+              <span className="font-semibold text-[var(--ava-running)]">{formatTokens(summary.totals.prompt_tokens)}</span>
             </span>
             <span className="text-[var(--border)]">|</span>
             <span className="shrink-0">
               <span className="text-[var(--text-secondary)]">Out:</span>{' '}
-              <span className="font-semibold text-emerald-400">{formatTokens(summary.totals.completion_tokens)}</span>
+              <span className="font-semibold text-[var(--ava-success)]">{formatTokens(summary.totals.completion_tokens)}</span>
             </span>
           </div>
         ) : (
@@ -1086,15 +1086,15 @@ export default function TokenStatsPage() {
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">LLM 调用</p>
-              <p className="text-xl font-bold text-purple-400">{summary.totals.total_calls}</p>
+              <p className="text-xl font-bold text-[var(--ava-queued)]">{summary.totals.total_calls}</p>
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">Prompt Tokens</p>
-              <p className="text-xl font-bold text-cyan-400">{formatTokens(summary.totals.prompt_tokens)}</p>
+              <p className="text-xl font-bold text-[var(--ava-running)]">{formatTokens(summary.totals.prompt_tokens)}</p>
             </div>
             <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
               <p className="text-xs text-[var(--text-secondary)] mb-1">Completion Tokens</p>
-              <p className="text-xl font-bold text-emerald-400">{formatTokens(summary.totals.completion_tokens)}</p>
+              <p className="text-xl font-bold text-[var(--ava-success)]">{formatTokens(summary.totals.completion_tokens)}</p>
             </div>
           </div>
         ))
@@ -1470,11 +1470,11 @@ export default function TokenStatsPage() {
                       labelStyle={{ color: 'var(--text-primary)' }}
                       formatter={fmtTooltip}
                     />
-                    <Bar dataKey="prompt_tokens" name="Prompt" fill="#3b82f6" stackId="a" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="prompt_tokens" name="Prompt" fill="#8FB6FF" stackId="a" radius={[0, 0, 0, 0]} />
                     <Bar
                       dataKey="completion_tokens"
                       name="Completion"
-                      fill="#8b5cf6"
+                      fill="#D7B5FF"
                       stackId="a"
                       radius={[0, 4, 4, 0]}
                     />
@@ -1504,8 +1504,8 @@ export default function TokenStatsPage() {
                         }}
                         formatter={fmtTooltip}
                       />
-                      <Bar dataKey="prompt_tokens" name="Prompt" fill="#06b6d4" />
-                      <Bar dataKey="completion_tokens" name="Completion" fill="#10b981" />
+                      <Bar dataKey="prompt_tokens" name="Prompt" fill={PIE_COLORS[0]} />
+                      <Bar dataKey="completion_tokens" name="Completion" fill={PIE_COLORS[1]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1661,7 +1661,7 @@ function ClaudeCodeMeta({ record }: { record: TokenRecord }) {
         {cost_usd > 0 && (
           <div>
             <span className="text-[var(--text-secondary)]">Cost: </span>
-            <span className="font-medium text-amber-400">${cost_usd.toFixed(4)}</span>
+            <span className="font-medium text-[var(--ava-warning)]">${cost_usd.toFixed(4)}</span>
           </div>
         )}
       </div>
@@ -1670,19 +1670,19 @@ function ClaudeCodeMeta({ record }: { record: TokenRecord }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
           <div className="text-[10px] text-[var(--text-secondary)]">Input (non-cached)</div>
-          <div className="text-sm font-medium text-cyan-400">{formatTokens(Math.max(0, nonCachedInput))}</div>
+          <div className="text-sm font-medium text-[var(--ava-running)]">{formatTokens(Math.max(0, nonCachedInput))}</div>
         </div>
         <div className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
           <div className="text-[10px] text-[var(--text-secondary)]">Cache Read 🎯</div>
-          <div className="text-sm font-medium text-emerald-400">{formatTokens(cached_tokens || 0)}</div>
+          <div className="text-sm font-medium text-[var(--ava-success)]">{formatTokens(cached_tokens || 0)}</div>
         </div>
         <div className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
           <div className="text-[10px] text-[var(--text-secondary)]">Cache Write ✍️</div>
-          <div className="text-sm font-medium text-amber-400">{formatTokens(cache_creation_tokens || 0)}</div>
+          <div className="text-sm font-medium text-[var(--ava-warning)]">{formatTokens(cache_creation_tokens || 0)}</div>
         </div>
         <div className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
           <div className="text-[10px] text-[var(--text-secondary)]">Output</div>
-          <div className="text-sm font-medium text-purple-400">{formatTokens(completion_tokens)}</div>
+          <div className="text-sm font-medium text-[var(--ava-queued)]">{formatTokens(completion_tokens)}</div>
         </div>
       </div>
 
@@ -1729,10 +1729,10 @@ function RecordRow({
           <ModelRoleIcon role={r.model_role || 'default'} />
         </td>
         <td className="px-4 py-2.5 text-xs">{r.provider}</td>
-        <td className="px-4 py-2.5 text-right text-cyan-400 text-xs">
+        <td className="px-4 py-2.5 text-right text-[var(--ava-running)] text-xs">
           {r.model_role === 'pending' ? '—' : formatTokens(r.prompt_tokens)}
         </td>
-        <td className="px-4 py-2.5 text-right text-emerald-400 text-xs">
+        <td className="px-4 py-2.5 text-right text-[var(--ava-success)] text-xs">
           {r.model_role === 'pending' ? '—' : formatTokens(r.completion_tokens)}
         </td>
         <td className="px-4 py-2.5 text-center">
@@ -1746,8 +1746,8 @@ function RecordRow({
             <span
               className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${
                 r.finish_reason === 'end_turn' || r.finish_reason === 'stop'
-                  ? 'bg-emerald-500/15 text-emerald-400'
-                  : 'bg-gray-500/15 text-gray-400'
+                  ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]'
+                  : 'bg-[var(--ava-idle-soft)] text-[var(--ava-idle)]'
               }`}
             >
               {r.finish_reason === 'end_turn' || r.finish_reason === 'stop' ? 'end' : r.finish_reason || '—'}
@@ -1757,7 +1757,7 @@ function RecordRow({
         <td className="px-4 py-2.5 text-right font-medium text-xs">{formatTokens(r.total_tokens)}</td>
         <td className="px-4 py-2.5 text-right text-xs">
           {r.cost_usd > 0 ? (
-            <span className="text-amber-400 font-medium">${r.cost_usd.toFixed(4)}</span>
+            <span className="text-[var(--ava-warning)] font-medium">${r.cost_usd.toFixed(4)}</span>
           ) : (
             <span className="text-[var(--text-secondary)]">—</span>
           )}
@@ -1990,11 +1990,11 @@ function TurnClusterList({
                   </div>
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2">
                     <div className="text-[10px] text-[var(--text-secondary)]">Prompt</div>
-                    <div className="text-sm font-semibold text-cyan-400">{formatTokens(summary.prompt_tokens)}</div>
+                    <div className="text-sm font-semibold text-[var(--ava-running)]">{formatTokens(summary.prompt_tokens)}</div>
                   </div>
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2">
                     <div className="text-[10px] text-[var(--text-secondary)]">Completion</div>
-                    <div className="text-sm font-semibold text-emerald-400">
+                    <div className="text-sm font-semibold text-[var(--ava-success)]">
                       {formatTokens(summary.completion_tokens)}
                     </div>
                   </div>
@@ -2123,7 +2123,7 @@ function TurnCallEntry({ record }: { record: TokenRecord }) {
         <div className="border-t border-[var(--border)] px-3 py-3 space-y-3">
           <div className="flex flex-wrap gap-3 text-[11px] text-[var(--text-secondary)]">
             <span>{formatCacheStatus(record.cached_tokens || 0, record.cache_creation_tokens || 0)}</span>
-            {record.cost_usd > 0 && <span className="text-amber-400">${record.cost_usd.toFixed(4)}</span>}
+            {record.cost_usd > 0 && <span className="text-[var(--ava-warning)]">${record.cost_usd.toFixed(4)}</span>}
           </div>
 
           {record.output_content && (

@@ -52,8 +52,8 @@ export function CodeBlock({ language, code, className }: CodeBlockProps) {
         className={cn(
           'flex items-center justify-between gap-3 px-4 py-2 text-xs',
           isDark
-            ? 'bg-slate-900 text-slate-300'
-            : 'bg-slate-100 text-slate-600',
+            ? 'bg-[var(--bg-primary)] text-[var(--text-secondary)]'
+            : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]',
         )}
       >
         <span className="font-mono lowercase">
@@ -65,8 +65,8 @@ export function CodeBlock({ language, code, className }: CodeBlockProps) {
           className={cn(
             'inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono transition-colors',
             isDark
-              ? 'hover:bg-slate-800 hover:text-slate-100'
-              : 'hover:bg-slate-200 hover:text-slate-900',
+              ? 'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
+              : 'hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)]',
           )}
           aria-label="复制代码"
         >

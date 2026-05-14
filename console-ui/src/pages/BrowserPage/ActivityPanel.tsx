@@ -8,18 +8,18 @@ interface ActivityPanelProps {
 }
 
 const typeConfig: Record<string, { icon: string; color: string; label: string }> = {
-  thinking: { icon: '●', color: 'text-yellow-400', label: 'Thinking' },
-  executing: { icon: '◉', color: 'text-blue-400', label: 'Executing' },
-  executed: { icon: '✓', color: 'text-green-400', label: 'Executed' },
-  retrying: { icon: '↻', color: 'text-orange-400', label: 'Retrying' },
-  error: { icon: '✗', color: 'text-red-400', label: 'Error' },
+  thinking: { icon: '●', color: 'text-[var(--ava-warning)]', label: 'Thinking' },
+  executing: { icon: '◉', color: 'text-[var(--ava-running)]', label: 'Executing' },
+  executed: { icon: '✓', color: 'text-[var(--ava-success)]', label: 'Executed' },
+  retrying: { icon: '↻', color: 'text-[var(--ava-warning)]', label: 'Retrying' },
+  error: { icon: '✗', color: 'text-[var(--ava-danger)]', label: 'Error' },
 }
 
 const statusColors: Record<string, string> = {
-  idle: 'bg-gray-400',
-  running: 'bg-green-400 animate-pulse',
-  completed: 'bg-blue-400',
-  error: 'bg-red-400',
+  idle: 'bg-[var(--ava-idle)]',
+  running: 'bg-[var(--ava-running)] motion-safe:animate-pulse',
+  completed: 'bg-[var(--ava-success)]',
+  error: 'bg-[var(--ava-danger)]',
 }
 
 export default function ActivityPanel({ entries, status, pageUrl, stepCount }: ActivityPanelProps) {

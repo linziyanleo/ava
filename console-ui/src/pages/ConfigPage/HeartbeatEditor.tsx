@@ -142,7 +142,7 @@ function TaskCard({
     <div className={`bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl overflow-hidden transition-opacity ${isCompleted ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex-1 flex items-center gap-3 min-w-0">
-          <Heart className={`w-4 h-4 shrink-0 ${isCompleted ? 'text-[var(--text-secondary)]' : 'text-red-400'}`} />
+          <Heart className={`w-4 h-4 shrink-0 ${isCompleted ? 'text-[var(--text-secondary)]' : 'text-[var(--ava-danger)]'}`} />
           {editing ? (
             <input
               type="text"
@@ -349,7 +349,7 @@ export function HeartbeatEditor({
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Heart className="w-4 h-4 text-red-400" /> 心跳状态
+            <Heart className="w-4 h-4 text-[var(--ava-danger)]" /> 心跳状态
           </h3>
           <div className="flex items-center gap-2">
             <button
