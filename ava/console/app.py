@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from loguru import logger
@@ -17,11 +16,9 @@ from ava.adapters.nanobot.discovery import resolve_nanobot_checkout
 from ava.console import auth
 from ava.console.middleware import setup_cors
 from ava.console.middleware import get_client_ip
-from ava.console.mock_bundle_runtime import (
-    MockBackgroundTaskStore,
-    MockGatewayService,
+from ava.console.local_accounts import (
     ensure_local_accounts,
-    prepare_mock_runtime,
+    migrate_users_json_to_owner,
 )
 from ava.console.models import UserInfo
 from ava.console.ui_build import prepare_console_ui_dist
@@ -51,7 +48,7 @@ class Services:
     audit: AuditService
     config: ConfigService
     files: FileService
-    gateway: GatewayService | MockGatewayService
+    gateway: GatewayService
     lan_access: LanAccessService
     mdns: LanMdnsService
     tunnel: TunnelService
@@ -68,7 +65,6 @@ class Services:
     agent_process_manager: AgentProcessManager | None = None
     agent_lifecycle_events: list[dict[str, Any]] = field(default_factory=list)
     db: Any | None = None
-    mock: "Services | None" = None
 
 
 _services: Services | None = None
@@ -81,10 +77,7 @@ def get_services() -> Services:
 
 
 def get_services_for_user(user: UserInfo | None = None) -> Services:
-    services = get_services()
-    if user and user.role == "mock_tester" and services.mock is not None:
-        return services.mock
-    return services
+    return get_services()
 
 
 def _proxy_close_params(
@@ -213,21 +206,17 @@ def create_console_app(
 
     lifecycle_mgr = getattr(agent_loop, "lifecycle_manager", None) if agent_loop else None
 
+    migrate_users_json_to_owner(console_dir)
     users = UserService(console_dir)
     ensure_local_accounts(users, console_dir)
-    mock_runtime = prepare_mock_runtime(console_dir, console_cfg.port)
     from ava.storage import Database
     if db is None:
         db = Database(nanobot_dir / "nanobot.db")
-    mock_db = Database(mock_runtime.db_path)
     trace_spans = TraceSpanStore(db) if db is not None else None
     workflow_store = WorkflowStore(db) if db is not None else None
     artifact_store = ArtifactStore(db) if db is not None else None
     if token_stats_collector is not None:
         token_stats_collector._trace_spans = trace_spans
-    mock_trace_spans = TraceSpanStore(mock_db) if mock_db is not None else None
-    mock_workflow_store = WorkflowStore(mock_db) if mock_db is not None else None
-    mock_artifact_store = ArtifactStore(mock_db) if mock_db is not None else None
     agent_lifecycle_events: list[dict[str, Any]] = []
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
     repo_root = Path(__file__).resolve().parents[2]
@@ -286,55 +275,6 @@ def create_console_app(
     )
     if trace_spans is not None:
         trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
-    mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
-    mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
-    mock_lan_access = LanAccessService(mock_runtime.root, console_port=console_cfg.port, db=mock_db)
-    mock_lan_https = LanHttpsService(mock_runtime.root)
-    mock_tunnel = TunnelService(repo_root=repo_root, console_port=console_cfg.port)
-    mock_mdns = LanMdnsService(port=console_cfg.port)
-    mock_network = ConsoleNetworkService(
-        nanobot_dir=mock_runtime.root,
-        port=console_cfg.port,
-        lan_access=mock_lan_access,
-        lan_https=mock_lan_https,
-        tunnel=mock_tunnel,
-    )
-
-    real_services.mock = Services(
-        users=users,
-        audit=AuditService(mock_runtime.root, db=mock_db),
-        config=ConfigService(mock_runtime.root),
-        files=FileService(mock_runtime.workspace, mock_runtime.root),
-        gateway=MockGatewayService(console_cfg.port),
-        lan_access=mock_lan_access,
-        mdns=mock_mdns,
-        tunnel=mock_tunnel,
-        lan_https=mock_lan_https,
-        pair_throttle=PairThrottleService(mock_db),
-        network=mock_network,
-        media=MediaService(
-            media_dir=mock_runtime.media_dir,
-            screenshot_dir=mock_runtime.media_dir.parent / "screenshots",
-            db=mock_db,
-        ),
-        skills=SkillsService(
-            mock_runtime.workspace,
-            skill_dir,
-            mock_runtime.root,
-            upstream_skills_dir=upstream_skills_dir,
-            db=mock_db,
-        ),
-        chat=mock_chat,
-        token_stats=TokenStatsCollector(
-            data_dir=mock_runtime.root,
-            db=mock_db,
-            trace_spans=mock_trace_spans,
-        ) if mock_db is not None else None,
-        trace_spans=mock_trace_spans,
-        workflow_store=mock_workflow_store,
-        artifact_store=mock_artifact_store,
-        db=mock_db,
-    )
     _services = real_services
     auth.set_device_token_validator(real_services.lan_access.validate_device_token)
 
@@ -425,20 +365,16 @@ def create_console_app_standalone(
     skill_dir = Path(__file__).parent.parent / "skills"
     upstream_skills_dir = resolve_nanobot_checkout().skills_dir
 
+    migrate_users_json_to_owner(console_dir)
     users = UserService(console_dir)
     ensure_local_accounts(users, console_dir)
 
     db_path = nanobot_dir / "nanobot.db"
     from ava.storage import Database
     db = Database(db_path)
-    mock_runtime = prepare_mock_runtime(console_dir, console_port)
-    mock_db = Database(mock_runtime.db_path)
     trace_spans = TraceSpanStore(db)
-    mock_trace_spans = TraceSpanStore(mock_db)
     workflow_store = WorkflowStore(db)
     artifact_store = ArtifactStore(db)
-    mock_workflow_store = WorkflowStore(mock_db)
-    mock_artifact_store = ArtifactStore(mock_db)
     agent_lifecycle_events: list[dict[str, Any]] = []
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
     repo_root = Path(__file__).resolve().parents[2]
@@ -498,51 +434,6 @@ def create_console_app_standalone(
         db=db,
     )
     trace_spans.mark_interrupted(stale_threshold_ns=30 * 60 * 1_000_000_000)
-    mock_chat = ChatService(agent_loop=None, workspace=mock_runtime.workspace, db=mock_db)
-    mock_chat._agent = SimpleNamespace(bg_tasks=MockBackgroundTaskStore())
-    mock_lan_access = LanAccessService(mock_runtime.root, console_port=console_port, db=mock_db)
-    mock_lan_https = LanHttpsService(mock_runtime.root)
-    mock_tunnel = TunnelService(repo_root=repo_root, console_port=console_port)
-    mock_mdns = LanMdnsService(port=console_port)
-    mock_network = ConsoleNetworkService(
-        nanobot_dir=mock_runtime.root,
-        port=console_port,
-        lan_access=mock_lan_access,
-        lan_https=mock_lan_https,
-        tunnel=mock_tunnel,
-    )
-
-    real_services.mock = Services(
-        users=users,
-        audit=AuditService(mock_runtime.root, db=mock_db),
-        config=ConfigService(mock_runtime.root),
-        files=FileService(mock_runtime.workspace, mock_runtime.root),
-        gateway=MockGatewayService(console_port),
-        lan_access=mock_lan_access,
-        mdns=mock_mdns,
-        tunnel=mock_tunnel,
-        lan_https=mock_lan_https,
-        pair_throttle=PairThrottleService(mock_db),
-        network=mock_network,
-        media=MediaService(
-            media_dir=mock_runtime.media_dir,
-            screenshot_dir=mock_runtime.media_dir.parent / "screenshots",
-            db=mock_db,
-        ),
-        skills=SkillsService(
-            mock_runtime.workspace,
-            skill_dir,
-            mock_runtime.root,
-            upstream_skills_dir=upstream_skills_dir,
-            db=mock_db,
-        ),
-        chat=mock_chat,
-        token_stats=TokenStatsCollector(data_dir=mock_runtime.root, db=mock_db, trace_spans=mock_trace_spans),
-        trace_spans=mock_trace_spans,
-        workflow_store=mock_workflow_store,
-        artifact_store=mock_artifact_store,
-        db=mock_db,
-    )
     _services = real_services
     auth.set_device_token_validator(real_services.lan_access.validate_device_token)
 

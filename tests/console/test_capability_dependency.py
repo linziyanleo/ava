@@ -55,7 +55,7 @@ def _client() -> TestClient:
         return {"user": user.username, "role": user.role}
 
     @app.post("/api/agents/nanobot/process/start")
-    async def process_action(user: UserInfo = Depends(auth.require_role("admin"))):
+    async def process_action(user: UserInfo = Depends(auth.require_role("owner"))):
         return {"user": user.username}
 
     return TestClient(app)
@@ -64,8 +64,7 @@ def _client() -> TestClient:
 def test_operate_or_helper_separates_console_roles_from_device_capabilities():
     client = _client()
 
-    assert client.post("/api/console/direct-tasks", headers=_headers("viewer")).status_code == 403
-    assert client.post("/api/console/direct-tasks", headers=_headers("editor")).status_code == 200
+    assert client.post("/api/console/direct-tasks", headers=_headers("owner")).status_code == 200
     assert client.post(
         "/api/console/direct-tasks",
         headers=_headers("read_only", kind="device", capabilities=["read"]),
@@ -76,7 +75,7 @@ def test_operate_or_helper_separates_console_roles_from_device_capabilities():
     ).status_code == 200
 
 
-def test_read_and_admin_only_routes_do_not_degrade():
+def test_read_and_owner_only_routes_do_not_degrade():
     client = _client()
 
     assert client.get(
@@ -87,10 +86,8 @@ def test_read_and_admin_only_routes_do_not_degrade():
         "/api/agents",
         headers=_headers("read_only", kind="device", capabilities=["read"]),
     ).status_code == 200
-    assert client.get("/api/agents", headers=_headers("viewer")).status_code == 200
-    assert client.get("/api/agents", headers=_headers("read_only")).status_code == 200
-    assert client.post("/api/agents/nanobot/process/start", headers=_headers("editor")).status_code == 403
-    assert client.post("/api/agents/nanobot/process/start", headers=_headers("admin")).status_code == 200
+    assert client.get("/api/agents", headers=_headers("owner")).status_code == 200
+    assert client.post("/api/agents/nanobot/process/start", headers=_headers("owner")).status_code == 200
     assert client.post(
         "/api/agents/nanobot/process/start",
         headers=_headers("read_only", kind="device", capabilities=["read", "operate"]),

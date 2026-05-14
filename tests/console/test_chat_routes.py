@@ -91,17 +91,27 @@ class _FakeChatService:
         return [{"session_id": session_id, "summary_text": "已压缩早期上下文"}]
 
 
-def _headers(role: str = "viewer") -> dict[str, str]:
-    token = auth.create_access_token({
+def _headers(role: str = "owner", *, kind: str = "console", capabilities: list[str] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {
         "sub": f"{role}_user",
         "role": role,
         "created_at": "",
-    })
+    }
+    if kind == "device":
+        payload.update({
+            "kind": "device",
+            "sub": "device:phone",
+            "device_id": "phone",
+            "token_id": "token",
+            "capabilities": capabilities or [],
+        })
+    token = auth.create_access_token(payload)
     return {"Authorization": f"Bearer {token}"}
 
 
 def _create_app_with_chat_service(service: _FakeChatService) -> FastAPI:
     auth.configure("x" * 48)
+    auth.set_device_token_validator(lambda _payload: True)
     app = FastAPI()
     app.include_router(chat_routes.router)
     app.include_router(chat_routes.messages_router)
@@ -340,7 +350,7 @@ def test_get_messages_accepts_trace_id_without_session_key(monkeypatch):
     response = TestClient(app).get(
         "/api/chat/messages",
         params={"trace_id": "trace-deeplink"},
-        headers=_headers("read_only"),
+        headers=_headers("read_only", kind="device", capabilities=["read"]),
     )
 
     assert response.status_code == 200
@@ -357,7 +367,7 @@ def test_messages_alias_accepts_trace_id(monkeypatch):
     response = TestClient(app).get(
         "/api/messages",
         params={"trace_id": "trace-deeplink"},
-        headers=_headers("viewer"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200
@@ -371,7 +381,7 @@ def test_context_size_route_returns_session_context_breakdown(monkeypatch):
 
     response = TestClient(app).get(
         "/api/chat/sessions/abc123/context-size",
-        headers=_headers("viewer"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200
@@ -379,23 +389,18 @@ def test_context_size_route_returns_session_context_breakdown(monkeypatch):
     assert service.context_size_calls == ["abc123"]
 
 
-def test_compress_context_route_requires_editor_and_returns_diff(monkeypatch):
+def test_compress_context_route_requires_owner_and_returns_diff(monkeypatch):
     service = _FakeChatService()
     app = _create_app_with_chat_service(service)
     monkeypatch.setattr(chat_routes, "_get_chat_service", lambda _user: service)
 
-    viewer_response = TestClient(app).post(
+    owner_response = TestClient(app).post(
         "/api/chat/sessions/abc123/compress",
-        headers=_headers("viewer"),
-    )
-    editor_response = TestClient(app).post(
-        "/api/chat/sessions/abc123/compress",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
-    assert viewer_response.status_code == 403
-    assert editor_response.status_code == 200
-    assert editor_response.json()["before_after_diff"] == {"before": [], "after": []}
+    assert owner_response.status_code == 200
+    assert owner_response.json()["before_after_diff"] == {"before": [], "after": []}
     assert service.compress_calls == ["abc123"]
 
 
@@ -404,7 +409,7 @@ def test_get_messages_requires_session_key_or_trace_id(monkeypatch):
     app = _create_app_with_chat_service(service)
     monkeypatch.setattr(chat_routes, "_get_chat_service", lambda _user: service)
 
-    response = TestClient(app).get("/api/chat/messages", headers=_headers("viewer"))
+    response = TestClient(app).get("/api/chat/messages", headers=_headers("owner"))
 
     assert response.status_code == 400
     assert response.json()["detail"] == "session_key or trace_id is required"
@@ -418,12 +423,12 @@ def test_create_session_accepts_participants(monkeypatch):
     response = TestClient(app).post(
         "/api/chat/sessions",
         json={"title": "pair", "participants": ["nanobot", "codex"]},
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200
     assert response.json()["participants"] == ["nanobot", "codex"]
-    assert service.create_calls == [("editor_user", "pair", ["nanobot", "codex"])]
+    assert service.create_calls == [("owner_user", "pair", ["nanobot", "codex"])]
 
 
 def test_update_session_participants(monkeypatch):
@@ -434,7 +439,7 @@ def test_update_session_participants(monkeypatch):
     response = TestClient(app).patch(
         "/api/chat/sessions/abc123",
         json={"participants": ["codex"]},
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200

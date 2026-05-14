@@ -131,7 +131,7 @@ def test_ws_origin_rejected_with_policy_violation(monkeypatch):
         await websocket.send_json({"ok": True})
 
     token = auth.create_access_token(
-        {"sub": "viewer_user", "role": "viewer", "created_at": ""},
+        {"sub": "owner_user", "role": "owner", "created_at": ""},
         expires_delta=timedelta(minutes=30),
     )
     client = TestClient(app)

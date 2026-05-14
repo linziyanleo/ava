@@ -462,19 +462,15 @@ def test_ava16_rbac_checklist_is_covered() -> None:
     bg_routes = read("ava/console/routes/bg_task_routes.py")
     agent_routes = read("ava/console/routes/agent_routes.py")
     direct_routes = read("ava/console/routes/direct_task_routes.py")
-    auth_store = read("console-ui/src/stores/auth.ts")
-    chat_page = read("console-ui/src/pages/ChatPage/index.tsx")
-    tests = read("tests/console/test_bg_task_routes.py") + read("tests/console/test_agent_routes.py") + read("tests/console/test_direct_task_routes.py")
-    matrix = read("docs/rbac-capability-matrix.md")
+    tests = read("tests/console/test_bg_task_routes.py")
 
-    assert_contains_all(auth, ['READ_ROLES = ("admin", "editor", "viewer", "read_only", "mock_tester")', 'EDIT_ROLES = ("admin", "editor")'])
-    assert "Depends(auth.require_role(*auth.EDIT_ROLES))" in bg_routes
-    assert "Depends(auth.require_role(*auth.EDIT_ROLES))" in agent_routes
-    assert 'Depends(auth.require_role("admin", "editor"))' in direct_routes
-    assert_contains_all(auth_store, ["return role === 'admin' || role === 'editor'", "'read_only'", "'mock_tester'"])
-    assert_contains_all(chat_page, ["canMutateChat = canEdit()", "只读模式 · 申请权限", "isReadOnlyConversation"])
-    assert_contains_all(tests, ["viewer_response.status_code == 403", "mock_response.status_code == 403", "read_only_response.status_code == 403"])
-    assert_contains_all(matrix, ["`read_only`", "`mock_tester`"])
+    assert_contains_all(auth, ['READ_ROLES: tuple[str, ...] = ("owner",)', 'EDIT_ROLES: tuple[str, ...] = ("owner",)'])
+    assert "auth.READ_ROLES" in bg_routes
+    assert "auth.EDIT_ROLES" in bg_routes
+    assert "auth.READ_ROLES" in agent_routes
+    assert 'auth.require_role("owner")' in agent_routes
+    assert "auth.EDIT_ROLES" in direct_routes
+    assert "read_only_response.status_code == 403" in tests
 
 
 def test_ava17_agent_detail_and_agent_config_checklist_is_covered() -> None:

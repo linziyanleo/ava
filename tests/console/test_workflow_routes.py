@@ -11,21 +11,31 @@ from ava.console.routes import workflow_routes
 from ava.storage import Database
 
 
-def _headers(role: str = "viewer") -> dict[str, str]:
-    token = auth.create_access_token({
+def _headers(role: str = "owner", *, kind: str = "console", capabilities: list[str] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {
         "sub": f"{role}_user",
         "role": role,
         "created_at": "",
-    })
+    }
+    if kind == "device":
+        payload.update({
+            "kind": "device",
+            "sub": "device:phone",
+            "device_id": "phone",
+            "token_id": "token",
+            "capabilities": capabilities or [],
+        })
+    token = auth.create_access_token(payload)
     return {"Authorization": f"Bearer {token}"}
 
 
 def _client(tmp_path, monkeypatch) -> tuple[TestClient, WorkflowStore, ArtifactStore]:
     auth.configure("x" * 48)
+    auth.set_device_token_validator(lambda _payload: True)
     db = Database(tmp_path / "workflow-routes.sqlite3")
     workflow_store = WorkflowStore(db)
     artifact_store = ArtifactStore(db)
-    services = SimpleNamespace(workflow_store=workflow_store, artifact_store=artifact_store, mock=None)
+    services = SimpleNamespace(workflow_store=workflow_store, artifact_store=artifact_store)
     monkeypatch.setattr(workflow_routes, "get_services_for_user", lambda user=None: services)
     app = FastAPI()
     app.include_router(workflow_routes.router)
@@ -46,7 +56,7 @@ def test_workflow_routes_list_chain_detail_and_artifacts(tmp_path, monkeypatch):
         preview="result",
     )
 
-    listed = client.get("/api/workflows", params={"trace_id": "trace-1"}, headers=_headers("read_only"))
+    listed = client.get("/api/workflows", params={"trace_id": "trace-1"}, headers=_headers("read_only", kind="device", capabilities=["read"]))
     detail = client.get("/api/workflows/chain-1", headers=_headers())
     artifact_list = client.get("/api/artifacts", params={"chain_id": "chain-1"}, headers=_headers())
 
@@ -58,23 +68,17 @@ def test_workflow_routes_list_chain_detail_and_artifacts(tmp_path, monkeypatch):
     assert artifact_list.json()["artifacts"][0]["uri"] == "artifact://task-a/result.json"
 
 
-def test_workflow_routes_require_edit_role_for_mutation(tmp_path, monkeypatch):
+def test_workflow_routes_require_owner_for_mutation(tmp_path, monkeypatch):
     client, _, _ = _client(tmp_path, monkeypatch)
 
-    viewer = client.post(
-        "/api/workflows",
-        json={"chain_id": "chain-2"},
-        headers=_headers("viewer"),
-    )
-    editor = client.post(
+    owner = client.post(
         "/api/workflows",
         json={"chain_id": "chain-2", "title": "Editable"},
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
-    assert viewer.status_code == 403
-    assert editor.status_code == 200
-    assert editor.json()["chain_id"] == "chain-2"
+    assert owner.status_code == 200
+    assert owner.json()["chain_id"] == "chain-2"
 
 
 def test_workflow_node_route_advances_linear_chain(tmp_path, monkeypatch):
@@ -89,7 +93,7 @@ def test_workflow_node_route_advances_linear_chain(tmp_path, monkeypatch):
             "status": "awaiting_deps",
             "parent_task_ids": ["task-a"],
         },
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200
@@ -108,8 +112,8 @@ def test_workflow_routes_cancel_and_retry_chain(tmp_path, monkeypatch):
         position=1,
     )
 
-    cancel = client.post("/api/workflows/chain-4/cancel", headers=_headers("editor"))
-    retry = client.post("/api/workflows/chain-4/retry", headers=_headers("editor"))
+    cancel = client.post("/api/workflows/chain-4/cancel", headers=_headers("owner"))
+    retry = client.post("/api/workflows/chain-4/retry", headers=_headers("owner"))
 
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "cancelled"
@@ -137,7 +141,7 @@ def test_workflow_websocket_pushes_chain_and_artifact_events(tmp_path, monkeypat
 
     with client.websocket_connect(
         "/api/workflows/ws?chain_id=chain-ws",
-        headers=_headers("viewer"),
+        headers=_headers("owner"),
     ) as websocket:
         payload = websocket.receive_json()
 

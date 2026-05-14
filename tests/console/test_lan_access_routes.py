@@ -11,7 +11,7 @@ from ava.console.services.lan_access_service import LanAccessService, resolve_co
 from ava.storage import Database
 
 
-def _headers(role: str = "viewer") -> dict[str, str]:
+def _headers(role: str = "owner") -> dict[str, str]:
     token = auth.create_access_token({
         "sub": f"{role}_user",
         "role": role,
@@ -66,10 +66,10 @@ def _build_client(tmp_path, monkeypatch) -> tuple[TestClient, Path]:
     return TestClient(app), nanobot_dir
 
 
-def test_lan_access_defaults_to_localhost_and_admin_toggle_controls_bind_host(tmp_path, monkeypatch):
+def test_lan_access_defaults_to_localhost_and_owner_toggle_controls_bind_host(tmp_path, monkeypatch):
     client, nanobot_dir = _build_client(tmp_path, monkeypatch)
 
-    status_response = client.get("/api/lan-access/status", headers=_headers("viewer"))
+    status_response = client.get("/api/lan-access/status", headers=_headers("owner"))
     assert status_response.status_code == 200
     status = status_response.json()
     assert status["enabled"] is False
@@ -77,17 +77,14 @@ def test_lan_access_defaults_to_localhost_and_admin_toggle_controls_bind_host(tm
     assert status["lan_urls"] == []
     assert resolve_console_bind_host(nanobot_dir, "0.0.0.0") == "127.0.0.1"
 
-    viewer_toggle = client.put("/api/lan-access/config", json={"enabled": True}, headers=_headers("viewer"))
-    assert viewer_toggle.status_code == 403
-
-    admin_toggle = client.put("/api/lan-access/config", json={"enabled": True}, headers=_headers("admin"))
-    assert admin_toggle.status_code == 200
-    enabled = admin_toggle.json()
+    owner_toggle = client.put("/api/lan-access/config", json={"enabled": True}, headers=_headers("owner"))
+    assert owner_toggle.status_code == 200
+    enabled = owner_toggle.json()
     assert enabled["enabled"] is True
     assert enabled["bind_host"] == "0.0.0.0"
     assert resolve_console_bind_host(nanobot_dir, "127.0.0.1") == "0.0.0.0"
 
-    disabled = client.put("/api/lan-access/config", json={"enabled": False}, headers=_headers("admin")).json()
+    disabled = client.put("/api/lan-access/config", json={"enabled": False}, headers=_headers("owner")).json()
     assert disabled["enabled"] is False
     assert disabled["bind_host"] == "127.0.0.1"
 
@@ -95,11 +92,11 @@ def test_lan_access_defaults_to_localhost_and_admin_toggle_controls_bind_host(tm
 def test_lan_pairing_issues_read_only_device_token_and_revoke_invalidates_it(tmp_path, monkeypatch):
     client, _nanobot_dir = _build_client(tmp_path, monkeypatch)
 
-    pin_disabled = client.post("/api/lan-access/pin", headers=_headers("admin"))
+    pin_disabled = client.post("/api/lan-access/pin", headers=_headers("owner"))
     assert pin_disabled.status_code == 409
 
-    client.put("/api/lan-access/config", json={"enabled": True}, headers=_headers("admin"))
-    pin_response = client.post("/api/lan-access/pin", headers=_headers("admin"))
+    client.put("/api/lan-access/config", json={"enabled": True}, headers=_headers("owner"))
+    pin_response = client.post("/api/lan-access/pin", headers=_headers("owner"))
     assert pin_response.status_code == 200
     pin_payload = pin_response.json()
     assert pin_payload["pin"].isdigit()
@@ -128,13 +125,13 @@ def test_lan_pairing_issues_read_only_device_token_and_revoke_invalidates_it(tmp
     write_response = client.put("/api/lan-access/config", json={"enabled": False}, headers=token_headers)
     assert write_response.status_code == 403
 
-    audit_response = client.get("/api/audit/logs?action=lan.device_access", headers=_headers("admin"))
+    audit_response = client.get("/api/audit/logs?action=lan.device_access", headers=_headers("owner"))
     assert audit_response.status_code == 200
     entries = audit_response.json()["entries"]
     assert {entry["user"] for entry in entries} == {f"device:{device['device_id']}"}
     assert "/api/auth/me" in {entry["target"] for entry in entries}
 
-    revoke_response = client.post(f"/api/lan-access/devices/{device['device_id']}/revoke", headers=_headers("admin"))
+    revoke_response = client.post(f"/api/lan-access/devices/{device['device_id']}/revoke", headers=_headers("owner"))
     assert revoke_response.status_code == 200
     assert revoke_response.json()["revoked_at"]
 

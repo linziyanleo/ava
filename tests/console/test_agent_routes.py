@@ -22,7 +22,7 @@ class _FakeBgStore:
         return f"Task {task_id} cancelled."
 
 
-def _headers(role: str = "viewer") -> dict[str, str]:
+def _headers(role: str = "owner") -> dict[str, str]:
     token = auth.create_access_token({
         "sub": f"{role}_user",
         "role": role,
@@ -90,7 +90,7 @@ def test_agent_route_lists_agents_for_viewer(tmp_path, monkeypatch):
     )
 
     client = TestClient(app)
-    response = client.get("/api/agents", headers=_headers("viewer"))
+    response = client.get("/api/agents", headers=_headers("owner"))
 
     assert response.status_code == 200
     payload = response.json()
@@ -99,27 +99,24 @@ def test_agent_route_lists_agents_for_viewer(tmp_path, monkeypatch):
     assert by_name["codex"]["status"] == "running"
     assert by_name["claude_code"]["status"] == "unavailable"
 
-    version_response = client.get("/api/agents/codex/version", headers=_headers("viewer"))
+    version_response = client.get("/api/agents/codex/version", headers=_headers("owner"))
     assert version_response.status_code == 200
     assert version_response.json()["version"] == "codex 0.1.0"
 
-    core_response = client.get("/api/core/version", headers=_headers("viewer"))
+    core_response = client.get("/api/core/version", headers=_headers("owner"))
     assert core_response.status_code == 200
     assert core_response.json()["protocol_version"] == "agent-adapter/0.1"
 
-    missing_response = client.get("/api/agents/missing/version", headers=_headers("viewer"))
+    missing_response = client.get("/api/agents/missing/version", headers=_headers("owner"))
     assert missing_response.status_code == 404
 
-    cancel_response = client.post("/api/agents/codex/tasks/cancel", headers=_headers("editor"))
+    cancel_response = client.post("/api/agents/codex/tasks/cancel", headers=_headers("owner"))
     assert cancel_response.status_code == 200
     assert cancel_response.json()["cancelled"] == 1
     assert bg_store.cancelled == ["codex-1"]
 
-    viewer_cancel = client.post("/api/agents/codex/tasks/cancel", headers=_headers("viewer"))
-    assert viewer_cancel.status_code == 403
 
-
-def test_agent_process_lifecycle_routes_require_admin_and_proxy_service(tmp_path, monkeypatch):
+def test_agent_process_lifecycle_routes_require_owner_and_proxy_service(tmp_path, monkeypatch):
     monkeypatch.setattr("ava.console.app.prepare_console_ui_dist", lambda: None)
     checkout = _make_nanobot_checkout(tmp_path / "nanobot")
     monkeypatch.setenv("AVA_NANOBOT_ROOT", str(checkout))
@@ -167,16 +164,10 @@ def test_agent_process_lifecycle_routes_require_admin_and_proxy_service(tmp_path
     )
     client = TestClient(app)
 
-    viewer_start = client.post("/api/agents/codex/process/start", headers=_headers("viewer"))
-    assert viewer_start.status_code == 403
-
-    editor_start = client.post("/api/agents/codex/process/start", headers=_headers("editor"))
-    assert editor_start.status_code == 403
-
-    start = client.post("/api/agents/codex/process/start", headers=_headers("admin"))
-    stop = client.post("/api/agents/codex/process/stop?force=true", headers=_headers("admin"))
-    restart = client.post("/api/agents/codex/process/restart?force=true", headers=_headers("admin"))
-    health = client.get("/api/agents/codex/process/health", headers=_headers("viewer"))
+    start = client.post("/api/agents/codex/process/start", headers=_headers("owner"))
+    stop = client.post("/api/agents/codex/process/stop?force=true", headers=_headers("owner"))
+    restart = client.post("/api/agents/codex/process/restart?force=true", headers=_headers("owner"))
+    health = client.get("/api/agents/codex/process/health", headers=_headers("owner"))
 
     assert start.status_code == 200
     assert start.json()["pid"] == 123
@@ -221,7 +212,7 @@ def test_missing_api_route_returns_json_before_spa_fallback(tmp_path, monkeypatc
     )
 
     client = TestClient(app)
-    response = client.get("/api/not-a-route", headers=_headers("viewer"))
+    response = client.get("/api/not-a-route", headers=_headers("owner"))
 
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/json")

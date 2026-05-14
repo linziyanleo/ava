@@ -40,17 +40,27 @@ class _FakeBackgroundTaskStore:
         return f"Task {task_id} cancelled."
 
 
-def _headers(role: str = "viewer") -> dict[str, str]:
-    token = auth.create_access_token({
+def _headers(role: str = "owner", *, kind: str = "console", capabilities: list[str] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {
         "sub": f"{role}_user",
         "role": role,
         "created_at": "",
-    })
+    }
+    if kind == "device":
+        payload.update({
+            "kind": "device",
+            "sub": "device:phone",
+            "device_id": "phone",
+            "token_id": "token",
+            "capabilities": capabilities or [],
+        })
+    token = auth.create_access_token(payload)
     return {"Authorization": f"Bearer {token}"}
 
 
 def _create_app_with_store(store: _FakeBackgroundTaskStore) -> FastAPI:
     auth.configure("x" * 48)
+    auth.set_device_token_validator(lambda _payload: True)
     app = FastAPI()
     app.include_router(bg_task_routes.router)
     return app
@@ -97,7 +107,7 @@ def test_list_route_passes_trace_id_filter(monkeypatch):
     response = TestClient(app).get(
         "/api/bg-tasks",
         params={"trace_id": "trace-bg", "include_finished": "true"},
-        headers=_headers("read_only"),
+        headers=_headers("read_only", kind="device", capabilities=["read"]),
     )
 
     assert response.status_code == 200
@@ -117,7 +127,7 @@ def test_list_route_passes_chain_id_filter(monkeypatch):
     response = TestClient(app).get(
         "/api/bg-tasks",
         params={"chain_id": "chain-bg", "include_finished": "true"},
-        headers=_headers("read_only"),
+        headers=_headers("read_only", kind="device", capabilities=["read"]),
     )
 
     assert response.status_code == 200
@@ -137,7 +147,7 @@ def test_history_route_passes_trace_id_filter(monkeypatch):
     response = TestClient(app).get(
         "/api/bg-tasks/history",
         params={"trace_id": "trace-bg"},
-        headers=_headers("read_only"),
+        headers=_headers("read_only", kind="device", capabilities=["read"]),
     )
 
     assert response.status_code == 200
@@ -159,7 +169,7 @@ def test_history_route_passes_chain_id_filter(monkeypatch):
     response = TestClient(app).get(
         "/api/bg-tasks/history",
         params={"chain_id": "chain-bg"},
-        headers=_headers("read_only"),
+        headers=_headers("read_only", kind="device", capabilities=["read"]),
     )
 
     assert response.status_code == 200
@@ -178,35 +188,31 @@ def test_read_only_role_can_read_bg_tasks(monkeypatch):
     app = _create_app_with_store(store)
     monkeypatch.setattr(bg_task_routes, "_get_bg_store", lambda user=None: store)
 
-    response = TestClient(app).get("/api/bg-tasks/history", headers=_headers("read_only"))
+    response = TestClient(app).get("/api/bg-tasks/history", headers=_headers("read_only", kind="device", capabilities=["read"]))
 
     assert response.status_code == 200
 
 
-def test_cancel_route_rejects_viewer_and_mock_tester(monkeypatch):
+def test_cancel_route_rejects_read_only_console_role(monkeypatch):
     store = _FakeBackgroundTaskStore()
     app = _create_app_with_store(store)
     monkeypatch.setattr(bg_task_routes, "_get_bg_store", lambda user=None: store)
     client = TestClient(app)
 
-    viewer_response = client.post("/api/bg-tasks/codex-1/cancel", headers=_headers("viewer"))
-    mock_response = client.post("/api/bg-tasks/codex-1/cancel", headers=_headers("mock_tester"))
-    read_only_response = client.post("/api/bg-tasks/codex-1/cancel", headers=_headers("read_only"))
+    read_only_response = client.post("/api/bg-tasks/codex-1/cancel", headers=_headers("read_only", kind="device", capabilities=["read"]))
 
-    assert viewer_response.status_code == 403
-    assert mock_response.status_code == 403
     assert read_only_response.status_code == 403
     assert store.cancelled == []
 
 
-def test_cancel_route_allows_editor(monkeypatch):
+def test_cancel_route_allows_owner(monkeypatch):
     store = _FakeBackgroundTaskStore()
     app = _create_app_with_store(store)
     monkeypatch.setattr(bg_task_routes, "_get_bg_store", lambda user=None: store)
 
     response = TestClient(app).post(
         "/api/bg-tasks/codex-1/cancel",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
 
     assert response.status_code == 200

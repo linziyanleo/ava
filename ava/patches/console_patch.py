@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from ava.console.mock_bundle_runtime import validate_console_security
+from ava.console.security_gate import validate_console_security
 from ava.launcher import register_patch
 from ava.runtime import paths as runtime_paths
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from ava.console.app import create_console_app
-from ava.console.mock_bundle_runtime import LOCAL_ADMIN_PASSWORD_FILE
+from ava.console.local_accounts import LOCAL_OWNER_PASSWORD_FILE, LOCAL_OWNER_USERNAME
 from ava.storage import Database
 
 
@@ -45,20 +45,20 @@ def _create_client(tmp_path, monkeypatch) -> tuple[TestClient, Path]:
     return TestClient(app), nanobot_dir
 
 
-def _login_admin(client: TestClient, nanobot_dir: Path) -> None:
+def _login_owner(client: TestClient, nanobot_dir: Path) -> None:
     password = (
-        nanobot_dir / "console" / "local-secrets" / LOCAL_ADMIN_PASSWORD_FILE
+        nanobot_dir / "console" / "local-secrets" / LOCAL_OWNER_PASSWORD_FILE
     ).read_text("utf-8").strip()
     response = client.post(
         "/api/auth/login",
-        json={"username": "admin", "password": password},
+        json={"username": LOCAL_OWNER_USERNAME, "password": password},
     )
     assert response.status_code == 200
 
 
 def test_chat_upload_route_saves_image_and_serves_preview(tmp_path, monkeypatch):
     client, nanobot_dir = _create_client(tmp_path, monkeypatch)
-    _login_admin(client, nanobot_dir)
+    _login_owner(client, nanobot_dir)
 
     png_bytes = b"\x89PNG\r\n\x1a\nchat-upload"
     upload = client.post(
@@ -86,7 +86,7 @@ def test_chat_upload_route_saves_image_and_serves_preview(tmp_path, monkeypatch)
 
 def test_chat_upload_route_saves_text_file_and_serves_download(tmp_path, monkeypatch):
     client, nanobot_dir = _create_client(tmp_path, monkeypatch)
-    _login_admin(client, nanobot_dir)
+    _login_owner(client, nanobot_dir)
 
     upload = client.post(
         "/api/chat/uploads",
@@ -110,7 +110,7 @@ def test_chat_upload_route_saves_text_file_and_serves_download(tmp_path, monkeyp
 
 def test_chat_upload_route_rejects_unsupported_files(tmp_path, monkeypatch):
     client, nanobot_dir = _create_client(tmp_path, monkeypatch)
-    _login_admin(client, nanobot_dir)
+    _login_owner(client, nanobot_dir)
 
     upload = client.post(
         "/api/chat/uploads",

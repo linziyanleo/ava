@@ -104,7 +104,7 @@ def test_submit_direct_task_route_creates_background_task(tmp_path, monkeypatch)
 
     response = client.post(
         "/api/console/direct-tasks",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
         json={
             "task_type": "codex",
             "prompt": "fix auth",
@@ -138,7 +138,7 @@ def test_submit_direct_task_route_returns_trace_id_when_tracing_is_available(tmp
 
     response = client.post(
         "/api/console/direct-tasks",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
         json={
             "task_type": "codex",
             "prompt": "fix auth",
@@ -172,22 +172,6 @@ def test_submit_direct_task_route_returns_trace_id_when_tracing_is_available(tmp
     assert row["turn_seq"] == 2
 
 
-def test_submit_direct_task_route_rejects_viewer(tmp_path, monkeypatch):
-    client = _create_client(tmp_path, monkeypatch, _FakeBgStore())
-
-    response = client.post(
-        "/api/console/direct-tasks",
-        headers=_headers("viewer"),
-        json={
-            "task_type": "codex",
-            "prompt": "fix auth",
-            "session_key": "console:abc123",
-        },
-    )
-
-    assert response.status_code == 403
-
-
 def test_submit_image_gen_route_rejects_arbitrary_reference_path(tmp_path, monkeypatch):
     bg_store = _FakeBgStore()
     client = _create_client(tmp_path, monkeypatch, bg_store)
@@ -196,7 +180,7 @@ def test_submit_image_gen_route_rejects_arbitrary_reference_path(tmp_path, monke
 
     response = client.post(
         "/api/console/direct-tasks",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
         json={
             "task_type": "image_gen",
             "prompt": "use this",
@@ -231,7 +215,7 @@ def test_submit_image_gen_route_accepts_uploaded_reference_path(tmp_path, monkey
 
     upload = client.post(
         "/api/chat/uploads",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
         files=[("files", ("reference.png", b"png", "image/png"))],
     )
     assert upload.status_code == 200
@@ -239,7 +223,7 @@ def test_submit_image_gen_route_accepts_uploaded_reference_path(tmp_path, monkey
 
     response = client.post(
         "/api/console/direct-tasks",
-        headers=_headers("editor"),
+        headers=_headers("owner"),
         json={
             "task_type": "image_gen",
             "prompt": "make it warmer",

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from ava.console.app import create_console_app
-from ava.console.mock_bundle_runtime import LOCAL_ADMIN_PASSWORD_FILE
+from ava.console.local_accounts import LOCAL_OWNER_PASSWORD_FILE, LOCAL_OWNER_USERNAME
 from ava.console.services.chat_service import ChatService
 from ava.storage import Database
 from nanobot.agent.context import ContextBuilder
@@ -118,13 +118,13 @@ def _build_session() -> Session:
     )
 
 
-def _login_admin(client: TestClient, nanobot_dir: Path) -> None:
+def _login_owner(client: TestClient, nanobot_dir: Path) -> None:
     password = (
-        nanobot_dir / "console" / "local-secrets" / LOCAL_ADMIN_PASSWORD_FILE
+        nanobot_dir / "console" / "local-secrets" / LOCAL_OWNER_PASSWORD_FILE
     ).read_text("utf-8").strip()
     response = client.post(
         "/api/auth/login",
-        json={"username": "admin", "password": password},
+        json={"username": LOCAL_OWNER_USERNAME, "password": password},
     )
     assert response.status_code == 200
 
@@ -183,7 +183,7 @@ def test_context_preview_route_returns_payload_and_404(tmp_path, monkeypatch):
         db=db,
     )
     client = TestClient(app)
-    _login_admin(client, nanobot_dir)
+    _login_owner(client, nanobot_dir)
 
     ok = client.get("/api/chat/sessions/console:ctx/context-preview")
     assert ok.status_code == 200

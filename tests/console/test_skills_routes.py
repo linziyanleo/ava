@@ -81,10 +81,10 @@ def _headers(role: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_mcp_status_route_redacts_config_for_viewer(tmp_path, monkeypatch):
+def test_mcp_status_route_redacts_config_for_owner(tmp_path, monkeypatch):
     client, _ = _create_client(tmp_path, monkeypatch)
 
-    response = client.get("/api/skills/mcp/status", headers=_headers("viewer"))
+    response = client.get("/api/skills/mcp/status", headers=_headers("owner"))
 
     assert response.status_code == 200
     payload = response.json()
@@ -97,7 +97,7 @@ def test_mcp_status_route_redacts_config_for_viewer(tmp_path, monkeypatch):
     assert "secret-token" not in response.text
 
 
-def test_mcp_test_route_is_editor_plus(tmp_path, monkeypatch):
+def test_mcp_test_route_allows_owner(tmp_path, monkeypatch):
     client, _ = _create_client(tmp_path, monkeypatch)
 
     async def fake_test(self, name: str):
@@ -112,37 +112,23 @@ def test_mcp_test_route_is_editor_plus(tmp_path, monkeypatch):
 
     monkeypatch.setattr("ava.console.services.skills_service.SkillsService.test_mcp_server", fake_test)
 
-    viewer_response = client.post(
+    owner_response = client.post(
         "/api/skills/mcp/test",
         json={"name": "playwright_daily"},
-        headers=_headers("viewer"),
+        headers=_headers("owner"),
     )
-    assert viewer_response.status_code == 403
-
-    editor_response = client.post(
-        "/api/skills/mcp/test",
-        json={"name": "playwright_daily"},
-        headers=_headers("editor"),
-    )
-    assert editor_response.status_code == 200
-    assert editor_response.json()["wrapped_tools"] == ["mcp_playwright_daily_browser_snapshot"]
+    assert owner_response.status_code == 200
+    assert owner_response.json()["wrapped_tools"] == ["mcp_playwright_daily_browser_snapshot"]
 
 
-def test_mcp_reconnect_route_is_admin_and_returns_501_when_unsupported(tmp_path, monkeypatch):
+def test_mcp_reconnect_route_is_owner_and_returns_501_when_unsupported(tmp_path, monkeypatch):
     client, _ = _create_client(tmp_path, monkeypatch)
 
-    editor_response = client.post(
+    owner_response = client.post(
         "/api/skills/mcp/reconnect",
         json={},
-        headers=_headers("editor"),
+        headers=_headers("owner"),
     )
-    assert editor_response.status_code == 403
-
-    admin_response = client.post(
-        "/api/skills/mcp/reconnect",
-        json={},
-        headers=_headers("admin"),
-    )
-    assert admin_response.status_code == 501
-    assert admin_response.json()["scope"] == "all"
-    assert admin_response.json()["status"] == "unsupported"
+    assert owner_response.status_code == 501
+    assert owner_response.json()["scope"] == "all"
+    assert owner_response.json()["status"] == "unsupported"
