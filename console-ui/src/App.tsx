@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './stores/auth'
-import type { UserRole } from './stores/auth'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
 import AgentDashboardPage from './pages/AgentDashboardPage'
@@ -12,14 +11,12 @@ import PersonaPage from './pages/PersonaPage'
 import SkillsPage from './pages/SkillsPage'
 import ChatPage from './pages/ChatPage'
 import TokenStatsPage from './pages/TokenStatsPage'
-import UsersPage from './pages/UsersPage'
 import BrowserPage from './pages/BrowserPage'
 import LanAccessPage from './pages/LanAccessPage'
 import SettingsPage, { DesktopSettingsPage, SettingsVersionPage } from './pages/SettingsPage'
 import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
 import { useDeepLink } from './hooks/useDeepLink'
 
-const READ_ONLY_ROLES: UserRole[] = ['admin', 'editor', 'viewer', 'read_only', 'mock_tester']
 const MobilePairPage = lazy(() => import('./pages/MobilePairPage'))
 
 function LegacyRedirect() {
@@ -37,17 +34,10 @@ function LegacyRedirect() {
   return <Navigate to={target} replace />
 }
 
-function ProtectedRoute({
-  children,
-  allowedRoles,
-}: {
-  children: React.ReactNode
-  allowedRoles?: UserRole[]
-}) {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <div className="min-h-screen flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>
   if (!user) return <Navigate to="/login" replace />
-  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/" replace />
   return <>{children}</>
 }
 
@@ -85,8 +75,8 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<ProtectedRoute allowedRoles={READ_ONLY_ROLES}><ChatPage /></ProtectedRoute>} />
-          <Route path="settings" element={<ProtectedRoute allowedRoles={READ_ONLY_ROLES}><SettingsPage /></ProtectedRoute>}>
+          <Route index element={<ChatPage />} />
+          <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="agents-config" replace />} />
             <Route path="agents-config" element={<AgentDashboardPage />} />
             <Route path="agents-config/:agentKind" element={<AgentDashboardPage />} />
@@ -99,12 +89,11 @@ export default function App() {
             <Route path="statistics" element={<TokenStatsPage />} />
             <Route path="tools" element={<Navigate to="skills" replace />} />
             <Route path="tools/skills" element={<SkillsPage />} />
-            <Route path="users" element={<ProtectedRoute allowedRoles={['admin']}><UsersPage /></ProtectedRoute>} />
             <Route path="system" element={<Navigate to="gateway" replace />} />
-            <Route path="system/desktop" element={<ProtectedRoute allowedRoles={['admin']}><DesktopSettingsPage /></ProtectedRoute>} />
-            <Route path="system/lan-access" element={<ProtectedRoute allowedRoles={['admin']}><LanAccessPage /></ProtectedRoute>} />
+            <Route path="system/desktop" element={<DesktopSettingsPage />} />
+            <Route path="system/lan-access" element={<LanAccessPage />} />
             <Route path="system/gateway" element={<DashboardPage />} />
-            <Route path="system/browser" element={<ProtectedRoute allowedRoles={['admin', 'editor', 'viewer']}><BrowserPage /></ProtectedRoute>} />
+            <Route path="system/browser" element={<BrowserPage />} />
             <Route path="system/console" element={<ConfigPage mode="console" />} />
             <Route path="system/version" element={<SettingsVersionPage />} />
           </Route>

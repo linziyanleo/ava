@@ -1,26 +1,20 @@
 import { create } from 'zustand'
 import { api, setOnUnauthorized } from '../api/client'
 
-export type UserRole = 'admin' | 'editor' | 'viewer' | 'read_only' | 'mock_tester'
-
 export interface User {
   username: string
-  role: UserRole
   created_at: string
 }
 
 interface AuthState {
   user: User | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (passphrase: string) => Promise<void>
   logout: () => void
   checkAuth: () => Promise<void>
-  isAdmin: () => boolean
-  isMockTester: () => boolean
-  canEdit: () => boolean
 }
 
-export const useAuth = create<AuthState>((set, get) => {
+export const useAuth = create<AuthState>((set) => {
   // 当非 auth 请求收到 401 时，清除用户状态，让 ProtectedRoute 自动重定向到登录页
   setOnUnauthorized(() => set({ user: null, loading: false }))
 
@@ -28,10 +22,10 @@ export const useAuth = create<AuthState>((set, get) => {
   user: null,
   loading: true,
 
-  login: async (username, password) => {
+  login: async (passphrase) => {
     const res = await api<{ user: User }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: 'owner', password: passphrase }),
     })
     set({ user: res.user, loading: false })
   },
@@ -48,12 +42,5 @@ export const useAuth = create<AuthState>((set, get) => {
     } catch {
       set({ user: null, loading: false })
     }
-  },
-
-  isAdmin: () => get().user?.role === 'admin',
-  isMockTester: () => get().user?.role === 'mock_tester',
-  canEdit: () => {
-    const role = get().user?.role
-    return role === 'admin' || role === 'editor'
   },
 }})
