@@ -266,7 +266,7 @@ fan-out 一旦上线，并发写同一个 repo 会立刻出事。这条契约必
 P2a 已经能跑单 step 串行 workflow。P2b 加并行：
 
 - **fan-out**：一个 step 输出 N 个 artifact，下游 step 声明 `for_each: artifact_collection`，Runner 为每个 artifact 派发独立子任务；子任务获得独立 AgentInstance（或排队复用 instance），取决于 `AgentCapabilities.max_concurrent_tasks`
-- **fan-in**：N 个并行子任务全部 settle 后触发 join step；join 策略由 step 定义声明：`all_success` / `at_least_n` / `best_effort` / `first_success`
+- **fan-in**：N 个并行子任务全部 settle 后触发 join step；**P2b 仅支持 `all_success` 策略**（任一上游 failed/cancelled → 当前 join skipped），与 AVA-25 Linear issue「不做 多种 fan-in 策略 (任意完成 / 多数完成)」对齐；`at_least_n` / `best_effort` / `first_success` 归 P3 / AVA-31 Coordination Plane（详见 `.specanchor/tasks/_cross-module/2026-05-13_ava-25-p2b-fan-out-runner.spec.md`）
 - 并发上限 = AgentInstance 数量 × `max_concurrent_tasks`；超出排队
 - 每个 fan-out 子任务在独立 worktree / branch 内运行（依赖 P2a workspace 契约）
 - Runner 维护 `barrier` 状态：未达到 fan-in 条件的 join step 阻塞，直到上游全部 settle（success / fail / cancel）
