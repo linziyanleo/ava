@@ -155,7 +155,6 @@ export const MessageBubble = React.memo(function MessageBubble({
   markdownInstanceKey,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
-  const [traceCopied, setTraceCopied] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [showTokenInfo, setShowTokenInfo] = useState(false);
   const [showMobileTokenInfo, setShowMobileTokenInfo] = useState(false);
@@ -194,13 +193,6 @@ export const MessageBubble = React.memo(function MessageBubble({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-
-  const handleCopyTraceLink = () => {
-    if (!message.trace_id) return
-    navigator.clipboard.writeText(`${window.location.origin}/?trace_id=${encodeURIComponent(message.trace_id)}`)
-    setTraceCopied(true)
-    setTimeout(() => setTraceCopied(false), 1500)
-  }
 
   return (
     <div className={cn('flex group', isUser ? 'justify-end' : 'justify-start')}>
@@ -343,15 +335,6 @@ export const MessageBubble = React.memo(function MessageBubble({
                 >
                   {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
                 </button>
-                {message.trace_id && (
-                  <button
-                    onClick={handleCopyTraceLink}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--accent)]"
-                    title="Copy trace link"
-                  >
-                    {traceCopied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                )}
                 {tokenStats && !isUser && (
                   <div className="relative" ref={popoverRef}>
                     <button

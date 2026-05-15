@@ -21,3 +21,4 @@ electron/dist/
 .worktrees/
 vendor/cloudflared/
 .pnpm-store/
+.rtk/
