@@ -215,16 +215,16 @@ function NowSendingTab({ preview, loading }: { preview: ContextPreview | null; l
           </span>
         </div>
         <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-          <BarSegment pct={(totals.system_tokens / totals.ctx_budget) * 100} color="bg-[#8FB6FF]" />
-          <BarSegment pct={(totals.runtime_tokens / totals.ctx_budget) * 100} color="bg-[#7DD3B0]" />
-          <BarSegment pct={(totals.history_tokens / totals.ctx_budget) * 100} color="bg-[#E3B15F]" />
-          <BarSegment pct={(totals.tool_tokens / totals.ctx_budget) * 100} color="bg-[#D7B5FF]" />
+          <BarSegment pct={(totals.system_tokens / totals.ctx_budget) * 100} color="bg-[var(--ava-chart-1)]" />
+          <BarSegment pct={(totals.runtime_tokens / totals.ctx_budget) * 100} color="bg-[var(--ava-chart-4)]" />
+          <BarSegment pct={(totals.history_tokens / totals.ctx_budget) * 100} color="bg-[var(--ava-chart-3)]" />
+          <BarSegment pct={(totals.tool_tokens / totals.ctx_budget) * 100} color="bg-[var(--ava-chart-2)]" />
         </div>
         <div className="mt-2 flex flex-wrap gap-3 text-[10px]">
-          <Legend color="bg-[#8FB6FF]" label="System" />
-          <Legend color="bg-[#7DD3B0]" label="Runtime" />
-          <Legend color="bg-[#E3B15F]" label="History" />
-          <Legend color="bg-[#D7B5FF]" label="Tools" />
+          <Legend color="bg-[var(--ava-chart-1)]" label="System" />
+          <Legend color="bg-[var(--ava-chart-4)]" label="Runtime" />
+          <Legend color="bg-[var(--ava-chart-3)]" label="History" />
+          <Legend color="bg-[var(--ava-chart-2)]" label="Tools" />
         </div>
       </div>
 

@@ -236,7 +236,7 @@ export default function DashboardPage() {
           label: '聊天',
           value: 'Mock Chat',
           sub: '安全浏览预置的模拟对话',
-          color: 'text-pink-400',
+          color: 'text-[var(--ava-chart-2)]',
           onClick: () => navigate('/'),
         },
         {

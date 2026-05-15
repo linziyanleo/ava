@@ -137,7 +137,7 @@ export function normalizeStatusKind(status: string | null | undefined): StatusKi
   if (value === 'paused') {
     return 'paused'
   }
-  if (value === 'cancelled' || value === 'canceled') {
+  if (value === 'cancelled' || value === 'canceled' || value === 'interrupted') {
     return 'cancelled'
   }
   return 'idle'

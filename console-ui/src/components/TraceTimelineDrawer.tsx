@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy, X } from 'lucide-react'
 import { getTrace, type TraceDetail, type TraceSpanRecord } from '../api/client'
 import { cn } from '../lib/utils'
+import { StatusBadge } from './ui/StatusBadge'
+import { normalizeStatusKind, statusToneClasses } from '../lib/statusSemantics'
 
 function formatDuration(ms: number | null): string {
   if (ms == null) return 'running'
@@ -10,18 +12,8 @@ function formatDuration(ms: number | null): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
-function statusClass(status: string): string {
-  if (status === 'error') return 'bg-[var(--ava-danger)] text-white'
-  if (status === 'interrupted') return 'bg-[var(--ava-idle)] text-white'
-  if (status === 'running') return 'bg-[var(--ava-running)] text-white'
-  return 'bg-[var(--ava-success)] text-white'
-}
-
 function spanBarClass(status: string): string {
-  if (status === 'error') return 'bg-[var(--ava-danger)]'
-  if (status === 'interrupted') return 'bg-[var(--ava-idle)]'
-  if (status === 'running') return 'bg-[var(--ava-running)]'
-  return 'bg-[var(--ava-success)]'
+  return statusToneClasses(normalizeStatusKind(status)).dot
 }
 
 function formatJson(value: unknown): string {
@@ -199,9 +191,7 @@ export default function TraceTimelineDrawer({ traceId, onClose }: { traceId: str
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">{selected.name}</h3>
-                    <span className={cn('rounded px-2 py-0.5 text-[10px] font-medium', statusClass(selected.status))}>
-                      {selected.status}
-                    </span>
+                    <StatusBadge kind={normalizeStatusKind(selected.status)} label={selected.status} />
                   </div>
                   {selected.status_message && <p className="text-[var(--ava-danger)]">{selected.status_message}</p>}
                 </div>

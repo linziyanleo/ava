@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { cn } from '../lib/utils';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { normalizeStatusKind } from '../lib/statusSemantics';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -296,7 +298,12 @@ export default function MediaPage() {
 
       {message && (
         <div
-          className={`shrink-0 mb-4 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}
+          className={cn(
+            'shrink-0 mb-4 p-3 rounded-lg text-sm border',
+            message.type === 'success'
+              ? 'bg-[var(--ava-success-soft)] border-[var(--ava-success-border)] text-[var(--ava-success)]'
+              : 'bg-[var(--ava-danger-soft)] border-[var(--ava-danger-border)] text-[var(--ava-danger)]',
+          )}
         >
           {message.text}
         </div>
@@ -442,11 +449,9 @@ export default function MediaPage() {
               )}
               <div className="flex items-center gap-6 text-xs text-[var(--text-secondary)]">
                 <span>模型: {selected.model}</span>
-                <span>
-                  状态:{' '}
-                  <span className={selected.status === 'success' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}>
-                    {selected.status}
-                  </span>
+                <span className="inline-flex items-center gap-1.5">
+                  状态:
+                  <StatusBadge kind={normalizeStatusKind(selected.status)} label={selected.status} />
                 </span>
                 <span>{new Date(selected.timestamp).toLocaleString()}</span>
               </div>
