@@ -271,9 +271,11 @@ async def delete_session(
 @router.get("/sessions/{session_id}/history")
 async def get_history(
     session_id: str,
+    limit: int | None = Query(None, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     user: UserInfo = Depends(auth.require_console_role_or_device_capability(console_roles=auth.READ_ROLES, device_capabilities=("read",))),
 ):
-    return _get_chat_service(user).get_history(session_id)
+    return _get_chat_service(user).get_history(session_id, limit=limit, offset=offset)
 
 
 @router.get("/sessions/{session_id}/context-size")

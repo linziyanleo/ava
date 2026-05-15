@@ -973,7 +973,7 @@ def test_ava18_full_process_lifecycle_checklist_is_covered() -> None:
         app,
         [
             "agent_process_manager: AgentProcessManager | None = None",
-            "agent_lifecycle_events: list[dict[str, Any]] = field(default_factory=list)",
+            "agent_lifecycle_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))",
             "AgentProcessManager(on_event=agent_lifecycle_events.append)",
         ],
     )

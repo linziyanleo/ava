@@ -22,6 +22,8 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+_MAX_EVENTS_PER_SPAN = 200
+
 class TraceSpanStore:
     """Persist and query hierarchical spans for a single SQLite database."""
 
@@ -138,6 +140,8 @@ class TraceSpanStore:
             if not isinstance(events, list):
                 events = []
             events.append(event)
+            if len(events) > _MAX_EVENTS_PER_SPAN:
+                events = events[-_MAX_EVENTS_PER_SPAN:]
             self._db.execute(
                 "UPDATE trace_spans SET events_json = ? WHERE trace_id = ? AND span_id = ?",
                 (_dumps(events), trace_id, span_id),

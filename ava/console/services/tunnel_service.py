@@ -49,7 +49,7 @@ class TunnelService:
             self._error = f"cloudflared binary not found: {binary}"
             return self.status()
 
-        output_queue: queue.Queue[str] = queue.Queue()
+        output_queue: queue.Queue[str] = queue.Queue(maxsize=10000)
         self._process = subprocess.Popen(
             [str(binary), "tunnel", "--url", f"http://127.0.0.1:{self._console_port}"],
             stdout=subprocess.PIPE,
@@ -121,4 +121,14 @@ class TunnelService:
 
 def _read_stream(stream, output_queue: queue.Queue[str]) -> None:
     for line in stream:
-        output_queue.put(line)
+        try:
+            output_queue.put_nowait(line)
+        except queue.Full:
+            try:
+                output_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                output_queue.put_nowait(line)
+            except queue.Full:
+                pass

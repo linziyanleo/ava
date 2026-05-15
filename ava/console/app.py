@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,7 @@ class Services:
     workflow_store: WorkflowStore | None = None
     artifact_store: ArtifactStore | None = None
     agent_process_manager: AgentProcessManager | None = None
-    agent_lifecycle_events: list[dict[str, Any]] = field(default_factory=list)
+    agent_lifecycle_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
     db: Any | None = None
 
 
@@ -109,6 +110,17 @@ async def _close_websocket_if_needed(websocket: WebSocket, *, code: int, reason:
         await websocket.close(code=code, reason=reason)
     except Exception:
         pass
+
+
+def _register_retention_startup(app: FastAPI, db: Any) -> None:
+    from ava.storage.retention import RetentionManager
+
+    retention = RetentionManager(db)
+
+    @app.on_event("startup")
+    async def _retention_startup():
+        retention.run_cleanup()
+        asyncio.create_task(retention.schedule_periodic(interval_hours=24))
 
 
 def _mount_console_spa(app: FastAPI) -> None:
@@ -220,7 +232,7 @@ def create_console_app(
     artifact_store = ArtifactStore(db) if db is not None else None
     if token_stats_collector is not None:
         token_stats_collector._trace_spans = trace_spans
-    agent_lifecycle_events: list[dict[str, Any]] = []
+    agent_lifecycle_events: deque[dict[str, Any]] = deque(maxlen=100)
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
     repo_root = Path(__file__).resolve().parents[2]
     lan_access = LanAccessService(nanobot_dir, console_port=console_cfg.port, db=db)
@@ -332,6 +344,9 @@ def create_console_app(
     _mount_api_not_found(app)
     _mount_console_spa(app)
 
+    if db is not None:
+        _register_retention_startup(app, db)
+
     return app
 
 
@@ -380,7 +395,7 @@ def create_console_app_standalone(
     trace_spans = TraceSpanStore(db)
     workflow_store = WorkflowStore(db)
     artifact_store = ArtifactStore(db)
-    agent_lifecycle_events: list[dict[str, Any]] = []
+    agent_lifecycle_events: deque[dict[str, Any]] = deque(maxlen=100)
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
     repo_root = Path(__file__).resolve().parents[2]
     lan_access = LanAccessService(nanobot_dir, console_port=console_port, db=db)
@@ -730,5 +745,8 @@ def create_console_app_standalone(
 
     _mount_api_not_found(app)
     _mount_console_spa(app)
+
+    if db is not None:
+        _register_retention_startup(app, db)
 
     return app

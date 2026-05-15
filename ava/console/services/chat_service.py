@@ -1233,7 +1233,13 @@ class ChatService:
             "message": f"Stopped {total} task(s)." if total else "No active task to stop.",
         }
 
-    def get_history(self, session_id: str) -> list[dict]:
+    def get_history(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict]:
         if self._use_db:
             session_key = f"console:{session_id}"
             row = self._db.fetchone(
@@ -1249,12 +1255,26 @@ class ChatService:
                 except json.JSONDecodeError:
                     meta = {}
             active_conversation_id = self._resolve_active_conversation_id(row["id"], meta)
-            msg_rows = self._db.fetchall(
-                """SELECT role, content, timestamp, trace_id FROM session_messages
-                   WHERE session_id = ? AND conversation_id = ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != ''
-                   ORDER BY seq""",
-                (row["id"], active_conversation_id),
-            )
+            if limit is not None:
+                msg_rows = self._db.fetchall(
+                    """SELECT role, content, timestamp, trace_id FROM (
+                           SELECT role, content, timestamp, trace_id, seq
+                           FROM session_messages
+                           WHERE session_id = ? AND conversation_id = ?
+                             AND role IN ('user', 'assistant')
+                             AND content IS NOT NULL AND content != ''
+                           ORDER BY seq DESC
+                           LIMIT ? OFFSET ?
+                       ) sub ORDER BY seq ASC""",
+                    (row["id"], active_conversation_id, limit, offset),
+                )
+            else:
+                msg_rows = self._db.fetchall(
+                    """SELECT role, content, timestamp, trace_id FROM session_messages
+                       WHERE session_id = ? AND conversation_id = ? AND role IN ('user', 'assistant') AND content IS NOT NULL AND content != ''
+                       ORDER BY seq""",
+                    (row["id"], active_conversation_id),
+                )
             return [
                 {
                     "role": r["role"],
@@ -1286,6 +1306,10 @@ class ChatService:
                     })
             except json.JSONDecodeError:
                 continue
+        if limit is not None:
+            messages = messages[-(limit + offset):]
+            if offset:
+                messages = messages[:limit]
         return messages
 
     @staticmethod
