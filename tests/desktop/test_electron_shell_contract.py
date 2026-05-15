@@ -228,7 +228,7 @@ def test_electron_main_starts_healthchecks_and_stops_ava_core() -> None:
             "path.join(homeDir, '.real', '.bin')",
             "export function findExecutable(command, env)",
             "export function venvSitePackages(repoRoot, pythonExecutable = '')",
-            "export function buildCoreEnv(config, nanobotRoot)",
+            "export function buildCoreEnv(config, nanobotRoot, desktopToken = '')",
             "VIRTUAL_ENV: path.join(config.repoRoot, '.venv')",
             "PYTHONPATH: pythonPath",
             "AVA_DESKTOP_CONSOLE_PORT: String(config.port)",
@@ -525,6 +525,17 @@ if (coreEnv.AVA_DESKTOP_CONSOLE_PORT !== '6688' || coreEnv.CAFE_CONSOLE_PORT !==
 }
 if (coreEnv.AVA_DESKTOP_GATEWAY_PORT !== '18791' || coreEnv.AVA_DESKTOP_WEBSOCKET_PORT !== '8766') {
   throw new Error('sidecar runtime ports were not propagated');
+}
+if ('AVA_DESKTOP_TOKEN' in coreEnv) {
+  throw new Error('desktop token must not leak when not supplied');
+}
+const tokenEnv = buildCoreEnv(
+  { env, repoRoot: '/repo/ava', host: '127.0.0.1', port: 6688, gatewayPort: 18791, websocketPort: 8766, pythonExecutable: '/opt/python3.11' },
+  '/repo/nanobot',
+  'desk-token-123',
+);
+if (tokenEnv.AVA_DESKTOP_TOKEN !== 'desk-token-123') {
+  throw new Error('desktop token was not propagated when supplied');
 }
 """
     result = subprocess.run(
@@ -2894,6 +2905,17 @@ export const nativeImage = {
         return this;
       },
     };
+  },
+};
+
+export const session = {
+  defaultSession: {
+    cookies: {
+      async set(properties) {
+        state.cookies = state.cookies || [];
+        state.cookies.push(properties);
+      },
+    },
   },
 };
 

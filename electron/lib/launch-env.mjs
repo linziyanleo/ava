@@ -86,7 +86,7 @@ export function venvSitePackages(repoRoot, pythonExecutable = '') {
   return path.join(repoRoot, '.venv', 'lib', `python${match[1]}`, 'site-packages');
 }
 
-export function buildCoreEnv(config, nanobotRoot) {
+export function buildCoreEnv(config, nanobotRoot, desktopToken = '') {
   const pythonPath = [config.repoRoot, nanobotRoot, venvSitePackages(config.repoRoot, config.pythonExecutable), config.env.PYTHONPATH]
     .filter(Boolean)
     .join(path.delimiter);
@@ -107,6 +107,9 @@ export function buildCoreEnv(config, nanobotRoot) {
   }
   if (Number.isInteger(config.websocketPort)) {
     env.AVA_DESKTOP_WEBSOCKET_PORT = String(config.websocketPort);
+  }
+  if (desktopToken) {
+    env.AVA_DESKTOP_TOKEN = desktopToken;
   }
   return env;
 }

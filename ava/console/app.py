@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -200,6 +201,8 @@ def create_console_app(
         cookie_secure=bool(getattr(console_cfg, "session_cookie_secure", False)),
         cookie_samesite=str(getattr(console_cfg, "session_cookie_samesite", "lax")),
     )
+    if os.environ.get("AVA_DESKTOP") == "1":
+        auth.set_desktop_token(os.environ.get("AVA_DESKTOP_TOKEN"))
 
     skill_dir = Path(__file__).parent.parent / "skills"
     upstream_skills_dir = resolve_nanobot_checkout().skills_dir
@@ -361,6 +364,8 @@ def create_console_app_standalone(
         cookie_secure=session_cookie_secure,
         cookie_samesite=session_cookie_samesite,
     )
+    if os.environ.get("AVA_DESKTOP") == "1":
+        auth.set_desktop_token(os.environ.get("AVA_DESKTOP_TOKEN"))
 
     skill_dir = Path(__file__).parent.parent / "skills"
     upstream_skills_dir = resolve_nanobot_checkout().skills_dir

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -17,6 +18,7 @@ _cookie_name: str = "ava_console_session"
 _cookie_secure: bool = False
 _cookie_samesite: str = "strict"
 _device_token_validator: Callable[[dict[str, Any]], bool] | None = None
+_desktop_token: str | None = None
 
 READ_ROLES: tuple[str, ...] = ("owner",)
 EDIT_ROLES: tuple[str, ...] = ("owner",)
@@ -30,18 +32,32 @@ def configure(
     cookie_secure: bool = False,
     cookie_samesite: str = "strict",
 ) -> None:
-    global _secret_key, _expire_minutes, _cookie_name, _cookie_secure, _cookie_samesite, _device_token_validator
+    global _secret_key, _expire_minutes, _cookie_name, _cookie_secure, _cookie_samesite, _device_token_validator, _desktop_token
     _secret_key = secret_key
     _expire_minutes = expire_minutes
     _cookie_name = cookie_name
     _cookie_secure = cookie_secure
     _cookie_samesite = cookie_samesite.lower()
     _device_token_validator = None
+    _desktop_token = None
 
 
 def set_device_token_validator(validator: Callable[[dict[str, Any]], bool] | None) -> None:
     global _device_token_validator
     _device_token_validator = validator
+
+
+def set_desktop_token(token: str | None) -> None:
+    """Register the one-time desktop session token shared by Electron Main."""
+    global _desktop_token
+    _desktop_token = token if token else None
+
+
+def verify_desktop_token(presented: str | None) -> bool:
+    """Constant-time check; False if no desktop token is configured."""
+    if _desktop_token is None or not presented:
+        return False
+    return hmac.compare_digest(_desktop_token, presented)
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:

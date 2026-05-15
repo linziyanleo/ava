@@ -8,9 +8,11 @@ import {
   globalShortcut,
   ipcMain,
   nativeImage,
+  session,
   shell,
 } from 'electron';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,6 +45,8 @@ import { prepareRuntimeMirror } from './lib/runtime-mirror.mjs';
 import { checkForUpdate } from './lib/update-check.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESKTOP_SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
+const DESKTOP_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_CONSOLE_PORT = 6688;
 const DEFAULT_GATEWAY_PORT = 18790;
 const DEFAULT_WEBSOCKET_PORT = 8765;
@@ -536,6 +540,58 @@ function stopConsoleReadyWatcher() {
   }
 }
 
+async function performDesktopHandshake(config) {
+  if (config.externalCore) {
+    writeMainLog('desktop handshake skipped: external core has no shared token');
+    return false;
+  }
+  const handshakeUrl = `${config.coreEndpoint}/api/auth/desktop-session`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DESKTOP_HANDSHAKE_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(handshakeUrl, {
+      method: 'POST',
+      headers: { 'X-Ava-Desktop-Token': DESKTOP_SESSION_TOKEN },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    writeMainLog(`desktop handshake request failed: ${String(error)}`);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    writeMainLog(`desktop handshake returned HTTP ${response.status}`);
+    return false;
+  }
+  const setCookie = response.headers.get('set-cookie');
+  if (!setCookie) {
+    writeMainLog('desktop handshake response missing Set-Cookie');
+    return false;
+  }
+  const match = setCookie.match(/^([^=]+)=([^;]+)/);
+  if (!match) {
+    writeMainLog('desktop handshake Set-Cookie not parseable');
+    return false;
+  }
+  try {
+    await session.defaultSession.cookies.set({
+      url: config.coreEndpoint,
+      name: match[1],
+      value: match[2],
+      httpOnly: true,
+      sameSite: 'strict',
+      path: '/',
+    });
+  } catch (error) {
+    writeMainLog(`desktop handshake cookie injection failed: ${String(error)}`);
+    return false;
+  }
+  writeMainLog('desktop handshake succeeded; owner session cookie injected');
+  return true;
+}
+
 async function loadConsole(config, reason) {
   if (consoleLoaded) {
     return;
@@ -554,6 +610,7 @@ async function loadConsole(config, reason) {
       message: 'Ava core is ready',
       error: '',
     });
+    await performDesktopHandshake(config);
     writeMainLog(`loading Console from ${config.coreEndpoint} (${reason})`);
     await mainWindow.loadURL(config.coreEndpoint);
     consoleLoaded = true;
@@ -674,7 +731,11 @@ function startAvaCore(config, nanobotRoot) {
     pythonExecutable: pythonPath,
   });
 
-  const env = buildCoreEnv({ ...config, repoRoot: runtime.repoRoot, pythonExecutable: pythonPath }, runtime.nanobotRoot);
+  const env = buildCoreEnv(
+    { ...config, repoRoot: runtime.repoRoot, pythonExecutable: pythonPath },
+    runtime.nanobotRoot,
+    DESKTOP_SESSION_TOKEN,
+  );
   writeMainLog(`starting ava-core sidecar repoRoot=${runtime.repoRoot} nanobotRoot=${runtime.nanobotRoot}`);
   const child = spawn(pythonPath, ['-m', 'ava', 'gateway'], {
     cwd: runtime.repoRoot,
