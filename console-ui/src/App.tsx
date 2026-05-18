@@ -14,6 +14,7 @@ import TokenStatsPage from './pages/TokenStatsPage'
 import BrowserPage from './pages/BrowserPage'
 import LanAccessPage from './pages/LanAccessPage'
 import SettingsPage, { DesktopSettingsPage, SettingsVersionPage } from './pages/SettingsPage'
+import WorkflowDetailPage from './pages/WorkflowDetailPage'
 import { legacyRedirectMatrix, resolveLegacyRedirect } from './router/redirect-matrix'
 import { useDeepLink } from './hooks/useDeepLink'
 
@@ -82,6 +83,7 @@ export default function App() {
           }
         >
           <Route index element={<ChatPage />} />
+          <Route path="workflows/:chainId" element={<WorkflowDetailPage />} />
           <Route path="settings" element={<SettingsPage />}>
             <Route index element={<Navigate to="agents-config" replace />} />
             <Route path="agents-config" element={<AgentDashboardPage />} />
