@@ -205,6 +205,27 @@ interface WorkspaceGroup {
   tasks: TaskItem[]
 }
 
+// DESIGN_DETAILS §8.3: visual order of attention within active section.
+// running/streaming first, then pending/awaiting_deps, then queued.
+const ATTENTION_RANK: Record<TaskStatus, number> = {
+  running: 0,
+  streaming: 0,
+  pending: 1,
+  awaiting_deps: 1,
+  queued: 2,
+  failed: 3,
+  interrupted: 3,
+  cancelled: 4,
+  skipped: 4,
+  succeeded: 5,
+}
+
+function compareByAttention(a: TaskItem, b: TaskItem): number {
+  const rankDiff = ATTENTION_RANK[a.status] - ATTENTION_RANK[b.status]
+  if (rankDiff !== 0) return rankDiff
+  return (b.started_at ?? 0) - (a.started_at ?? 0)
+}
+
 function groupByWorkspace(tasks: TaskItem[]): WorkspaceGroup[] {
   const map = new Map<string, WorkspaceGroup>()
   for (const task of tasks) {
@@ -221,6 +242,9 @@ function groupByWorkspace(tasks: TaskItem[]): WorkspaceGroup[] {
       map.set(wk, group)
     }
     group.tasks.push(task)
+  }
+  for (const group of map.values()) {
+    group.tasks.sort(compareByAttention)
   }
   return Array.from(map.values())
 }
@@ -564,6 +588,20 @@ function TaskCard({
               >
                 <ExternalLink className="w-3 h-3 shrink-0" />
                 Trace {task.trace_id.slice(0, 8)}
+              </button>
+            )}
+            {task.chain_id && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  navigate(`/workflows/${encodeURIComponent(task.chain_id!)}`)
+                }}
+                className="inline-flex items-center gap-1 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                title={`查看 workflow ${task.chain_id}`}
+              >
+                <GitBranch className="w-3 h-3 shrink-0" />
+                Workflow {task.chain_id.slice(0, 8)}
               </button>
             )}
           </div>
@@ -1133,7 +1171,14 @@ export default function BgTasksPage({
     [deepLinkChainId, filteredTasks],
   )
   const activeTasks = chainFilteredTasks.filter(t => ACTIVE_STATUSES.has(t.status))
-  const recentFinished = chainFilteredTasks.filter(t => !ACTIVE_STATUSES.has(t.status))
+  const finishedTasks = chainFilteredTasks.filter(t => !ACTIVE_STATUSES.has(t.status))
+  // DESIGN_DETAILS §8.3: failed tasks must not be buried below recently-completed.
+  const failedRecent = finishedTasks
+    .filter(t => t.status === 'failed' || t.status === 'cancelled' || t.status === 'interrupted')
+    .sort(compareByAttention)
+  const recentFinished = finishedTasks.filter(
+    t => t.status === 'succeeded' || t.status === 'skipped'
+  )
 
   // Module A: group active tasks by workspace
   const workspaceGroups = useMemo(() => groupByWorkspace(activeTasks), [activeTasks])
@@ -1225,7 +1270,7 @@ export default function BgTasksPage({
             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
             加载中...
           </div>
-        ) : showCurrentSections && activeTasks.length === 0 && (!showRecentFinishedSection || recentFinished.length === 0) && !showHistory && !hasFilter ? (
+        ) : showCurrentSections && activeTasks.length === 0 && failedRecent.length === 0 && (!showRecentFinishedSection || recentFinished.length === 0) && !showHistory && !hasFilter ? (
           <div className="text-center py-20 text-[var(--text-secondary)]">
             <Clock className="w-8 h-8 mx-auto mb-3 opacity-40" />
             <p>暂无活跃任务</p>
@@ -1276,6 +1321,26 @@ export default function BgTasksPage({
               </section>
             )}
 
+            {showCurrentSections && showRecentFinishedSection && failedRecent.length > 0 && (
+              <section>
+                <h2 className="text-sm font-medium text-[var(--ava-danger)] mb-2 flex items-center gap-2">
+                  <XCircle className="w-3.5 h-3.5" />
+                  需要关注 · 失败 / 已取消 ({failedRecent.length})
+                </h2>
+                <div className="space-y-2">
+                  {failedRecent.map(t => (
+                    <TaskCard
+                      key={t.task_id}
+                      task={t}
+                      onCancel={canCancelTasks ? handleCancel : undefined}
+                      highlighted={deepLinkTaskId === t.task_id}
+                      onNavigateToChat={handleNavigateToChat}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             {showCurrentSections && showRecentFinishedSection && recentFinished.length > 0 && (
               <section>
                 <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2">
@@ -1295,7 +1360,7 @@ export default function BgTasksPage({
               </section>
             )}
 
-            {showCurrentSections && !showHistorySection && hasFilter && activeTasks.length === 0 && recentFinished.length === 0 && (
+            {showCurrentSections && !showHistorySection && hasFilter && activeTasks.length === 0 && failedRecent.length === 0 && recentFinished.length === 0 && (
               <div className="text-center py-12 text-[var(--text-secondary)]">
                 <p className="text-sm">无匹配任务</p>
                 <button onClick={clearFilters} className="mt-2 text-xs text-[var(--accent)] hover:underline">
