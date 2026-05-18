@@ -381,11 +381,16 @@ rtk pnpm dev                    # 默认 http://localhost:5173
 
 ## 6. 已知差异（DESIGN review 留档，自查时确认是否仍在）
 
-| 文件 | 行 | 问题 | 建议改法 |
-|------|----|------|---------|
-| `components/TraceTimelineDrawer.tsx` | ~13-25, 202-204 | status pill 走 `bg-[var(--ava-{kind})] text-white`，未走 StatusBadge / 未用 soft+border 三段 | 替换为 `StatusBadge` 或手写 `bg-[var(--ava-{kind}-soft)] border-[var(--ava-{kind}-border)] text-[var(--ava-{kind})]` |
-| `pages/MediaPage.tsx` | 301 | `bg-[var(--success)]/10` —— 走的是 alias 不是 soft token | 改 `bg-[var(--ava-success-soft)]` |
-| `pages/MediaPage.tsx` | 449-451 | 状态 span 裸色 | 包 StatusBadge |
-| `pages/UsersPage.tsx` | （admin 专属，匿名自查跳过） | 角色徽章未走 StatusBadge | 后续单独审 admin 视图 |
+| 文件 | 行 | 问题 | 状态 |
+|------|----|------|------|
+| `components/TraceTimelineDrawer.tsx` | ~13-25, 202-204 | status pill 走 `bg-[var(--ava-{kind})] text-white`，未走 StatusBadge / 未用 soft+border 三段 | ✅ commit `bdf2c97` 已切到 StatusBadge |
+| `pages/MediaPage.tsx` | 301 | `bg-[var(--success)]/10` —— 走的是 alias 不是 soft token | ✅ commit `bdf2c97` 已改 `bg-[var(--ava-success-soft)]` 三段式 |
+| `pages/MediaPage.tsx` | 449-451 | 状态 span 裸色 | ✅ commit `bdf2c97` 已包 StatusBadge |
+| `pages/UsersPage.tsx` | （admin 专属，匿名自查跳过） | 角色徽章未走 StatusBadge | 🟡 后续单独审 admin 视图 |
 
 每轮自查若发现新差异，按上表追加一行（含截图路径）。
+
+> **Native-feel epic 联动**：NF-3 vibrancy、NF-6 平台 scrollbar、NF-7 spring 缓动、NF-1 drag region 自查规则见 `docs/native-feel-epic.md`。重点：
+> - macOS：TopBar 应整体可拖；红黄绿不压 logo；body 背景透明度 ~14% 让壁纸隐隐透出。
+> - macOS scrollbar 应走系统 overlay（停止滚动后淡出），不再是固定 6px。
+> - 浮层（TaskFloater / Drawer / Modal / 移动 sheet）过渡曲线应为 `--ava-ease-spring`。
