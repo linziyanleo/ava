@@ -466,6 +466,8 @@ function createBootstrapWindow(config, { loadSetup = true } = {}) {
       ? {
           titleBarStyle: 'hiddenInset',
           trafficLightPosition: { x: 16, y: 20 },
+          vibrancy: 'sidebar',
+          visualEffectState: 'active',
         }
       : {}),
     webPreferences: {
