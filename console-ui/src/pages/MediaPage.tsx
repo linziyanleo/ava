@@ -88,14 +88,14 @@ function GridCard({
         </div>
       ) : (
         <div className="aspect-[4/3] flex items-center justify-center bg-[var(--bg-tertiary)]">
-          <AlertCircle className="w-8 h-8 text-[var(--danger)] opacity-50" />
+          <AlertCircle className="w-8 h-8 text-[var(--ava-danger)] opacity-50" />
         </div>
       )}
       {onDelete && (
         <button
           onClick={e => onDelete(record, e)}
           disabled={deleting === record.id}
-          className="absolute top-2 left-2 z-10 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-[var(--danger)] transition-all"
+          className="absolute top-2 left-2 z-10 p-1.5 rounded-lg bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-[var(--ava-danger)] transition-all"
           title="删除"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -108,7 +108,7 @@ function GridCard({
       )}
       {record.status === 'error' && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <span className="text-xs text-[var(--danger)] font-medium px-2 py-1 bg-black/60 rounded">失败</span>
+          <span className="text-xs text-[var(--ava-danger)] font-medium px-2 py-1 bg-black/60 rounded">失败</span>
         </div>
       )}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 z-10">
@@ -443,8 +443,8 @@ export default function MediaPage() {
               )}
               {selected.error && (
                 <div>
-                  <label className="text-xs font-medium text-[var(--danger)] uppercase">错误</label>
-                  <p className="mt-1 text-sm text-[var(--danger)]">{selected.error}</p>
+                  <label className="text-xs font-medium text-[var(--ava-danger)] uppercase">错误</label>
+                  <p className="mt-1 text-sm text-[var(--ava-danger)]">{selected.error}</p>
                 </div>
               )}
               <div className="flex items-center gap-6 text-xs text-[var(--text-secondary)]">

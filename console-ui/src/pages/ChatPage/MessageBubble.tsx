@@ -333,7 +333,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                   className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--text-primary)]"
                   title="Copy"
                 >
-                  {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                  {copied ? <Check className="w-3 h-3 text-[var(--ava-success)]" /> : <Copy className="w-3 h-3" />}
                 </button>
                 {tokenStats && !isUser && (
                   <div className="relative" ref={popoverRef}>

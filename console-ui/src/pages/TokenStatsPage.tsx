@@ -1607,7 +1607,7 @@ function CopyablePre({ children, className }: { children: string; className?: st
         className="absolute bottom-2 right-2 p-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] opacity-0 group-hover/copy:opacity-100 transition-opacity"
         title="复制到剪贴板"
       >
-        {copied ? <Check className="w-3.5 h-3.5 text-[var(--success)]" /> : <Copy className="w-3.5 h-3.5" />}
+        {copied ? <Check className="w-3.5 h-3.5 text-[var(--ava-success)]" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
     </div>
   );

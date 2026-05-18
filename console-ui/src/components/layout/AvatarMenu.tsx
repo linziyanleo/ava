@@ -89,7 +89,7 @@ export default function AvatarMenu() {
               logout()
               setOpen(false)
             }}
-            className={cn(itemClass, 'text-[var(--danger)] hover:text-[var(--danger)]')}
+            className={cn(itemClass, 'text-[var(--ava-danger)] hover:text-[var(--ava-danger)]')}
             role="menuitem"
           >
             <LogOut className="h-4 w-4" />

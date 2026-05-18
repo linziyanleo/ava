@@ -84,7 +84,7 @@ function ToggleSwitch({ enabled, onToggle, disabled }: { enabled: boolean; onTog
       title={enabled ? '点击禁用' : '点击启用'}
       className={cn(
         'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
-        enabled ? 'bg-[var(--success)]' : 'bg-[var(--bg-tertiary)]',
+        enabled ? 'bg-[var(--ava-success)]' : 'bg-[var(--bg-tertiary)]',
         disabled && 'opacity-40 cursor-not-allowed',
       )}
     >
@@ -162,7 +162,7 @@ function ToolsSection() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}>
           {message.text}
         </div>
       )}
@@ -191,7 +191,7 @@ function ToolsSection() {
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
-            <Pencil className="w-4 h-4 text-[var(--warning)]" />
+            <Pencil className="w-4 h-4 text-[var(--ava-warning)]" />
             <span className="text-sm font-semibold">TOOLS.md</span>
             <span className="text-xs text-[var(--text-secondary)]">工具文档</span>
           </div>
@@ -229,9 +229,9 @@ function ToolsSection() {
 // ── MCP Section ────────────────────────────────────────────────────────────
 
 function statusClass(status: string): string {
-  if (status === 'connected') return 'bg-[var(--success)]/10 text-[var(--success)]'
-  if (status === 'connecting' || status === 'configured') return 'bg-[var(--warning)]/10 text-[var(--warning)]'
-  return 'bg-[var(--danger)]/10 text-[var(--danger)]'
+  if (status === 'connected') return 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]'
+  if (status === 'connecting' || status === 'configured') return 'bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]'
+  return 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'
 }
 
 function recordKeys(record?: Record<string, string>): string[] {
@@ -331,7 +331,7 @@ function MCPSection() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}>
           {message.text}
         </div>
       )}
@@ -416,13 +416,13 @@ function MCPSection() {
                     </div>
                   )}
                   {server.last_error && (
-                    <div className="flex items-start gap-1.5 text-[var(--danger)]">
+                    <div className="flex items-start gap-1.5 text-[var(--ava-danger)]">
                       <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                       <span>{server.last_error}</span>
                     </div>
                   )}
                   {probe && (
-                    <div className={cn('rounded-lg px-2.5 py-2', probe.ok ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]')}>
+                    <div className={cn('rounded-lg px-2.5 py-2', probe.ok ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]')}>
                       {probe.ok ? `probe tools: ${probe.wrapped_tools.join(', ') || '(none)'}` : probe.error}
                     </div>
                   )}
@@ -607,7 +607,7 @@ function SkillsSection() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+        <div className={`p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}>
           {message.text}
         </div>
       )}
@@ -891,7 +891,7 @@ function SkillCard({
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
           {skill.always && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--success)]/10 text-[var(--success)]">always</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--ava-success-soft)] text-[var(--ava-success)]">always</span>
           )}
           <span className={cn('text-[10px] px-1.5 py-0.5 rounded', badgeClass)}>
             {sourceLabels[skill.source]}
@@ -931,7 +931,7 @@ function SkillCard({
               onClick={onDelete}
               disabled={deleting}
               title="删除"
-              className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 opacity-0 group-hover:opacity-100 transition-all"
+              className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] opacity-0 group-hover:opacity-100 transition-all"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>

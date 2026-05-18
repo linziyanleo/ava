@@ -81,7 +81,7 @@ export function ChatHeader({
             onClick={handleCopyKey}
             className="p-0.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           >
-            {keyCopied ? <Check className="h-3 w-3 text-[var(--success)]" /> : <Copy className="h-3 w-3" />}
+            {keyCopied ? <Check className="h-3 w-3 text-[var(--ava-success)]" /> : <Copy className="h-3 w-3" />}
           </button>
 
           <AgentsDropdown
@@ -144,7 +144,7 @@ export function ChatHeader({
             className="shrink-0 rounded p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             title="Copy session key"
           >
-            {keyCopied ? <Check className="h-3 w-3 text-[var(--success)]" /> : <Copy className="h-3 w-3" />}
+            {keyCopied ? <Check className="h-3 w-3 text-[var(--ava-success)]" /> : <Copy className="h-3 w-3" />}
           </button>
           <span className="hidden shrink-0 text-[10px] text-[var(--text-tertiary)] lg:inline">
             {SCENE_LABELS[session.scene]}

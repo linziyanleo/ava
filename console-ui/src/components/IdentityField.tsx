@@ -43,7 +43,7 @@ export default function IdentityField({
       >
         {copied ? (
           <>
-            <Check className="h-3 w-3 text-[var(--success)]" />
+            <Check className="h-3 w-3 text-[var(--ava-success)]" />
             已复制
           </>
         ) : (

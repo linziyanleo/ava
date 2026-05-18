@@ -108,7 +108,7 @@ export function ExtraConfigEditor({ readOnly }: ExtraConfigEditorProps) {
       </div>
 
       {message && (
-        <div className={`mb-3 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+        <div className={`mb-3 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}>
           {message.text}
         </div>
       )}
@@ -121,7 +121,7 @@ export function ExtraConfigEditor({ readOnly }: ExtraConfigEditorProps) {
       )}
 
       {jsonError && (
-        <div className="mb-3 p-2 rounded-lg text-xs bg-[var(--danger)]/10 text-[var(--danger)] font-mono">
+        <div className="mb-3 p-2 rounded-lg text-xs bg-[var(--ava-danger-soft)] text-[var(--ava-danger)] font-mono">
           JSON 语法错误: {jsonError}
         </div>
       )}

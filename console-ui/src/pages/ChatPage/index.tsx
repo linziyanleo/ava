@@ -1170,7 +1170,7 @@ export default function ChatPage() {
 
       {/* Error banner */}
       {error && (
-        <div className="px-4 py-2 bg-[var(--danger)]/10 text-[var(--danger)] text-xs flex items-center justify-between">
+        <div className="px-4 py-2 bg-[var(--ava-danger-soft)] text-[var(--ava-danger)] text-xs flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError('')} className="ml-2 hover:underline">Dismiss</button>
         </div>

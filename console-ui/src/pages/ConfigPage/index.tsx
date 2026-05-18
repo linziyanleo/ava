@@ -208,7 +208,7 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
 
       {message && (
         <div
-          className={`mb-3 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}
+          className={`mb-3 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}
         >
           {message.text}
         </div>

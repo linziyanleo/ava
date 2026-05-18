@@ -128,9 +128,6 @@
   --text-tertiary: var(--ava-text-subtle);
   --accent: var(--ava-primary);
   --accent-hover: var(--ava-primary-hover);
-  --danger: var(--ava-danger);
-  --success: var(--ava-success);
-  --warning: var(--ava-warning);
   --border: var(--ava-border);
 }
 

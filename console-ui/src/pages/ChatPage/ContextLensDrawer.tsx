@@ -162,7 +162,7 @@ export function ContextLensDrawer({ open, sessionKey, sessionLabel, isMobile, on
         {/* Tab Content */}
         <div className="flex-1 overflow-y-auto">
           {error && (
-            <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 p-3 text-xs text-[var(--danger)]">
+            <div className="m-4 flex items-center gap-2 rounded-lg border border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] p-3 text-xs text-[var(--ava-danger)]">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               {error}
             </div>
@@ -320,9 +320,9 @@ function WindowTab({ preview, loading }: { preview: ContextPreview | null; loadi
       {window && <WindowDetails window={window} />}
 
       {/* Scope notice */}
-      <div className="rounded-lg border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-3 text-xs text-[var(--text-secondary)]">
+      <div className="rounded-lg border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-3 text-xs text-[var(--text-secondary)]">
         <div className="flex items-start gap-2">
-          <Info className="h-3.5 w-3.5 shrink-0 text-[var(--warning)] mt-0.5" />
+          <Info className="h-3.5 w-3.5 shrink-0 text-[var(--ava-warning)] mt-0.5" />
           <div>
             <span className="font-medium text-[var(--text-primary)]">Estimate scope</span>
             <p className="mt-0.5">
@@ -353,7 +353,7 @@ function WindowDetails({ window }: { window: ContextPreviewWindow }) {
         </div>
       )}
       {window.dropped_count > 0 && (
-        <div className="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--warning)]">
+        <div className="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--ava-warning)]">
           <AlertTriangle className="h-3 w-3" />
           Some messages are outside the replay window and won't be sent to the model
         </div>
@@ -497,7 +497,7 @@ function StatCell({ label, value }: { label: string; value: string }) {
 }
 
 function utilGaugeColor(pct: number): string {
-  if (pct > 85) return 'bg-[var(--danger)]'
-  if (pct >= 60) return 'bg-[var(--warning)]'
-  return 'bg-[var(--success)]'
+  if (pct > 85) return 'bg-[var(--ava-danger)]'
+  if (pct >= 60) return 'bg-[var(--ava-warning)]'
+  return 'bg-[var(--ava-success)]'
 }

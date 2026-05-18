@@ -242,8 +242,8 @@ export function DesktopSettingsPage() {
         <p className="mt-2 text-sm text-[var(--text-secondary)]">Finder launch, local logs, and nanobot checkout selection.</p>
       </div>
 
-      {message && <div className="rounded-lg bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{message}</div>}
-      {error && <div className="rounded-lg bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</div>}
+      {message && <div className="rounded-lg bg-[var(--ava-success-soft)] p-3 text-sm text-[var(--ava-success)]">{message}</div>}
+      {error && <div className="rounded-lg bg-[var(--ava-danger-soft)] p-3 text-sm text-[var(--ava-danger)]">{error}</div>}
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
         <p className="text-xs uppercase text-[var(--text-secondary)]">Nanobot checkout</p>

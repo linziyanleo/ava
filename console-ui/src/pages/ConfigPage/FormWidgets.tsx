@@ -23,7 +23,7 @@ export function CopyableText({ text }: { text: string }) {
       className="ml-1.5 p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
       title="复制到剪贴板"
     >
-      {copied ? <Check className="w-3.5 h-3.5 text-[var(--success)]" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? <Check className="w-3.5 h-3.5 text-[var(--ava-success)]" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
   )
 }
@@ -143,7 +143,7 @@ export function ArrayField({
             <button
               type="button"
               onClick={() => removeRow(idx)}
-              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] transition-colors"
               title="删除"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -216,7 +216,7 @@ export function KeyValueField({
             <button
               type="button"
               onClick={() => removeRow(idx)}
-              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] transition-colors"
               title="删除"
             >
               <Trash2 className="w-3.5 h-3.5" />

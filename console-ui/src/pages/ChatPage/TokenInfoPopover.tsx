@@ -65,7 +65,7 @@ export function TokenInfoPopover({ stats, sessionKey, turnSeq, isMobile, onClose
                 className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                 title={copyLabel}
               >
-                {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+                {copied ? <Check className="w-3 h-3 text-[var(--ava-success)]" /> : <Copy className="w-3 h-3" />}
                 <span>{copied ? '已复制' : copyLabel}</span>
               </button>
               <button
@@ -125,7 +125,7 @@ export function TokenInfoPopover({ stats, sessionKey, turnSeq, isMobile, onClose
             className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
             title={copyLabel}
           >
-            {copied ? <Check className="w-3 h-3 text-[var(--success)]" /> : <Copy className="w-3 h-3" />}
+            {copied ? <Check className="w-3 h-3 text-[var(--ava-success)]" /> : <Copy className="w-3 h-3" />}
             <span>{copied ? '已复制' : copyLabel}</span>
           </button>
           <button

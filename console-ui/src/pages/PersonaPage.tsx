@@ -125,7 +125,7 @@ export default function PersonaPage() {
               {fileHasChanges && (
                 <span className={cn(
                   'w-1.5 h-1.5 rounded-full shrink-0',
-                  isActive ? 'bg-white' : 'bg-[var(--warning)]'
+                  isActive ? 'bg-white' : 'bg-[var(--ava-warning)]'
                 )} />
               )}
             </button>
@@ -134,7 +134,7 @@ export default function PersonaPage() {
       </div>
 
       {message && (
-        <div className={`mb-4 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+        <div className={`mb-4 p-3 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}>
           {message.text}
         </div>
       )}

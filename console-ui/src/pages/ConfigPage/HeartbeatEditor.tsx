@@ -171,7 +171,7 @@ function TaskCard({
               <button
                 type="button"
                 onClick={onMoveSection}
-                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--success)] hover:bg-[var(--success)]/10 transition-colors"
+                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-success)] hover:bg-[var(--ava-success-soft)] transition-colors"
                 title={isCompleted ? '标记为活跃' : '标记为完成'}
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -179,7 +179,7 @@ function TaskCard({
               <button
                 type="button"
                 onClick={onDelete}
-                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] transition-colors"
                 title="删除任务"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -189,11 +189,11 @@ function TaskCard({
           {editing && (
             <>
               <button type="button" onClick={handleSave}
-                className="p-1.5 rounded-md text-[var(--success)] hover:bg-[var(--success)]/10 transition-colors" title="保存">
+                className="p-1.5 rounded-md text-[var(--ava-success)] hover:bg-[var(--ava-success-soft)] transition-colors" title="保存">
                 <Save className="w-3.5 h-3.5" />
               </button>
               <button type="button" onClick={handleCancel}
-                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] transition-colors" title="取消">
+                className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-danger)] transition-colors" title="取消">
                 <X className="w-3.5 h-3.5" />
               </button>
             </>
@@ -372,7 +372,7 @@ export function HeartbeatEditor({
 
         {message && (
           <div
-            className={`mb-3 p-2 rounded-lg text-xs ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}
+            className={`mb-3 p-2 rounded-lg text-xs ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}
           >
             {message.text}
           </div>

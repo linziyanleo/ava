@@ -761,10 +761,10 @@ export default function AgentDashboardPage() {
     return (
       <div>
         {error && (
-          <div className="mb-4 rounded-lg bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</div>
+          <div className="mb-4 rounded-lg bg-[var(--ava-danger-soft)] p-3 text-sm text-[var(--ava-danger)]">{error}</div>
         )}
         {message && (
-          <div className="mb-4 rounded-lg bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{message}</div>
+          <div className="mb-4 rounded-lg bg-[var(--ava-success-soft)] p-3 text-sm text-[var(--ava-success)]">{message}</div>
         )}
         {loading && !data ? (
           <div className="flex items-center justify-center py-16 text-[var(--text-secondary)]">
@@ -830,10 +830,10 @@ export default function AgentDashboardPage() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-lg bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</div>
+        <div className="mb-4 rounded-lg bg-[var(--ava-danger-soft)] p-3 text-sm text-[var(--ava-danger)]">{error}</div>
       )}
       {message && (
-        <div className="mb-4 rounded-lg bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{message}</div>
+        <div className="mb-4 rounded-lg bg-[var(--ava-success-soft)] p-3 text-sm text-[var(--ava-success)]">{message}</div>
       )}
 
       {loading && !data ? (

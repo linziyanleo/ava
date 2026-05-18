@@ -200,7 +200,7 @@ export function SessionSidebar({
                         <button onClick={() => confirmRename(s.key)} className="p-0.5 text-[var(--ava-success)] hover:text-[var(--ava-success)]">
                           <Check className="w-3 h-3" />
                         </button>
-                        <button onClick={cancelRename} className="p-0.5 text-[var(--text-secondary)] hover:text-[var(--danger)]">
+                        <button onClick={cancelRename} className="p-0.5 text-[var(--text-secondary)] hover:text-[var(--ava-danger)]">
                           <X className="w-3 h-3" />
                         </button>
                       </div>
@@ -253,7 +253,7 @@ export function SessionSidebar({
                       {canManageSessions && (
                         <button
                           onClick={(e) => { e.stopPropagation(); setConfirmDelete(s.key) }}
-                          className="p-1 text-[var(--text-secondary)] hover:text-[var(--danger)]"
+                          className="p-1 text-[var(--text-secondary)] hover:text-[var(--ava-danger)]"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -262,10 +262,10 @@ export function SessionSidebar({
                   )}
                   {confirmDelete === s.key && (
                     <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <span className="text-[10px] text-[var(--danger)]">Delete?</span>
+                      <span className="text-[10px] text-[var(--ava-danger)]">Delete?</span>
                       <button
                         onClick={() => { onDeleteSession(s.key); setConfirmDelete(null) }}
-                        className="p-0.5 text-[var(--danger)] hover:text-[var(--ava-danger)]"
+                        className="p-0.5 text-[var(--ava-danger)] hover:text-[var(--ava-danger)]"
                       >
                         <Check className="w-3 h-3" />
                       </button>

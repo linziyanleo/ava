@@ -122,8 +122,8 @@ function buildCronExpr(p: CronParts): string {
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="text-[var(--text-secondary)] text-xs">未运行</span>;
   const map: Record<string, { icon: React.ReactNode; cls: string; label: string }> = {
-    ok: { icon: <CheckCircle2 className="w-3 h-3" />, cls: 'text-[var(--success)]', label: '成功' },
-    error: { icon: <XCircle className="w-3 h-3" />, cls: 'text-[var(--danger)]', label: '失败' },
+    ok: { icon: <CheckCircle2 className="w-3 h-3" />, cls: 'text-[var(--ava-success)]', label: '成功' },
+    error: { icon: <XCircle className="w-3 h-3" />, cls: 'text-[var(--ava-danger)]', label: '失败' },
     skipped: { icon: <AlertCircle className="w-3 h-3" />, cls: 'text-[var(--ava-warning)]', label: '跳过' },
   };
   const s = map[status] ?? { icon: null, cls: 'text-[var(--text-secondary)]', label: status };
@@ -379,7 +379,7 @@ function JobCard({
             <button
               type="button"
               onClick={onDelete}
-              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+              className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--ava-danger)] hover:bg-[var(--ava-danger-soft)] transition-colors"
               title="删除任务"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -636,7 +636,7 @@ function JobCard({
               </div>
             </div>
             {job.state.lastError && (
-              <div className="mt-2 px-3 py-2 rounded-lg bg-[var(--danger)]/10 text-[var(--danger)] text-xs">
+              <div className="mt-2 px-3 py-2 rounded-lg bg-[var(--ava-danger-soft)] text-[var(--ava-danger)] text-xs">
                 {job.state.lastError}
               </div>
             )}

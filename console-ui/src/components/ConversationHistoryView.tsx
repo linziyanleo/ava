@@ -31,7 +31,7 @@ function UserBubble({ content }: { content: string }) {
         <User className="w-3 h-3 shrink-0" />
         <span>User</span>
         {isFolded && !expanded && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已折叠</span>
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]">已折叠</span>
         )}
       </div>
       <pre className="whitespace-pre-wrap font-[inherit] text-[var(--text-primary)] break-words">{display}</pre>
@@ -58,7 +58,7 @@ function AssistantBubble({ content }: { content: string }) {
         <Bot className="w-3 h-3 shrink-0" />
         <span>Assistant</span>
         {isFolded && !expanded && (
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/10 text-[var(--warning)]">已折叠</span>
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--ava-warning-soft)] text-[var(--ava-warning)]">已折叠</span>
         )}
       </div>
       <pre className="whitespace-pre-wrap font-[inherit] text-[var(--text-primary)] break-words">{display}</pre>

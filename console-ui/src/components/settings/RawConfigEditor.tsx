@@ -24,7 +24,7 @@ export function RawConfigEditor({
         </div>
       </div>
       {parseError && (
-        <div className="flex items-start gap-2 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--ava-danger-border)] bg-[var(--ava-danger-soft)] p-3 text-sm text-[var(--ava-danger)]">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{parseError}</span>
         </div>

@@ -5,14 +5,14 @@ import { formatTokenCount } from './utils'
 import { api } from '../../api/client'
 
 function toneClass(pct: number): string {
-  if (pct > 85) return 'bg-[var(--danger)]'
-  if (pct >= 60) return 'bg-[var(--warning)]'
-  return 'bg-[var(--success)]'
+  if (pct > 85) return 'bg-[var(--ava-danger)]'
+  if (pct >= 60) return 'bg-[var(--ava-warning)]'
+  return 'bg-[var(--ava-success)]'
 }
 
 function toneTextClass(pct: number): string {
-  if (pct > 85) return 'text-[var(--danger)]'
-  if (pct >= 60) return 'text-[var(--warning)]'
+  if (pct > 85) return 'text-[var(--ava-danger)]'
+  if (pct >= 60) return 'text-[var(--ava-warning)]'
   return 'text-[var(--text-secondary)]'
 }
 
@@ -92,7 +92,7 @@ export function ContextChip({ sessionKey, onOpenLens, isMobile }: ContextChipPro
       <button
         type="button"
         onClick={onOpenLens}
-        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--danger)]/30 px-2.5 py-1.5 text-xs text-[var(--danger)]"
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--ava-danger-border)] px-2.5 py-1.5 text-xs text-[var(--ava-danger)]"
       >
         <AlertCircle className="h-3.5 w-3.5" />
         Error

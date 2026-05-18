@@ -747,7 +747,7 @@ export function ToolCallBlock({
               </div>
             )}
             {isLoading && !resultText && (
-              <div className="flex items-center gap-1.5 text-[var(--warning)] py-1">
+              <div className="flex items-center gap-1.5 text-[var(--ava-warning)] py-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span>Processing...</span>
               </div>
@@ -768,7 +768,7 @@ export function ToolCallBlock({
           className="flex items-center gap-1.5 w-full px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/30 rounded-lg transition-colors"
         >
           {isLoading ? (
-            <Loader2 className="w-3 h-3 shrink-0 text-[var(--warning)] animate-spin" />
+            <Loader2 className="w-3 h-3 shrink-0 text-[var(--ava-warning)] animate-spin" />
           ) : expanded ? (
             <ChevronDown className="w-3 h-3 shrink-0 text-[var(--text-secondary)]" />
           ) : (
@@ -808,7 +808,7 @@ export function ToolCallBlock({
               </div>
             )}
             {isLoading && !resultText && (
-              <div className="flex items-center gap-1.5 text-[var(--warning)] py-1">
+              <div className="flex items-center gap-1.5 text-[var(--ava-warning)] py-1">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span>Waiting for result...</span>
               </div>

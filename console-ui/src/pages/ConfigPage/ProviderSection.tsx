@@ -18,7 +18,7 @@ export function ProviderSection({
       title={name}
       infoKey="providers"
       defaultOpen={hasKey}
-      badge={hasKey ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--success)]/15 text-[var(--success)]">已配置</span> : undefined}
+      badge={hasKey ? <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--ava-success-soft)] text-[var(--ava-success)]">已配置</span> : undefined}
     >
       <div className="space-y-3">
         <div>

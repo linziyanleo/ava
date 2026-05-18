@@ -202,7 +202,7 @@ function MemoryContent({ scope }: { scope: MemoryScope }) {
 
       {message && (
         <div
-          className={`mx-4 mt-3 p-2 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}
+          className={`mx-4 mt-3 p-2 rounded-lg text-sm ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}
         >
           {message.text}
         </div>
@@ -395,7 +395,7 @@ function DiaryTab({ isMobile }: { isMobile?: boolean }) {
       </div>
       {message && (
         <div
-          className={`mx-4 mt-3 p-2 rounded-lg text-xs ${message.type === 'success' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}
+          className={`mx-4 mt-3 p-2 rounded-lg text-xs ${message.type === 'success' ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]' : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'}`}
         >
           {message.text}
         </div>

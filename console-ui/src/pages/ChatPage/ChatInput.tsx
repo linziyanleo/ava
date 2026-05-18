@@ -580,7 +580,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
                 )}
                 <button
                   onClick={() => removeAttachment(attachment.id)}
-                  className="absolute right-2 top-2 rounded-full bg-black/65 p-1 text-white hover:bg-[var(--danger)]"
+                  className="absolute right-2 top-2 rounded-full bg-black/65 p-1 text-white hover:bg-[var(--ava-danger)]"
                   title="移除文件"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -592,7 +592,7 @@ export function ChatInput({ onSend, onStopCurrentTurn, onSubmitDirectTask, sendD
       )}
 
       {pasteError && (
-        <div className="mb-2 text-xs text-[var(--danger)]">{pasteError}</div>
+        <div className="mb-2 text-xs text-[var(--ava-danger)]">{pasteError}</div>
       )}
 
       <div className="flex gap-2 items-end">

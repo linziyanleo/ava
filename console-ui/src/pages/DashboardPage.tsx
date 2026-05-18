@@ -331,8 +331,8 @@ export default function DashboardPage() {
         <div
           className={`mb-4 rounded-lg p-3 text-sm ${
             gwMessage.type === 'success'
-              ? 'bg-[var(--success)]/10 text-[var(--success)]'
-              : 'bg-[var(--danger)]/10 text-[var(--danger)]'
+              ? 'bg-[var(--ava-success-soft)] text-[var(--ava-success)]'
+              : 'bg-[var(--ava-danger-soft)] text-[var(--ava-danger)]'
           }`}
         >
           {gwMessage.text}
@@ -340,10 +340,10 @@ export default function DashboardPage() {
       )}
 
       {countdown > 0 && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/10 p-4">
-          <AlertTriangle className="h-5 w-5 text-[var(--warning)]" />
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-4">
+          <AlertTriangle className="h-5 w-5 text-[var(--ava-warning)]" />
           <div>
-            <p className="text-sm font-medium text-[var(--warning)]">网关重启等待中</p>
+            <p className="text-sm font-medium text-[var(--ava-warning)]">网关重启等待中</p>
             <p className="text-xs text-[var(--text-secondary)]">预计约 {countdown}s 后重新连接。</p>
           </div>
         </div>
@@ -391,8 +391,8 @@ export default function DashboardPage() {
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className={`rounded-lg p-2 ${status?.running ? 'bg-[var(--success)]/10' : 'bg-[var(--danger)]/10'}`}>
-              <Server className={`h-5 w-5 ${status?.running ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`} />
+            <div className={`rounded-lg p-2 ${status?.running ? 'bg-[var(--ava-success-soft)]' : 'bg-[var(--ava-danger-soft)]'}`}>
+              <Server className={`h-5 w-5 ${status?.running ? 'text-[var(--ava-success)]' : 'text-[var(--ava-danger)]'}`} />
             </div>
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -426,7 +426,7 @@ export default function DashboardPage() {
               <button
                 onClick={() => handleRestart(false)}
                 disabled={restarting}
-                className="flex items-center gap-1 rounded-lg bg-[var(--warning)] px-2.5 py-1.5 text-[11px] font-medium text-black disabled:opacity-50 hover:bg-[var(--warning)]/80"
+                className="flex items-center gap-1 rounded-lg bg-[var(--ava-warning)] px-2.5 py-1.5 text-[11px] font-medium text-black disabled:opacity-50 hover:bg-[var(--ava-warning-soft)]"
               >
                 <RefreshCw className="h-3 w-3" />
                 {isMobile ? '' : restarting ? '调度中...' : '重启'}
@@ -434,7 +434,7 @@ export default function DashboardPage() {
               <button
                 onClick={() => handleRestart(true)}
                 disabled={restarting}
-                className="flex items-center gap-1 rounded-lg bg-[var(--danger)] px-2.5 py-1.5 text-[11px] font-medium text-white disabled:opacity-50 hover:bg-[var(--danger)]/80"
+                className="flex items-center gap-1 rounded-lg bg-[var(--ava-danger)] px-2.5 py-1.5 text-[11px] font-medium text-white disabled:opacity-50 hover:bg-[var(--ava-danger-soft)]"
               >
                 <Power className="h-3 w-3" />
                 {isMobile ? '' : '强制'}
@@ -447,7 +447,7 @@ export default function DashboardPage() {
           <div className="rounded-lg bg-[var(--bg-primary)] p-3">
             <p className="mb-0.5 text-[10px] text-[var(--text-secondary)]">状态</p>
             <p
-              className={`text-sm font-semibold ${status?.running ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}
+              className={`text-sm font-semibold ${status?.running ? 'text-[var(--ava-success)]' : 'text-[var(--ava-danger)]'}`}
             >
               {status?.running ? '在线' : '离线'}
             </p>
@@ -472,7 +472,7 @@ export default function DashboardPage() {
               <p className="mb-0.5 text-[10px] text-[var(--text-secondary)]">监管进程</p>
               <p className="flex items-center gap-1 text-sm font-semibold">
                 <Shield
-                  className={`h-3 w-3 ${status.supervised ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}
+                  className={`h-3 w-3 ${status.supervised ? 'text-[var(--ava-success)]' : 'text-[var(--text-secondary)]'}`}
                 />
                 {status.supervised ? (status.supervisor ?? '已启用') : '无'}
               </p>
@@ -488,7 +488,7 @@ export default function DashboardPage() {
             <div className="rounded-lg bg-[var(--bg-primary)] p-3">
               <p className="mb-0.5 text-[10px] text-[var(--text-secondary)]">重启状态</p>
               <p
-                className={`text-sm font-semibold ${status.restart_pending ? 'text-[var(--warning)]' : 'text-[var(--text-secondary)]'}`}
+                className={`text-sm font-semibold ${status.restart_pending ? 'text-[var(--ava-warning)]' : 'text-[var(--text-secondary)]'}`}
               >
                 {status.restart_pending ? '等待重启' : '稳定'}
               </p>
