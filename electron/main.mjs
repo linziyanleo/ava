@@ -448,6 +448,35 @@ function presentMainWindow(appWindow, reason) {
   );
 }
 
+function installContextMenu(window) {
+  const { webContents } = window;
+  webContents.on('context-menu', (_event, params) => {
+    const { editFlags, selectionText, isEditable } = params;
+    const hasSelection = typeof selectionText === 'string' && selectionText.trim().length > 0;
+    const template = [];
+    if (isEditable) {
+      template.push(
+        { role: 'cut', enabled: editFlags.canCut },
+        { role: 'copy', enabled: editFlags.canCopy },
+        { role: 'paste', enabled: editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: editFlags.canSelectAll },
+      );
+    } else if (hasSelection) {
+      template.push({ role: 'copy', enabled: editFlags.canCopy });
+    }
+    if (!app.isPackaged) {
+      if (template.length > 0) template.push({ type: 'separator' });
+      template.push({
+        label: 'Inspect Element',
+        click: () => webContents.inspectElement(params.x, params.y),
+      });
+    }
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window });
+  });
+}
+
 function createBootstrapWindow(config, { loadSetup = true } = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
@@ -477,6 +506,7 @@ function createBootstrapWindow(config, { loadSetup = true } = {}) {
       sandbox: true,
     },
   });
+  installContextMenu(mainWindow);
   if (!loadSetup) {
     return mainWindow;
   }
