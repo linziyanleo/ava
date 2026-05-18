@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const api = {
+  platform: process.platform,
   selectDirectory: () => ipcRenderer.invoke('ava:selectDirectory'),
   revealArtifact: (artifactId) => ipcRenderer.invoke('ava:revealArtifact', artifactId),
   openLogs: () => ipcRenderer.invoke('ava:openLogs'),

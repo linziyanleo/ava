@@ -46,10 +46,16 @@ function DeepLinkBridge() {
   return null
 }
 
+function applyPlatformAttr() {
+  const desktop = (window as unknown as { avaDesktop?: { platform?: string } }).avaDesktop
+  document.documentElement.dataset.platform = desktop?.platform ?? 'web'
+}
+
 export default function App() {
   const { checkAuth, user, loading } = useAuth()
 
   useEffect(() => {
+    applyPlatformAttr()
     checkAuth()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

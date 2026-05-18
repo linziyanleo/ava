@@ -179,6 +179,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* NF-1: drag region + macOS traffic-light reservation */
+.topbar {
+  -webkit-app-region: drag;
+}
+.topbar :where(button, a, input, textarea, select, [role="button"], [role="link"], [data-no-drag]) {
+  -webkit-app-region: no-drag;
+}
+html[data-platform="darwin"] .topbar > :first-child {
+  padding-left: calc(1rem + 78px);
+}
+
 :root {
   --cjk-line-height: 1.6;
 }

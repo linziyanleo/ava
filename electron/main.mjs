@@ -452,6 +452,7 @@ function createBootstrapWindow(config, { loadSetup = true } = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return mainWindow;
   }
+  const isDarwin = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -460,6 +461,13 @@ function createBootstrapWindow(config, { loadSetup = true } = {}) {
     title: 'Ava',
     show: false,
     focusable: true,
+    backgroundColor: '#0f1512',
+    ...(isDarwin
+      ? {
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: 16, y: 20 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

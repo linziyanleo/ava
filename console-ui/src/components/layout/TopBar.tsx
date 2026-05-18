@@ -12,7 +12,7 @@ export default function TopBar() {
   const { open } = useTaskFloater()
 
   return (
-    <header className="z-30 flex h-14 shrink-0 items-center border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+    <header className="topbar z-30 flex h-14 shrink-0 items-center border-b border-[var(--border)] bg-[var(--bg-secondary)]">
       <div className="flex h-full min-w-0 shrink-0 items-center gap-4 px-4">
         <NavLink to="/" className="flex items-center gap-2">
           <Bot className="h-6 w-6 text-[var(--accent)]" />
