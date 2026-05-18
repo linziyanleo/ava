@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 
-export type TaskFloaterPanel = 'background' | 'scheduled' | 'artifacts'
+export type TaskFloaterPanel = 'background' | 'scheduled' | 'artifacts' | 'workflows'
 export type TaskFloaterBgView = 'all' | 'current' | 'history'
+export type TaskFloaterWorkflowView = 'all' | 'active' | 'failed' | 'done'
 
 interface TaskFloaterOpenOptions {
   panel?: TaskFloaterPanel
   bgView?: TaskFloaterBgView
+  workflowView?: TaskFloaterWorkflowView
   taskId?: string | null
   traceId?: string | null
   chainId?: string | null
@@ -15,12 +17,14 @@ interface TaskFloaterState {
   isOpen: boolean
   panel: TaskFloaterPanel
   bgView: TaskFloaterBgView
+  workflowView: TaskFloaterWorkflowView
   selectedTaskId: string | null
   traceId: string | null
   chainId: string | null
   open: (options?: string | TaskFloaterOpenOptions) => void
   setPanel: (panel: TaskFloaterPanel) => void
   setBgView: (bgView: TaskFloaterBgView) => void
+  setWorkflowView: (workflowView: TaskFloaterWorkflowView) => void
   close: () => void
 }
 
@@ -28,6 +32,7 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
   isOpen: false,
   panel: 'background',
   bgView: 'all',
+  workflowView: 'all',
   selectedTaskId: null,
   traceId: null,
   chainId: null,
@@ -37,6 +42,7 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
         isOpen: true,
         panel: 'background',
         bgView: 'all',
+        workflowView: 'all',
         selectedTaskId: options,
         traceId: null,
         chainId: null,
@@ -47,6 +53,7 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
       isOpen: true,
       panel: options?.panel ?? 'background',
       bgView: options?.bgView ?? 'all',
+      workflowView: options?.workflowView ?? 'all',
       selectedTaskId: options?.taskId ?? null,
       traceId: options?.traceId ?? null,
       chainId: options?.chainId ?? null,
@@ -54,10 +61,12 @@ export const useTaskFloater = create<TaskFloaterState>((set) => ({
   },
   setPanel: (panel) => set({ panel }),
   setBgView: (bgView) => set({ bgView }),
+  setWorkflowView: (workflowView) => set({ workflowView }),
   close: () => set({
     isOpen: false,
     panel: 'background',
     bgView: 'all',
+    workflowView: 'all',
     selectedTaskId: null,
     traceId: null,
     chainId: null,

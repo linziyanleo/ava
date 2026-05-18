@@ -1,15 +1,17 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Box, CalendarClock, ListChecks, X } from 'lucide-react'
+import { Box, CalendarClock, GitBranch, ListChecks, X } from 'lucide-react'
 import BgTasksPage, { type BgTaskView } from '../../pages/BgTasksPage'
 import MediaPage from '../../pages/MediaPage'
 import ScheduledTasksPage from '../../pages/ScheduledTasksPage'
+import WorkflowsListPanel from './WorkflowsListPanel'
 import { cn } from '../../lib/utils'
 import { useTaskFloater } from '../../stores/taskFloater'
 import type { TaskFloaterPanel } from '../../stores/taskFloater'
 
 const PANEL_TABS: Array<{ id: TaskFloaterPanel; label: string; icon: typeof ListChecks }> = [
   { id: 'background', label: '后台任务', icon: ListChecks },
+  { id: 'workflows', label: '工作流', icon: GitBranch },
   { id: 'scheduled', label: '定时任务', icon: CalendarClock },
   { id: 'artifacts', label: '产物', icon: Box },
 ]
@@ -48,13 +50,15 @@ export default function TaskFloater() {
     ? 'cron / heartbeat'
     : panel === 'artifacts'
       ? 'media artifacts'
-      : selectedTaskId
-      ? `task_id=${selectedTaskId}`
-      : chainId
-        ? `chain_id=${chainId}`
-        : traceId
-          ? `trace_id=${traceId}`
-          : BG_VIEW_TABS.find((item) => item.id === bgView)?.label ?? '全部'
+      : panel === 'workflows'
+        ? 'workflow chains'
+        : selectedTaskId
+        ? `task_id=${selectedTaskId}`
+        : chainId
+          ? `chain_id=${chainId}`
+          : traceId
+            ? `trace_id=${traceId}`
+            : BG_VIEW_TABS.find((item) => item.id === bgView)?.label ?? '全部'
 
   return createPortal(
     <div className="fixed inset-0 z-[80] flex justify-end bg-black/40" onClick={close}>
@@ -126,6 +130,8 @@ export default function TaskFloater() {
             <ScheduledTasksPage embedded />
           ) : panel === 'artifacts' ? (
             <MediaPage />
+          ) : panel === 'workflows' ? (
+            <WorkflowsListPanel />
           ) : (
             <BgTasksPage
               embedded
