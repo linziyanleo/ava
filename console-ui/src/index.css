@@ -231,21 +231,23 @@ html[data-platform="darwin"] .topbar > :first-child {
   box-sizing: border-box;
 }
 
-::-webkit-scrollbar {
+/* NF-6: keep custom scrollbar on Windows/Linux/web; let macOS use the
+ * system overlay scrollbar so it auto-hides per the platform default. */
+:where(html[data-platform="win32"], html[data-platform="linux"], html[data-platform="web"], html:not([data-platform])) ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-::-webkit-scrollbar-track {
+:where(html[data-platform="win32"], html[data-platform="linux"], html[data-platform="web"], html:not([data-platform])) ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
+:where(html[data-platform="win32"], html[data-platform="linux"], html[data-platform="web"], html:not([data-platform])) ::-webkit-scrollbar-thumb {
   background: var(--bg-tertiary);
   border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+:where(html[data-platform="win32"], html[data-platform="linux"], html[data-platform="web"], html:not([data-platform])) ::-webkit-scrollbar-thumb:hover {
   background: var(--ava-border-strong);
 }
 
