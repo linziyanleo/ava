@@ -400,6 +400,7 @@ async def trigger_definition_run(
         raise HTTPException(status_code=404, detail={"code": "workflow_not_found"})
     inputs = (payload or {}).get("inputs") or {}
     triggered_by = (payload or {}).get("triggered_by") or user.username
+    error_payload: dict[str, Any] | None = None
     try:
         record = runner.start_run(
             workflow_id=workflow_id,
@@ -408,7 +409,25 @@ async def trigger_definition_run(
             inputs=inputs,
         )
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail={"code": "version_not_found", "message": str(exc)})
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "version_not_found", "message": str(exc)},
+        )
+    except Exception as exc:  # StepRuntimeError or anything the runner raises
+        record = None
+        error_payload = {
+            "code": getattr(exc, "code", "runner_error"),
+            "message": str(exc),
+        }
+    # Resolve the canonical run record (the runner stores it before raising).
+    if record is None:
+        runs = store.list_runs_for_workflow(workflow_id, limit=1)
+        if not runs:
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "run_not_persisted", "message": "runner failed before persistence"},
+            )
+        record = runs[0]
     await _emit_definition_event(
         user,
         "workflow.run.created",
@@ -419,7 +438,85 @@ async def trigger_definition_run(
             "triggered_by": record.triggered_by,
         },
     )
+    # Drain the persisted step rows into per-step events. Synchronous P2a/P2b
+    # runner means all steps are settled by now; the events are issued in
+    # array order so consumers can render fan-out children grouped under
+    # their parallel parent via ``parent_step_id``.
+    for step_event in build_step_events(store, record.run_id):
+        await _emit_definition_event(user, "workflow.run.step.event", step_event)
+    await _emit_definition_event(
+        user,
+        "workflow.run.completed",
+        {
+            "run_id": record.run_id,
+            "final_status": record.status,
+            "outputs": _safe_json_loads(record.final_outputs_json),
+            "duration_ms": _duration_ms(record.started_at, record.completed_at),
+        },
+    )
+    if error_payload is not None:
+        raise HTTPException(
+            status_code=500,
+            detail={**error_payload, "run_id": record.run_id},
+        )
     return record.to_dict()
+
+
+def build_step_events(
+    store: WorkflowDefinitionStore, run_id: str
+) -> list[dict[str, Any]]:
+    """Build ``workflow.run.step.event`` payloads for every settled step row.
+
+    AVA-25 P2b acceptance: payload carries ``parent_step_id`` so the UI can
+    fold fan-out children under their ``parallel`` parent. Per spec table
+    each event also carries ``run_id`` / ``step_id`` / ``event_type``.
+    """
+    payloads: list[dict[str, Any]] = []
+    for step in store.list_steps_for_run(run_id):
+        payloads.append(
+            {
+                "run_id": run_id,
+                "step_id": step.step_id,
+                "step_run_id": step.step_run_id,
+                "parent_step_id": step.parent_step_id,
+                "event_type": _event_type_for_status(step.status),
+                "payload": {
+                    "agent": step.agent,
+                    "status": step.status,
+                    "bg_task_id": step.bg_task_id,
+                    "outputs": _safe_json_loads(step.outputs_json),
+                    "error": _safe_json_loads(step.error_json),
+                },
+            }
+        )
+    return payloads
+
+
+def _event_type_for_status(status: str) -> str:
+    if status == "running":
+        return "started"
+    if status == "succeeded":
+        return "succeeded"
+    if status == "failed":
+        return "failed"
+    if status == "skipped":
+        return "skipped"
+    if status == "cancelled":
+        return "cancelled"
+    return "settled"
+
+
+def _safe_json_loads(raw: str | None) -> Any:
+    try:
+        return json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _duration_ms(started_at: float | None, completed_at: float | None) -> int | None:
+    if started_at is None or completed_at is None:
+        return None
+    return int(max(0.0, completed_at - started_at) * 1000)
 
 
 @router.get("/workflow-runs/{run_id}")

@@ -256,3 +256,26 @@ def test_run_endpoint_requires_run_service(tmp_path, monkeypatch) -> None:
     )
     assert resp.status_code == 503
     assert "WorkflowRunService" in resp.text
+
+
+def test_build_step_events_includes_parent_step_id(tmp_path) -> None:
+    """AVA-25 P2b: WS payload must surface parent_step_id for fan-out children."""
+    db = Database(tmp_path / "events.sqlite3")
+    store = WorkflowDefinitionStore(db)
+    wf, _ = store.create_workflow(
+        name="evt", definition_json='{"name":"evt","steps":[]}'
+    )
+    run = store.create_run(workflow_id=wf.workflow_id, version=1)
+    parent = store.create_step(run_id=run.run_id, step_id="fork", agent="")
+    store.settle_step(parent.step_run_id, status="succeeded", outputs={})
+    child = store.create_step(
+        run_id=run.run_id, step_id="b1", agent="codex",
+        parent_step_id=parent.step_run_id,
+    )
+    store.settle_step(child.step_run_id, status="succeeded", outputs={"x": 1})
+    payloads = workflow_definition_routes.build_step_events(store, run.run_id)
+    by_step = {p["step_id"]: p for p in payloads}
+    assert by_step["fork"]["parent_step_id"] == ""
+    assert by_step["b1"]["parent_step_id"] == parent.step_run_id
+    assert by_step["b1"]["event_type"] == "succeeded"
+    assert by_step["b1"]["payload"]["status"] == "succeeded"
