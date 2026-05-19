@@ -62,7 +62,7 @@ def linear_definition_json() -> str:
     })
 
 
-def test_six_migration_markers_stamped(tmp_path: Path):
+def test_p2a_migration_markers_stamped(tmp_path: Path):
     """All P2a tables must carry a versioned schema_migrations marker."""
     db = Database(tmp_path / "markers.db")
     rows = db.fetchall(
@@ -73,6 +73,22 @@ def test_six_migration_markers_stamped(tmp_path: Path):
         "agent_workflows_v1", "workflow_versions_v1", "workflow_runs_v1",
         "workflow_steps_v1", "workflow_artifacts_v1", "workspace_leases_v1",
     }
+
+
+def test_p2b_migration_markers_stamped(tmp_path: Path):
+    """AVA-25 P2b widens workflow_runs and workflow_steps."""
+    db = Database(tmp_path / "markers_v2.db")
+    rows = db.fetchall(
+        "SELECT name FROM schema_migrations WHERE name LIKE '%_v2' ORDER BY name"
+    )
+    names = {row["name"] for row in rows}
+    assert names == {"workflow_runs_v2", "workflow_steps_v2"}
+    # New columns are reachable via PRAGMA so the runner can rely on them.
+    step_columns = {row["name"] for row in db.fetchall("PRAGMA table_info(workflow_steps)")}
+    run_columns = {row["name"] for row in db.fetchall("PRAGMA table_info(workflow_runs)")}
+    assert "parent_step_id" in step_columns
+    assert "trace_id" in run_columns
+    assert "retry_of_run_id" in run_columns
 
 
 def test_resolve_jsonpath_supports_inputs_workspace_steps():

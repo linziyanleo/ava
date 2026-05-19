@@ -90,13 +90,28 @@ class Database:
                 logger.warning("Skipped post-migration SQL due to legacy schema mismatch: {}", exc)
         # AVA-47 P2a: stamp per-table migration markers so future migrations
         # can branch on whether v1 was applied.
+        # AVA-25 P2b: workflow_runs_v2 (trace_id, retry_of_run_id) and
+        # workflow_steps_v2 (parent_step_id) widen the run/step rows for
+        # fan-out / retry. The ALTER TABLE branches below carry the same v2
+        # semantics for legacy databases that already had v1 applied.
+        for ddl in (
+            "ALTER TABLE workflow_steps ADD COLUMN parent_step_id TEXT DEFAULT ''",
+            "ALTER TABLE workflow_runs ADD COLUMN trace_id TEXT DEFAULT ''",
+            "ALTER TABLE workflow_runs ADD COLUMN retry_of_run_id TEXT DEFAULT ''",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # column already present
         from datetime import datetime, timezone
         applied_at = datetime.now(timezone.utc).isoformat()
         for marker in (
             "agent_workflows_v1",
             "workflow_versions_v1",
             "workflow_runs_v1",
+            "workflow_runs_v2",
             "workflow_steps_v1",
+            "workflow_steps_v2",
             "workflow_artifacts_v1",
             "workspace_leases_v1",
         ):
@@ -754,10 +769,15 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     started_at REAL,
     completed_at REAL,
     final_outputs_json TEXT DEFAULT '{}',
+    -- workflow_runs_v2 (AVA-25 P2b): trace_id retained across retries.
+    trace_id TEXT DEFAULT '',
+    -- workflow_runs_v2 (AVA-25 P2b): retry_of pointer back to original run.
+    retry_of_run_id TEXT DEFAULT '',
     FOREIGN KEY (workflow_id) REFERENCES agent_workflows(workflow_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_trace ON workflow_runs(trace_id);
 
 CREATE TABLE IF NOT EXISTS workflow_steps (
     step_run_id TEXT PRIMARY KEY,
@@ -770,10 +790,13 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
     completed_at REAL,
     outputs_json TEXT DEFAULT '{}',
     error_json TEXT DEFAULT '{}',
+    -- workflow_steps_v2 (AVA-25 P2b): fan-out child step → parent parallel step_run_id.
+    parent_step_id TEXT DEFAULT '',
     FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_bg_task ON workflow_steps(bg_task_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_parent ON workflow_steps(parent_step_id);
 
 CREATE TABLE IF NOT EXISTS workflow_artifacts (
     artifact_id TEXT PRIMARY KEY,
