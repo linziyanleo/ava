@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Save, RefreshCw, FileJson } from 'lucide-react';
+import { Code, FormInput, Save, RefreshCw, FileJson } from 'lucide-react';
 import { api } from '../../api/client'
+import { AgentConfigForm } from '../../components/settings/AgentConfigForm'
 import { RawConfigEditor } from '../../components/settings/RawConfigEditor'
 import type { ConfigData, NanobotConfig, ChannelBase, GatewayConfig } from './types'
 import { Section } from './FormWidgets'
@@ -10,6 +11,96 @@ import { ProviderSection } from './ProviderSection'
 import { GatewaySection } from './GatewaySection'
 import { ToolsSection } from './ToolsSection'
 import { TokenStatsSection } from './TokenStatsSection'
+
+type AgentSchemaResponse = { filename: string; schema: Record<string, unknown> }
+type ServerFieldError = { path: string; message: string }
+type AgentEditMode = 'visual' | 'raw'
+
+function isJsonFormat(format: string | undefined): boolean {
+  return (format || '').toLowerCase() === 'json'
+}
+
+function parseAgentContent(content: string, format: string): Record<string, unknown> | null {
+  if (!content.trim()) return {}
+  if (isJsonFormat(format)) {
+    try {
+      const parsed = JSON.parse(content)
+      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+  // tiny TOML reader for the agent-config subset (top-level scalars + arrays of strings)
+  const out: Record<string, unknown> = {}
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*$/, '').trim()
+    if (!line) continue
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    const valueLiteral = line.slice(eq + 1).trim()
+    out[key] = parseTomlValue(valueLiteral)
+  }
+  return out
+}
+
+function parseTomlValue(literal: string): unknown {
+  if (!literal) return ''
+  if (literal === 'true') return true
+  if (literal === 'false') return false
+  if (/^-?\d+$/.test(literal)) return Number.parseInt(literal, 10)
+  if (/^-?\d+\.\d+$/.test(literal)) return Number.parseFloat(literal)
+  if ((literal.startsWith('"') && literal.endsWith('"')) || (literal.startsWith("'") && literal.endsWith("'"))) {
+    return literal.slice(1, -1)
+  }
+  if (literal.startsWith('[') && literal.endsWith(']')) {
+    return literal
+      .slice(1, -1)
+      .split(',')
+      .map((part) => parseTomlValue(part.trim()))
+      .filter((value) => value !== '')
+  }
+  return literal
+}
+
+function serialiseAgentValue(value: Record<string, unknown>, format: string): string {
+  if (isJsonFormat(format)) return JSON.stringify(value, null, 2)
+  // tiny TOML writer for the same subset
+  const lines: string[] = []
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === undefined || raw === null) continue
+    if (typeof raw === 'string') {
+      lines.push(`${key} = ${JSON.stringify(raw)}`)
+    } else if (typeof raw === 'number' || typeof raw === 'boolean') {
+      lines.push(`${key} = ${raw}`)
+    } else if (Array.isArray(raw) && raw.every((item) => typeof item === 'string')) {
+      lines.push(`${key} = [${(raw as string[]).map((item) => JSON.stringify(item)).join(', ')}]`)
+    } else {
+      // complex value — fall back to JSON inline (TOML inline tables would be more correct,
+      // but the v1 schemas for the four adapters never reach here).
+      lines.push(`${key} = ${JSON.stringify(raw)}`)
+    }
+  }
+  return lines.join('\n') + (lines.length ? '\n' : '')
+}
+
+function parseServerErrors(detail: unknown): ServerFieldError[] {
+  if (!detail) return []
+  if (typeof detail === 'string') return [{ path: '/', message: detail }]
+  if (typeof detail === 'object') {
+    const obj = detail as { errors?: unknown }
+    if (Array.isArray(obj.errors)) {
+      return obj.errors.flatMap((row) => {
+        if (row && typeof row === 'object' && 'path' in row && 'message' in row) {
+          const r = row as ServerFieldError
+          return [{ path: String(r.path), message: String(r.message) }]
+        }
+        return []
+      })
+    }
+  }
+  return []
+}
 
 type ConfigTab = 'main';
 type ConfigPageMode = 'nanobot' | 'console' | 'legacy' | 'codex' | 'claude_code' | 'image_gen'
@@ -80,6 +171,10 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [agentSchema, setAgentSchema] = useState<Record<string, unknown> | null>(null);
+  const [agentValue, setAgentValue] = useState<Record<string, unknown> | null>(null);
+  const [agentEditMode, setAgentEditMode] = useState<AgentEditMode>('visual');
+  const [serverErrors, setServerErrors] = useState<ServerFieldError[]>([]);
   const agentConfigMode = isAgentConfigMode(mode);
 
   const originalRef = useRef<string>('');
@@ -91,9 +186,27 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
       setRawContent(d.content);
       originalRef.current = d.content;
       setParseError('');
+      setServerErrors([]);
       if (isAgentConfigMode(mode)) {
         setParsed(null);
         setDirty(false);
+        // Best-effort schema fetch; on 404 fall back to Raw mode quietly.
+        try {
+          const schemaResp = await api<AgentSchemaResponse>(`/config/${CONFIG_PATH[mode]}/schema`);
+          setAgentSchema(schemaResp.schema);
+          const parsedAgent = parseAgentContent(d.content, d.format);
+          if (parsedAgent !== null) {
+            setAgentValue(parsedAgent);
+            setAgentEditMode('visual');
+          } else {
+            setAgentValue(null);
+            setAgentEditMode('raw');
+          }
+        } catch {
+          setAgentSchema(null);
+          setAgentValue(null);
+          setAgentEditMode('raw');
+        }
         return;
       }
       try {
@@ -124,24 +237,81 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
     if (!data || (!agentConfigMode && !parsed)) return;
     setSaving(true);
     setMessage(null);
-    const content = agentConfigMode ? rawContent : JSON.stringify(parsed as EditableConfig, null, 2);
-    try {
-      const result = await api<{ mtime: number }>(`/config/${CONFIG_PATH[mode]}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content, mtime: data.mtime }),
-      });
-      setData({ ...data, content, mtime: result.mtime });
-      setRawContent(content);
-      originalRef.current = content;
-      setDirty(false);
-      setMessage({ type: 'success', text: agentConfigMode ? '保存成功；后续任务将读取新配置，运行中的任务需要重新派发或重启。' : '保存成功' });
-    } catch (err: unknown) {
-      const text = err instanceof Error ? err.message : '保存失败';
-      setMessage({ type: 'error', text });
-    } finally {
-      setSaving(false);
+    setServerErrors([]);
+    let content: string;
+    if (!agentConfigMode) {
+      content = JSON.stringify(parsed as EditableConfig, null, 2);
+    } else if (agentEditMode === 'visual' && agentValue) {
+      content = serialiseAgentValue(agentValue, data.format);
+    } else {
+      content = rawContent;
     }
+    const url = `/api/config/${CONFIG_PATH[mode]}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, mtime: data.mtime }),
+    });
+    if (res.status === 422) {
+      const body = await res.json().catch(() => ({}));
+      const errs = parseServerErrors(body?.detail);
+      setServerErrors(errs);
+      setMessage({
+        type: 'error',
+        text: errs.length
+          ? `保存失败：${errs.length} 项校验错误`
+          : '保存失败：服务端 schema 校验未通过',
+      });
+      setSaving(false);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const text = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+      setMessage({ type: 'error', text });
+      setSaving(false);
+      return;
+    }
+    const result = (await res.json()) as { mtime: number };
+    setData({ ...data, content, mtime: result.mtime });
+    setRawContent(content);
+    originalRef.current = content;
+    setDirty(false);
+    setMessage({
+      type: 'success',
+      text: agentConfigMode
+        ? '保存成功；后续任务将读取新配置，运行中的任务需要重新派发或重启。'
+        : '保存成功',
+    });
+    setSaving(false);
   };
+
+  const switchAgentEditMode = useCallback(
+    (next: AgentEditMode) => {
+      if (!data) return;
+      if (next === 'visual') {
+        const parsedNow = parseAgentContent(rawContent, data.format);
+        if (parsedNow === null) {
+          setMessage({
+            type: 'error',
+            text: '当前内容无法解析为 visual 表单（语法错误），请先在 Raw 模式修正。',
+          });
+          return;
+        }
+        setAgentValue(parsedNow);
+        setMessage(null);
+        setAgentEditMode('visual');
+      } else {
+        if (agentValue) {
+          const next = serialiseAgentValue(agentValue, data.format);
+          setRawContent(next);
+        }
+        setAgentEditMode('raw');
+      }
+    },
+    [agentValue, data, rawContent],
+  );
 
   const readOnly = false;
 
@@ -287,7 +457,76 @@ export default function ConfigPage({ mode = 'legacy' }: { mode?: ConfigPageMode 
         </div>
       )}
 
-      {activeTab === 'main' && (agentConfigMode || !parsed) && data && (
+      {activeTab === 'main' && agentConfigMode && data && (
+        <div className="flex-1 overflow-y-auto pb-8 space-y-3">
+          {agentSchema && (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => switchAgentEditMode('visual')}
+                className={`inline-flex items-center gap-1 rounded border px-2 py-1 ${
+                  agentEditMode === 'visual'
+                    ? 'bg-zinc-100 dark:bg-zinc-800'
+                    : 'hover:bg-zinc-50 dark:hover:bg-zinc-900'
+                }`}
+                disabled={readOnly}
+              >
+                <FormInput className="h-4 w-4" /> Visual
+              </button>
+              <button
+                type="button"
+                onClick={() => switchAgentEditMode('raw')}
+                className={`inline-flex items-center gap-1 rounded border px-2 py-1 ${
+                  agentEditMode === 'raw'
+                    ? 'bg-zinc-100 dark:bg-zinc-800'
+                    : 'hover:bg-zinc-50 dark:hover:bg-zinc-900'
+                }`}
+                disabled={readOnly}
+              >
+                <Code className="h-4 w-4" /> Raw
+              </button>
+              {agentEditMode === 'visual' && (
+                <span className="text-zinc-500">schema-driven 表单 · 字段错误实时校验</span>
+              )}
+              {agentEditMode === 'raw' && (
+                <span className="text-zinc-500">直接编辑 {data.format.toUpperCase()} 文本</span>
+              )}
+            </div>
+          )}
+          {!agentSchema && (
+            <div className="text-xs text-zinc-500">
+              该配置文件未提供 JSON Schema（GET /schema 404），已 fallback 到 Raw 模式。
+            </div>
+          )}
+          {agentEditMode === 'visual' && agentSchema && agentValue && (
+            <AgentConfigForm
+              schema={agentSchema}
+              value={agentValue}
+              readOnly={readOnly}
+              serverErrors={serverErrors}
+              onChange={(next) => {
+                setAgentValue(next);
+                setDirty(true);
+              }}
+            />
+          )}
+          {agentEditMode === 'raw' && (
+            <RawConfigEditor
+              content={rawContent}
+              format={data.format}
+              readOnly={readOnly}
+              parseError={parseError}
+              onChange={(content) => {
+                setRawContent(content);
+                setDirty(true);
+                setParseError('');
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {activeTab === 'main' && !agentConfigMode && !parsed && data && (
         <RawConfigEditor
           content={rawContent}
           format={data.format}
