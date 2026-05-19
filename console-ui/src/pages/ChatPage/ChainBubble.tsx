@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { ExternalLink, GitBranch } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ExternalLink, GitBranch, Workflow } from 'lucide-react'
 import { List, type RowComponentProps } from 'react-window'
 import { api } from '../../api/client'
 import { StatusBadge } from '../../components/ui/StatusBadge'
@@ -59,6 +60,9 @@ export function ChainBubble({
   const traceId = orderedTasks.find((task) => task.trace_id)?.trace_id || ''
   const virtualizedTaskWindow = orderedTasks.length > 10
   const skillTask = orderedTasks.find((task) => task.skill_name || task.matched_by === 'natural_language')
+  const workflowOrigin = orderedTasks.find((task) => task.workflow_definition_id)
+  const workflowDefinitionId = workflowOrigin?.workflow_definition_id || ''
+  const workflowRunId = workflowOrigin?.workflow_run_id || ''
 
   const handleCancelChain = async () => {
     if (!window.confirm('Cancel this whole chain?')) return
@@ -181,6 +185,20 @@ export function ChainBubble({
           <ExternalLink className="h-3 w-3" />
           Tasks
         </button>
+        {workflowDefinitionId && (
+          <Link
+            to={
+              workflowRunId
+                ? `/settings/tools/workflows/${encodeURIComponent(workflowDefinitionId)}?run=${encodeURIComponent(workflowRunId)}`
+                : `/settings/tools/workflows/${encodeURIComponent(workflowDefinitionId)}`
+            }
+            className="inline-flex items-center gap-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            title="View source workflow"
+          >
+            <Workflow className="h-3 w-3" />
+            查看 Workflow
+          </Link>
+        )}
         {cancellable && (
           <button
             type="button"

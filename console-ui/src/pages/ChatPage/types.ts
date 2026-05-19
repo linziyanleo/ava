@@ -61,6 +61,11 @@ export interface DirectTaskMessage {
   node_kind?: string
   skill_name?: string
   matched_by?: 'natural_language' | 'explicit'
+  // AVA-48 P2c: when this task was dispatched from a workflow run, surface the
+  // ids so the ChainBubble can deep-link to the Workflow Detail page. Backend
+  // wiring is gated on workflow_run_service being attached (P2c follow-up).
+  workflow_definition_id?: string
+  workflow_run_id?: string
 }
 
 export interface ChatFileUpload {

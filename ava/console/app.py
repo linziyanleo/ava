@@ -41,6 +41,7 @@ from ava.console.services.trace_spans_service import TraceSpanStore
 from ava.console.services.tunnel_service import TunnelService
 from ava.console.services.user_service import UserService
 from ava.agent.workflow_store import ArtifactStore, WorkflowStore
+from ava.console.services.workflow_definition_store import WorkflowDefinitionStore
 from ava.agents.process_manager import AgentProcessManager
 
 
@@ -64,6 +65,8 @@ class Services:
     trace_spans: TraceSpanStore | None = None
     workflow_store: WorkflowStore | None = None
     artifact_store: ArtifactStore | None = None
+    workflow_definition_store: WorkflowDefinitionStore | None = None
+    workflow_run_service: Any | None = None
     agent_process_manager: AgentProcessManager | None = None
     agent_lifecycle_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
     db: Any | None = None
@@ -230,6 +233,7 @@ def create_console_app(
     trace_spans = TraceSpanStore(db) if db is not None else None
     workflow_store = WorkflowStore(db) if db is not None else None
     artifact_store = ArtifactStore(db) if db is not None else None
+    workflow_definition_store = WorkflowDefinitionStore(db) if db is not None else None
     if token_stats_collector is not None:
         token_stats_collector._trace_spans = trace_spans
     agent_lifecycle_events: deque[dict[str, Any]] = deque(maxlen=100)
@@ -284,6 +288,8 @@ def create_console_app(
         trace_spans=trace_spans,
         workflow_store=workflow_store,
         artifact_store=artifact_store,
+        workflow_definition_store=workflow_definition_store,
+        workflow_run_service=None,
         agent_process_manager=agent_process_manager,
         agent_lifecycle_events=agent_lifecycle_events,
         db=db,
@@ -319,6 +325,7 @@ def create_console_app(
         trace_routes,
         skills_routes,
         workflow_routes,
+        workflow_definition_routes,
         page_agent_routes,
     )
     from ava.console.routes import bg_task_routes
@@ -339,6 +346,7 @@ def create_console_app(
     app.include_router(skills_routes.router)
     app.include_router(page_agent_routes.router)
     app.include_router(workflow_routes.router)
+    app.include_router(workflow_definition_routes.router)
     app.include_router(bg_task_routes.router)
 
     _mount_api_not_found(app)
@@ -395,6 +403,7 @@ def create_console_app_standalone(
     trace_spans = TraceSpanStore(db)
     workflow_store = WorkflowStore(db)
     artifact_store = ArtifactStore(db)
+    workflow_definition_store = WorkflowDefinitionStore(db)
     agent_lifecycle_events: deque[dict[str, Any]] = deque(maxlen=100)
     agent_process_manager = AgentProcessManager(on_event=agent_lifecycle_events.append)
     repo_root = Path(__file__).resolve().parents[2]
@@ -449,6 +458,8 @@ def create_console_app_standalone(
         trace_spans=trace_spans,
         workflow_store=workflow_store,
         artifact_store=artifact_store,
+        workflow_definition_store=workflow_definition_store,
+        workflow_run_service=None,
         agent_process_manager=agent_process_manager,
         agent_lifecycle_events=agent_lifecycle_events,
         db=db,
@@ -480,6 +491,7 @@ def create_console_app_standalone(
         trace_routes,
         skills_routes,
         workflow_routes,
+        workflow_definition_routes,
     )
     from ava.console.routes import bg_task_routes
 
@@ -494,6 +506,7 @@ def create_console_app_standalone(
     app.include_router(trace_routes.router)
     app.include_router(skills_routes.router)
     app.include_router(workflow_routes.router)
+    app.include_router(workflow_definition_routes.router)
     app.include_router(bg_task_routes.router)
 
     gateway_base = f"http://127.0.0.1:{gateway_port}"

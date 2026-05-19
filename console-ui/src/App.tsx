@@ -9,6 +9,8 @@ import ConfigPage from './pages/ConfigPage'
 import MemoryPage from './pages/MemoryPage'
 import PersonaPage from './pages/PersonaPage'
 import SkillsPage from './pages/SkillsPage'
+import SettingsToolsWorkflowsPage from './pages/SettingsToolsWorkflowsPage'
+import SettingsToolsWorkflowsDetailPage from './pages/SettingsToolsWorkflowsDetailPage'
 import ChatPage from './pages/ChatPage'
 import TokenStatsPage from './pages/TokenStatsPage'
 import BrowserPage from './pages/BrowserPage'
@@ -97,6 +99,8 @@ export default function App() {
             <Route path="statistics" element={<TokenStatsPage />} />
             <Route path="tools" element={<Navigate to="skills" replace />} />
             <Route path="tools/skills" element={<SkillsPage />} />
+            <Route path="tools/workflows" element={<SettingsToolsWorkflowsPage />} />
+            <Route path="tools/workflows/:workflowId" element={<SettingsToolsWorkflowsDetailPage />} />
             <Route path="system" element={<Navigate to="gateway" replace />} />
             <Route path="system/desktop" element={<DesktopSettingsPage />} />
             <Route path="system/lan-access" element={<LanAccessPage />} />

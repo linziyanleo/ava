@@ -1,0 +1,47 @@
+{
+  "id": "image_gen_then_caption",
+  "name": "image_gen → nanobot caption",
+  "description": "图像生成 → 自动配文的两步链：image_gen 生成图，nanobot 写说明文案。v1 baseline 单图单条；P2b 落地 fan-out 后可批量化（AVA-25）。",
+  "definition": {
+    "name": "image_gen → nanobot caption",
+    "description": "Two-step linear chain: produce one image, then caption it.",
+    "version": 1,
+    "inputs": [
+      {"name": "prompt", "type": "string", "description": "图像生成 prompt"},
+      {"name": "tone", "type": "string", "description": "文案语气", "default": "neutral"}
+    ],
+    "outputs": [
+      {"name": "image_url", "type": "string"},
+      {"name": "caption", "type": "string"}
+    ],
+    "steps": [
+      {
+        "id": "gen",
+        "kind": "agent_task",
+        "agent": "image_gen",
+        "task": {
+          "prompt_template": "Generate one image for: {{prompt}}",
+          "tools": []
+        },
+        "inputs": {
+          "prompt": "$.inputs.prompt"
+        },
+        "outputs": ["image_url"]
+      },
+      {
+        "id": "caption",
+        "kind": "agent_task",
+        "agent": "nanobot",
+        "task": {
+          "prompt_template": "Write a {{tone}}-toned 1-sentence caption for the image at {{image_url}}.",
+          "tools": []
+        },
+        "inputs": {
+          "image_url": "$.steps.gen.outputs.image_url",
+          "tone": "$.inputs.tone"
+        },
+        "outputs": ["caption"]
+      }
+    ]
+  }
+}

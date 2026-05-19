@@ -1,0 +1,48 @@
+{
+  "id": "codex_review_then_apply",
+  "name": "Codex review → nanobot apply",
+  "description": "代码评审 → apply 改动的两步链：codex 给出 review 报告与修改建议，nanobot 执行 patch 应用。v1 baseline 不分支、不 fan-out。",
+  "definition": {
+    "name": "Codex review → nanobot apply",
+    "description": "Two-step linear chain: codex emits review summary, nanobot applies the patch.",
+    "version": 1,
+    "inputs": [
+      {"name": "repo_path", "type": "string", "description": "本地仓库路径"},
+      {"name": "diff_or_branch", "type": "string", "description": "目标 diff、PR URL、或 branch ref"}
+    ],
+    "outputs": [
+      {"name": "review_summary", "type": "string"},
+      {"name": "apply_log", "type": "string"}
+    ],
+    "steps": [
+      {
+        "id": "review",
+        "kind": "agent_task",
+        "agent": "codex",
+        "task": {
+          "prompt_template": "Review {{diff_or_branch}} in repo {{repo_path}}. Identify correctness/safety issues, name concrete files, and emit a JSON report with fields {summary, suggested_patch}.",
+          "tools": ["read_file", "grep", "exec"]
+        },
+        "inputs": {
+          "repo_path": "$.inputs.repo_path",
+          "diff_or_branch": "$.inputs.diff_or_branch"
+        },
+        "outputs": ["summary", "suggested_patch"]
+      },
+      {
+        "id": "apply",
+        "kind": "agent_task",
+        "agent": "nanobot",
+        "task": {
+          "prompt_template": "Apply the suggested patch from review step to {{repo_path}}. Patch payload: {{suggested_patch}}",
+          "tools": ["edit_file", "exec"]
+        },
+        "inputs": {
+          "repo_path": "$.inputs.repo_path",
+          "suggested_patch": "$.steps.review.outputs.suggested_patch"
+        },
+        "outputs": ["apply_log"]
+      }
+    ]
+  }
+}

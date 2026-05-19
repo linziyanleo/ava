@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Shield,
   User,
+  Workflow,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -86,6 +87,7 @@ const settingsTree: SettingsNode[] = [
     icon: Puzzle,
     children: [
       { to: '/settings/tools/skills', label: 'Skills', description: '', icon: Puzzle },
+      { to: '/settings/tools/workflows', label: 'Workflows', description: '', icon: Workflow },
     ],
   },
   {
