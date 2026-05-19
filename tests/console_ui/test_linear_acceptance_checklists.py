@@ -1065,6 +1065,25 @@ def test_ava23_full_chain_bubble_ux_checklist_is_covered() -> None:
     assert "test_workflow_store_retry_chain_preserves_trace_and_creates_new_chain" in store_tests
 
 
+def test_finding_chain_p0_tools_md_documents_task_chain() -> None:
+    """finding-chain-implementation-audit §7 P0#1: TOOLS.md carries a Task
+    Chain note that explains chain is a trace artifact (not a tool), what
+    triggers auto-registration (NL skill match), and how to disable it.
+    """
+    tools_md = read("ava/templates/TOOLS.md")
+
+    assert_contains_all(
+        tools_md,
+        [
+            "### Task Chain（不是工具）",
+            "natural_language_skill_matching",
+            "skills.natural_language_matching",
+            "自然语言 Skill 匹配",
+            "POST /api/workflows",
+        ],
+    )
+
+
 def test_finding_chain_p0_settings_global_nl_match_toggle() -> None:
     """finding-chain-implementation-audit §7 P0#2: Settings → Skills exposes a
     global natural_language_matching toggle backed by

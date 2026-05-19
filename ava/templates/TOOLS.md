@@ -101,6 +101,20 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 - token stats / media / sqlite 记录
 - `python -m ava gateway` 时自动带起 Web Console
 - `console_ui_regression` 当前是 skill 编排，不是 `console_ui_autotest` tool
+- **Task Chain**：见下方说明
+
+### Task Chain（不是工具）
+
+Task Chain 是 backend-side 的 trace UI 容器，不是 LLM 可以调用或编排的对象。LLM 在 prompt 里 reason about chain 没有意义，也不应该尝试创建/取消它——仓内默认面没有 chain/workflow tool 暴露给模型。
+
+- **自动建链触发**：仅当 NL skill matcher（`natural_language_skill_matching`）匹配到一个 skill 时，`chat_routes._register_skill_chain` 会写一条 `Skill: <name>` chain 并推 `direct_task` 事件给前端。匹配是**关键词**打分，不是语义理解；用户消息含 skill 关键词字面量（如 “github”、“reddit”）就可能命中。
+- **未匹配则不建链**：走 `BackgroundTaskStore.submit_task` 的工具（codex / claude_code / image_gen）都默认 `chain_id=""`，不会自动注册 chain。`page_agent` 与 browser substrate 也不走 chain 注册路径。
+- **单节点 NL skill chain 已视觉降噪**：ChainBubble 在只有 1 个 skill 节点时直接渲染为标准 DirectTask 卡片，不再显示 `Task Chain` header；底层 chain row 仍然落库，cancel/retry 仍可在 TaskFloater 找到。
+- **关闭自动建链**：
+  - **首选**：Settings → Skills 顶部的“自然语言 Skill 匹配”全局开关——关闭后只有显式 `@skill` 才会触发 skill。
+  - 等价做法：编辑 `console-config.json` 把 `skills.natural_language_matching` 设为 `false`。
+  - 只想关一个误触 skill：Settings → Skills 单独把它 disable。
+- **显式 REST 入口**：`POST /api/workflows` 仍然存在，要 owner / admin / device-operate 角色；这是真正想注册 chain 的接口，不是 LLM 的 surface。
 
 ## Quick Map
 
