@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -32,8 +34,26 @@ class ToggleSkillRequest(BaseModel):
     enabled: bool
 
 
+class NLMatchingUpdateRequest(BaseModel):
+    enabled: bool
+
+
 class MCPTestRequest(BaseModel):
     name: str
+
+
+def _read_skills_block(svc) -> tuple[dict, dict, float]:
+    """Return (full_console_config, skills_block, mtime). Defaults to {} when missing."""
+    raw = svc.config.read_config("console-config.json", mask=False)
+    payload: dict = {}
+    try:
+        payload = json.loads(raw.get("content") or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    skills_block = payload.get("skills") if isinstance(payload.get("skills"), dict) else {}
+    return payload, skills_block, float(raw.get("mtime", 0) or 0)
 
 
 @router.get("/tools")
@@ -120,6 +140,47 @@ async def get_skill(
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
     return skill
+
+
+@router.get("/nl_matching")
+async def get_nl_matching(
+    user: UserInfo = Depends(auth.require_role(*auth.READ_ROLES)),
+):
+    """Read the global natural-language skill matcher toggle from console-config.json."""
+    from ava.console.app import get_services_for_user
+    svc = get_services_for_user(user)
+    _, skills_block, _ = _read_skills_block(svc)
+    enabled = skills_block.get("natural_language_matching", True) is not False
+    return {"enabled": enabled}
+
+
+@router.put("/nl_matching")
+async def put_nl_matching(
+    body: NLMatchingUpdateRequest,
+    request: Request,
+    user: UserInfo = Depends(auth.require_role(*auth.EDIT_ROLES)),
+):
+    """Update the global natural-language skill matcher toggle in console-config.json.
+
+    Refs: finding-chain-implementation-audit §7 P0#2.
+    """
+    from ava.console.app import get_services_for_user
+    svc = get_services_for_user(user)
+    payload, skills_block, mtime = _read_skills_block(svc)
+    skills_block["natural_language_matching"] = bool(body.enabled)
+    payload["skills"] = skills_block
+    new_content = json.dumps(payload, indent=2, ensure_ascii=False)
+    try:
+        result = svc.config.update_config("console-config.json", new_content, mtime)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    svc.audit.log(
+        user=user.username, role=user.role,
+        action="skill.nl_matching",
+        target=f"enabled={'true' if body.enabled else 'false'}",
+        ip=get_client_ip(request),
+    )
+    return {"enabled": bool(body.enabled), "mtime": result.get("mtime")}
 
 
 @router.put("/toggle")

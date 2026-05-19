@@ -132,3 +132,38 @@ def test_mcp_reconnect_route_is_owner_and_returns_501_when_unsupported(tmp_path,
     assert owner_response.status_code == 501
     assert owner_response.json()["scope"] == "all"
     assert owner_response.json()["status"] == "unsupported"
+
+
+def test_nl_matching_get_defaults_to_enabled_when_unset(tmp_path, monkeypatch):
+    client, _ = _create_client(tmp_path, monkeypatch)
+    response = client.get("/api/skills/nl_matching", headers=_headers("owner"))
+    assert response.status_code == 200
+    assert response.json() == {"enabled": True}
+
+
+def test_nl_matching_put_persists_to_console_config_json(tmp_path, monkeypatch):
+    client, nanobot_dir = _create_client(tmp_path, monkeypatch)
+
+    put_response = client.put(
+        "/api/skills/nl_matching",
+        json={"enabled": False},
+        headers=_headers("owner"),
+    )
+    assert put_response.status_code == 200
+    assert put_response.json()["enabled"] is False
+
+    get_response = client.get("/api/skills/nl_matching", headers=_headers("owner"))
+    assert get_response.json() == {"enabled": False}
+
+    persisted = json.loads((nanobot_dir / "console" / "console-config.json").read_text("utf-8"))
+    assert persisted["skills"]["natural_language_matching"] is False
+
+
+def test_nl_matching_put_requires_edit_role(tmp_path, monkeypatch):
+    client, _ = _create_client(tmp_path, monkeypatch)
+    response = client.put(
+        "/api/skills/nl_matching",
+        json={"enabled": False},
+        headers=_headers("read"),
+    )
+    assert response.status_code in {401, 403}

@@ -1065,6 +1065,43 @@ def test_ava23_full_chain_bubble_ux_checklist_is_covered() -> None:
     assert "test_workflow_store_retry_chain_preserves_trace_and_creates_new_chain" in store_tests
 
 
+def test_finding_chain_p0_settings_global_nl_match_toggle() -> None:
+    """finding-chain-implementation-audit §7 P0#2: Settings → Skills exposes a
+    global natural_language_matching toggle backed by
+    console-config.json::skills.natural_language_matching, with a backend
+    GET/PUT pair on /api/skills/nl_matching.
+    """
+    skills_routes = read("ava/console/routes/skills_routes.py")
+    skills_page = read("console-ui/src/pages/SkillsPage.tsx")
+    skills_routes_tests = read("tests/console/test_skills_routes.py")
+
+    assert_contains_all(
+        skills_routes,
+        [
+            'class NLMatchingUpdateRequest(BaseModel)',
+            '@router.get("/nl_matching")',
+            '@router.put("/nl_matching")',
+            'natural_language_matching',
+        ],
+    )
+    assert_contains_all(
+        skills_page,
+        [
+            'data-testid="nl-matching-toggle"',
+            "/skills/nl_matching",
+            "自然语言 Skill 匹配",
+        ],
+    )
+    assert_contains_all(
+        skills_routes_tests,
+        [
+            "test_nl_matching_get_defaults_to_enabled_when_unset",
+            "test_nl_matching_put_persists_to_console_config_json",
+            "test_nl_matching_put_requires_edit_role",
+        ],
+    )
+
+
 def test_finding_chain_p0_chainbubble_single_skill_node_degrade() -> None:
     """finding-chain-implementation-audit §7 P0#3: ChainBubble degrades to a
     standalone DirectTask card when nodes.length===1 && node_kind==='skill',

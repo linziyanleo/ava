@@ -448,6 +448,10 @@ function SkillsSection() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  // finding-chain-implementation-audit §7 P0#2: global NL skill match toggle
+  // backed by console-config.json::skills.natural_language_matching.
+  const [nlMatching, setNlMatching] = useState<boolean | null>(null)
+  const [nlSaving, setNlSaving] = useState(false)
   const mockMode = IS_MOCK_SANDBOX
   const canMutateRegistry = !mockMode
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -462,7 +466,41 @@ function SkillsSection() {
     }
   }, [])
 
-  useEffect(() => { loadSkills() }, [loadSkills])
+  const loadNLMatching = useCallback(async () => {
+    try {
+      const res = await api<{ enabled: boolean }>('/skills/nl_matching')
+      setNlMatching(res.enabled)
+    } catch {
+      setNlMatching(null)
+    }
+  }, [])
+
+  const toggleNLMatching = async (next: boolean) => {
+    setNlSaving(true)
+    setMessage(null)
+    try {
+      const res = await api<{ enabled: boolean }>('/skills/nl_matching', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: next }),
+      })
+      setNlMatching(res.enabled)
+      setMessage({
+        type: 'success',
+        text: res.enabled
+          ? '已启用 NL 关键词匹配；用户消息含 skill 关键词时会自动触发 skill chain。'
+          : '已关闭 NL 关键词匹配；只有显式 @skill 提及才会触发 skill。',
+      })
+    } catch (err: unknown) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '保存失败' })
+    } finally {
+      setNlSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    loadSkills()
+    loadNLMatching()
+  }, [loadSkills, loadNLMatching])
 
   const toggleSkill = async (name: string, enabled: boolean) => {
     setToggling(name)
@@ -611,6 +649,39 @@ function SkillsSection() {
           {message.text}
         </div>
       )}
+
+      {/* Global natural-language skill matcher toggle (finding §7 P0#2) */}
+      <div
+        data-testid="nl-matching-toggle"
+        className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 flex items-start justify-between gap-4"
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Puzzle className="w-4 h-4 text-[var(--accent)]" />
+            自然语言 Skill 匹配
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            关闭后，用户对话只在显式 <code>@skill</code> 提及时才会触发 skill；不会再因消息含关键词（如 “github”、“reddit”）被自动判定为 skill 任务并自动建链。
+            写入 <code className="font-mono">console-config.json::skills.natural_language_matching</code>，立即生效。
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {nlMatching === null ? (
+            <span className="text-xs text-[var(--text-secondary)]">加载中…</span>
+          ) : (
+            <>
+              <span className="text-xs text-[var(--text-secondary)]">
+                {nlMatching ? '已启用' : '已关闭'}
+              </span>
+              <ToggleSwitch
+                enabled={nlMatching}
+                onToggle={() => toggleNLMatching(!nlMatching)}
+                disabled={nlSaving || !canMutateRegistry}
+              />
+            </>
+          )}
+        </div>
+      </div>
 
       {mockMode && (
         <div className="rounded-xl border border-[var(--ava-warning-border)] bg-[var(--ava-warning-soft)] p-3 text-sm text-[var(--ava-warning)]">
