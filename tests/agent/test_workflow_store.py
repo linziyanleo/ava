@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ava.agent.workflow_store import ArtifactStore, WorkflowStore
 from ava.storage import Database
 
@@ -129,3 +131,16 @@ def test_workflow_store_retry_chain_preserves_trace_and_creates_new_chain(tmp_pa
     assert retried.metadata["retry_of"] == "chain-original"
     assert [node.status for node in retried.nodes] == ["queued", "awaiting_deps"]
     assert retried.nodes[1].parent_task_ids == [retried.nodes[0].task_id]
+
+
+def test_upsert_node_rejects_empty_chain_id(tmp_path):
+    """Guards against accidentally writing orphan nodes with chain_id=""
+    plus a stray random workflow_chains row from the register_chain fallback.
+    """
+    db = Database(tmp_path / "workflow.sqlite3")
+    store = WorkflowStore(db)
+
+    with pytest.raises(ValueError, match="chain_id is required"):
+        store.upsert_node(chain_id="", task_id="orphan")
+
+    assert store.list_chains() == []

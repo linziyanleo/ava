@@ -175,6 +175,8 @@ class WorkflowStore:
         position: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> WorkflowNode:
+        if not chain_id:
+            raise ValueError("chain_id is required")
         self.register_chain(chain_id=chain_id)
         if position is None:
             position = self._next_position(chain_id)
