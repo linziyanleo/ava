@@ -4,7 +4,7 @@ specanchor:
   task_name: "修复 Anthropic tool_result 结构化结果校验失败"
   author: "fanghu"
   created: "2026-04-14"
-  status: "active"
+  status: "archived"
   last_change: "新增 Anthropic tool_result 归一化 sidecar patch，兼容结构化 tool 输出并补回归测试"
   related_modules: []
   related_global:

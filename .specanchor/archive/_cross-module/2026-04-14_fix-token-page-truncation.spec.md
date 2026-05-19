@@ -4,7 +4,7 @@ specanchor:
   task_name: "修复 Token 页面对话历史显示误导问题"
   author: "fanghu"
   created: "2026-04-14"
-  status: "active"
+  status: "archived"
   last_change: "完成请求上下文误导修复并验证通过：snapshot 阈值配置化、前端改名并移除误导性截断统计"
   related_modules: []
   related_global:
