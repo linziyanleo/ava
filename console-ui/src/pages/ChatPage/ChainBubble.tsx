@@ -17,6 +17,15 @@ import {
   visibleTaskStatus,
 } from './ConversationTaskCard'
 
+// Single-skill chains are usually NL-skill-match auto-registers (one
+// node per chain). Rendering the full Chain header for them is just
+// noise — the task card already carries skill_name, status, chain_id.
+// chain row is still written backend-side so trace/cancel/retry remain
+// reachable via TaskFloater. Refs: finding-chain-implementation-audit §7 P0#3.
+function shouldDegradeToDirectTask(tasks: DirectTaskMessage[]): boolean {
+  return tasks.length === 1 && tasks[0]?.node_kind === 'skill'
+}
+
 function orderValue(task: DirectTaskMessage) {
   return task.started_at ?? Number.MAX_SAFE_INTEGER
 }
@@ -51,6 +60,7 @@ export function ChainBubble({
   const [busyAction, setBusyAction] = useState<'cancel' | 'retry' | ''>('')
   const [actionError, setActionError] = useState('')
   const orderedTasks = useMemo(() => orderTasks(tasks), [tasks])
+  const degradeToDirect = shouldDegradeToDirectTask(orderedTasks)
   const status = chainStatus(orderedTasks)
   const statusConfig = TASK_STATUS_CONFIG[visibleTaskStatus(status)]
   const statusTone = statusToneClasses(statusConfig.kind)
@@ -149,6 +159,18 @@ export function ChainBubble({
       {renderTaskNode(orderedTasks[index], index)}
     </div>
   )
+
+  if (degradeToDirect) {
+    return (
+      <div
+        data-chain-id={chainId}
+        data-chain-degraded="single-skill-node"
+        data-skill-name={skillTask?.skill_name || undefined}
+      >
+        <ConversationTaskCard task={orderedTasks[0]} variant="standalone" />
+      </div>
+    )
+  }
 
   return (
     <div

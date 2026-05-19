@@ -1065,6 +1065,25 @@ def test_ava23_full_chain_bubble_ux_checklist_is_covered() -> None:
     assert "test_workflow_store_retry_chain_preserves_trace_and_creates_new_chain" in store_tests
 
 
+def test_finding_chain_p0_chainbubble_single_skill_node_degrade() -> None:
+    """finding-chain-implementation-audit §7 P0#3: ChainBubble degrades to a
+    standalone DirectTask card when nodes.length===1 && node_kind==='skill',
+    so single-node NL-skill chains stop rendering the full chain header.
+    """
+    chain_bubble = read("console-ui/src/pages/ChatPage/ChainBubble.tsx")
+
+    assert_contains_all(
+        chain_bubble,
+        [
+            "function shouldDegradeToDirectTask",
+            "tasks[0]?.node_kind === 'skill'",
+            "if (degradeToDirect)",
+            'data-chain-degraded="single-skill-node"',
+            'variant="standalone"',
+        ],
+    )
+
+
 def test_ava58_browser_substrate_checklist_is_covered() -> None:
     """AVA-58 acceptance: 5-tool substrate, GET/HEAD only, local-only adapters,
     opt-in body capture, conditional registration, TOOLS.md update."""
