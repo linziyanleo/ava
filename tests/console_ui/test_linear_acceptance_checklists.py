@@ -1063,3 +1063,102 @@ def test_ava23_full_chain_bubble_ux_checklist_is_covered() -> None:
     )
     assert '@router.post("/workflows/{chain_id}/retry")' in workflow_routes
     assert "test_workflow_store_retry_chain_preserves_trace_and_creates_new_chain" in store_tests
+
+
+def test_ava58_browser_substrate_checklist_is_covered() -> None:
+    """AVA-58 acceptance: 5-tool substrate, GET/HEAD only, local-only adapters,
+    opt-in body capture, conditional registration, TOOLS.md update."""
+    schema = read("ava/forks/config/schema.py")
+    fetch_tool = read("ava/tools/browser_substrate/fetch_tool.py")
+    events_tool = read("ava/tools/browser_substrate/events_tool.py")
+    registry = read("ava/tools/browser_substrate/adapter_registry.py")
+    runner = read("ava/tools/browser_substrate/adapter_runner.py")
+    registration = read("ava/tools/browser_substrate/registration.py")
+    tools_md = read("ava/templates/TOOLS.md")
+    fetch_tests = read("tests/tools/browser_substrate/test_browser_fetch.py")
+    register_tests = read("tests/tools/browser_substrate/test_substrate_tools_register.py")
+
+    assert_contains_all(
+        schema,
+        [
+            "class BrowserSubstrateConfig(Base):",
+            "enabled: bool = False",
+            "browserSubstrate",
+            "adapter_dir",
+            "body_max_bytes",
+        ],
+    )
+    assert_contains_all(
+        fetch_tool,
+        [
+            '_ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "HEAD"})',
+            '_DENY_HEADERS: frozenset[str] = frozenset({"cookie", "authorization", "origin"})',
+            "_FETCH_TEMPLATE",
+            "browser_fetch",
+            "_validate_request",
+            "stripped_headers",
+        ],
+    )
+    assert_contains_all(
+        events_tool,
+        [
+            'name(self) -> str:\n        return "browser_events"',
+            '"event_type"',
+            "last_action",
+        ],
+    )
+    assert_contains_all(
+        registry,
+        [
+            "class SiteAdapterRegistry:",
+            "_APPROVED_STEP_KINDS",
+            "browser_evaluate_readonly",
+            "read_only=false",
+        ],
+    )
+    assert_contains_all(
+        runner,
+        [
+            "class AdapterRunner:",
+            "set_var",
+            "extract_jsonpath",
+            "_APPROVED_EVAL_HELPERS",
+        ],
+    )
+    assert_contains_all(
+        registration,
+        [
+            "class SubstrateConfigurationError(RuntimeError)",
+            "def register_browser_substrate_tools",
+            "is not configured",
+        ],
+    )
+    assert_contains_all(
+        tools_md,
+        [
+            "登录态数据抓取",
+            "browser_fetch",
+            "site_adapter_run",
+            "browser_events",
+            "安全边界",
+        ],
+    )
+    assert_contains_all(
+        fetch_tests,
+        [
+            "test_unsafe_method_blocked_before_mcp",
+            "test_caller_supplied_auth_headers_stripped",
+            "test_absolute_url_without_allowed_origins_rejected",
+            "test_body_capture_default_off",
+            "test_fetch_template_is_module_constant",
+        ],
+    )
+    assert_contains_all(
+        register_tests,
+        [
+            "test_disabled_does_not_register",
+            "test_enabled_without_mcp_server_raises",
+            "test_no_eval_named_tool_exposed",
+            "test_substrate_does_not_replace_mcp_playwright_daily_wrappers",
+        ],
+    )

@@ -18,6 +18,7 @@ from ava.tools import (
     StickerTool,
     VisionTool,
 )
+from ava.tools.browser_substrate import register_browser_substrate_tools
 
 
 def apply_tools_patch() -> str:
@@ -134,10 +135,14 @@ def apply_tools_patch() -> str:
                 db=db,
             ))
 
+        # Browser data substrate (AVA-58) — opt-in. Raises if enabled but
+        # the configured Playwright MCP server is missing (Q7 fail-fast).
+        register_browser_substrate_tools(self, config)
+
     patched_register_default_tools._ava_tools_patched = True
     AgentLoop._register_default_tools = patched_register_default_tools
-    
-    return "Registered custom tools: claude_code, codex (conditional), image_gen, vision, send_sticker, page_agent, gateway_control, memory"
+
+    return "Registered custom tools: claude_code, codex (conditional), image_gen, vision, send_sticker, page_agent, gateway_control, memory, browser_substrate (conditional)"
 
 
 register_patch('custom_tools', apply_tools_patch)

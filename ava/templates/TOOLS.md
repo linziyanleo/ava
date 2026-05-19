@@ -54,21 +54,32 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 
 ### Browser tool selection
 
-把浏览器能力分成三层，按最小有效工具选择：
+把浏览器能力分成五层，按最小有效工具选择：
 
 | 层级 | 首选工具 | 适合场景 | 不适合场景 |
 |------|----------|----------|------------|
-| 静态读取 | `web_fetch` | 公开网页正文、文章摘要、无需登录且无需交互 | 登录态、SPA 渲染缺内容、需要点击/滚动 |
-| 任务级代理 | `page_agent(action="execute")` | 用户明确说“用 Page Agent”；路径不确定的多步任务；登录态/内网页面需要 PageAgent 自主规划；需要自然语言探索页面 | 精确截图、稳定 ref 点击、测试验收证据、安全敏感最终提交 |
-| 动作级控制 | `mcp_playwright_daily_*` | 已知要点哪个 ref、填哪个字段、截图留证、tab 管理、回归验证、排查 PageAgent 失败原因 | 目标含糊、需要 agent 自主规划复杂流程 |
+| 静态读取 | `web_fetch` | 公开网页正文，无登录 | 登录态、SPA、需要交互 |
+| 任务级代理 | `page_agent(action="execute")` | 路径不确定的多步任务，需要自然语言规划 | 精确截图、稳定 ref 点击、安全敏感最终提交 |
+| 动作级控制 | `mcp_playwright_daily_*` | 已知 ref 操作、tab 管理、截图证据 | 目标含糊、需要 agent 自主规划 |
+| 登录态数据抓取 | `browser_fetch` | 已登录页面的 JSON/HTML API；read-only `GET`/`HEAD`；当前 tab origin | 写操作、跨 origin 写；任意 JS 执行；登录流本身 |
+| 站点适配器 | `site_adapter_list` / `site_adapter_info` / `site_adapter_run` | 高频登录态站点的可复现 read-only 工作流 | 一次性脚本、写操作、未审过的社区 adapter |
 
-默认组合方式：
+配套的 DevTools 增量证据：`browser_events(event_type="network"/"console"/"errors", since="last_action")` 用于在动作之后查询本 session 内的事件；不要把它当作通用 logging。
+
+**安全边界**：`browser_fetch` v1 只支持 `GET`/`HEAD`，并且默认禁止跨 origin 写；caller 提供的 `Cookie`/`Authorization`/`Origin` header 会被 strip（cookies 走浏览器上下文）。`site_adapter_run` 只接受 `read_only=true` 的本地 manifest（位于 `~/.ava/browser-sites/<id>/adapter.toml`），不会自动拉取或执行社区脚本。response body 抓取必须显式 `with_body=true`，且受 `body_max_bytes` 限制；body 可能含 token / cookie，不要回显到非可信环境。
+
+**multi-tab 用法**：v1 substrate 仅作用于当前活跃 tab；切换工作 tab 必须显式 `mcp_playwright_daily_browser_tabs(action="select", index=N)`。
+
+默认组合：v1 的 substrate 工具是 PageAgent 与 mcp_playwright_daily_* 的"读侧"伴侣，不替代二者；写操作仍然走 `mcp_playwright_daily_*` + 用户确认。
+
+整体决策序列：
 
 1. 静态文本先 `web_fetch`。
-2. 目标明确、需要可复现证据时用 `mcp_playwright_daily_browser_snapshot()` 获取 refs，再 click/type/screenshot。
-3. 目标明确但路径未知、或用户明确要求 PageAgent 时，用 `page_agent(action="execute")`。
-4. PageAgent 完成后如需证明最终状态，用 `mcp_playwright_daily_browser_snapshot()` 或 `mcp_playwright_daily_browser_take_screenshot()` 验收。
-5. 涉及提交、删除、支付、发布、权限变更等高风险动作时，先用 Playwright snapshot/screenshot 给出当前状态并等待用户确认，不让 PageAgent 自主完成最后一步。
+2. 已登录页面取 JSON/HTML 数据：相对路径 `browser_fetch(url="/api/...")`，需要可复现脚本则封装为 `site_adapter_*` manifest。
+3. 目标明确、需要可复现证据时用 `mcp_playwright_daily_browser_snapshot()` 获取 refs，再 click/type/screenshot。
+4. 目标明确但路径未知、或用户明确要求 PageAgent 时，用 `page_agent(action="execute")`。
+5. PageAgent / fetch 之后排查问题时，用 `browser_events(since="last_action")` 拉取本 action 的网络/console 证据。
+6. 涉及提交、删除、支付、发布、权限变更等高风险动作时，先用 Playwright snapshot/screenshot 给出当前状态并等待用户确认，不让 PageAgent 自主完成最后一步。
 
 ### ava 通过 patch 注入的工具
 
@@ -80,6 +91,7 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 - `page_agent`（仅当 `tools.pageAgent.enabled=true`）
 - `gateway_control`
 - `memory`（仅当 `categorized_memory` 已初始化）
+- `browser_fetch` / `browser_events` / `site_adapter_list` / `site_adapter_info` / `site_adapter_run`（仅当 `tools.browserSubstrate.enabled=true` 且配置了 `tools.mcpServers.playwright_daily`）
 
 ### 不是 tool 的能力
 
@@ -101,8 +113,11 @@ This file focuses on non-obvious constraints, tool-selection guidance, and sidec
 | 用户发了一个链接想看内容/摘要 | `web_fetch`（首选） |
 | 搜网页或抓静态页面正文 | `web_search` / `web_fetch` |
 | 已知要点哪个元素、填哪个字段、需要截图/验收证据 | `mcp_playwright_daily_*` |
+| 登录态页面拉 JSON/HTML 数据（read-only API 调用） | `browser_fetch`（仅当 `tools.browserSubstrate.enabled=true`） |
+| 高频登录态站点的可复现 read-only 工作流 | `site_adapter_list` / `site_adapter_info` / `site_adapter_run` |
+| 排查刚才 substrate 动作产生的网络/console/errors 证据 | `browser_events(since="last_action")` |
 | 登录态/内网/SSO 页面，且希望 PageAgent 自主规划多步任务 | `page_agent(action="execute")`（要求 `tools.pageAgent.backend="official_mcp"`） |
-| 用户明确说“用 Page Agent”看页面或完成浏览器任务 | `page_agent(action="execute")` |
+| 用户明确说"用 Page Agent"看页面或完成浏览器任务 | `page_agent(action="execute")` |
 | PageAgent 结果需要复核、截图或定位失败点 | `mcp_playwright_daily_browser_snapshot` / `mcp_playwright_daily_browser_take_screenshot` |
 | 不需要日常 Chrome 登录态，但需要 Ava 旧 Page State / 截图 / console 预览 | `page_agent` 的 `playwright` backend |
 | 需要登录态或 JS 动态渲染才能拿到的内容 | 可拆成确定性步骤时优先 `mcp_playwright_daily_browser_snapshot`；路径不确定时用 `page_agent` |

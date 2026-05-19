@@ -592,6 +592,45 @@ class PageAgentConfig(Base):
     )
 
 
+class BrowserSubstrateConfig(Base):
+    """Browser data substrate (AVA-58) — 登录态 read-only browser_fetch、DevTools 增量证据、本地 site adapter。
+
+    v1 安全边界：browser_fetch 仅 GET/HEAD；adapters 只接 read_only=true、仅来自 adapter_dir；body 抓取 opt-in 且 bounded。
+    """
+
+    enabled: bool = False
+    mcp_server: str = Field(
+        default="playwright_daily",
+        validation_alias=AliasChoices("mcp_server", "mcpServer"),
+        serialization_alias="mcpServer",
+    )
+    network_cache_max: int = Field(
+        default=500,
+        validation_alias=AliasChoices("network_cache_max", "networkCacheMax"),
+        serialization_alias="networkCacheMax",
+    )
+    console_cache_max: int = Field(
+        default=200,
+        validation_alias=AliasChoices("console_cache_max", "consoleCacheMax"),
+        serialization_alias="consoleCacheMax",
+    )
+    errors_cache_max: int = Field(
+        default=100,
+        validation_alias=AliasChoices("errors_cache_max", "errorsCacheMax"),
+        serialization_alias="errorsCacheMax",
+    )
+    body_max_bytes: int = Field(
+        default=65536,
+        validation_alias=AliasChoices("body_max_bytes", "bodyMaxBytes"),
+        serialization_alias="bodyMaxBytes",
+    )
+    adapter_dir: str = Field(
+        default="~/.ava/browser-sites",
+        validation_alias=AliasChoices("adapter_dir", "adapterDir"),
+        serialization_alias="adapterDir",
+    )
+
+
 class ToolsConfig(_UPSTREAM.ToolsConfig):
     """在上游工具配置基础上补 sidecar 工具项。"""
 
@@ -606,6 +645,11 @@ class ToolsConfig(_UPSTREAM.ToolsConfig):
         default_factory=PageAgentConfig,
         validation_alias=AliasChoices("page_agent", "pageAgent"),
         serialization_alias="pageAgent",
+    )
+    browser_substrate: BrowserSubstrateConfig = Field(
+        default_factory=BrowserSubstrateConfig,
+        validation_alias=AliasChoices("browser_substrate", "browserSubstrate"),
+        serialization_alias="browserSubstrate",
     )
     restrict_config_file: bool = Field(
         default=True,
