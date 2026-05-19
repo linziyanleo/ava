@@ -88,6 +88,22 @@ class Database:
                 conn.execute(sql)
             except sqlite3.OperationalError as exc:
                 logger.warning("Skipped post-migration SQL due to legacy schema mismatch: {}", exc)
+        # AVA-47 P2a: stamp per-table migration markers so future migrations
+        # can branch on whether v1 was applied.
+        from datetime import datetime, timezone
+        applied_at = datetime.now(timezone.utc).isoformat()
+        for marker in (
+            "agent_workflows_v1",
+            "workflow_versions_v1",
+            "workflow_runs_v1",
+            "workflow_steps_v1",
+            "workflow_artifacts_v1",
+            "workspace_leases_v1",
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations (name, applied_at) VALUES (?, ?)",
+                (marker, applied_at),
+            )
         conn.commit()
 
     # ------------------------------------------------------------------
@@ -697,4 +713,89 @@ CREATE TABLE IF NOT EXISTS lan_pair_throttle (
     PRIMARY KEY (scope, key)
 );
 CREATE INDEX IF NOT EXISTS idx_lan_pair_throttle_locked ON lan_pair_throttle(locked_until);
+
+-- AVA-47 P2a: workflow definition + run baseline (6 tables, see spec
+-- .specanchor/tasks/_cross-module/2026-05-13_p2a-p2c-workflow-baseline.spec.md §1 F2).
+-- Distinct from P1b workflow_chains/workflow_nodes/task_artifacts owned by
+-- ava/agent/workflow_store.py — those keep operating unchanged.
+CREATE TABLE IF NOT EXISTS agent_workflows (
+    workflow_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    current_version INTEGER NOT NULL DEFAULT 1,
+    created_by_agent TEXT DEFAULT '',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    deleted_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_workflows_name ON agent_workflows(name);
+CREATE INDEX IF NOT EXISTS idx_agent_workflows_updated ON agent_workflows(updated_at);
+
+CREATE TABLE IF NOT EXISTS workflow_versions (
+    workflow_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    definition_json TEXT NOT NULL,
+    change_summary TEXT DEFAULT '',
+    base_version INTEGER,
+    created_by_agent TEXT DEFAULT '',
+    created_at REAL NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (workflow_id, version),
+    FOREIGN KEY (workflow_id) REFERENCES agent_workflows(workflow_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_versions_current ON workflow_versions(workflow_id, is_current);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    run_id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    triggered_by TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at REAL,
+    completed_at REAL,
+    final_outputs_json TEXT DEFAULT '{}',
+    FOREIGN KEY (workflow_id) REFERENCES agent_workflows(workflow_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    step_run_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    agent TEXT DEFAULT '',
+    bg_task_id TEXT DEFAULT '',
+    started_at REAL,
+    completed_at REAL,
+    outputs_json TEXT DEFAULT '{}',
+    error_json TEXT DEFAULT '{}',
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_bg_task ON workflow_steps(bg_task_id);
+
+CREATE TABLE IF NOT EXISTS workflow_artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_run_id TEXT DEFAULT '',
+    kind TEXT NOT NULL,
+    payload_ref TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_run ON workflow_artifacts(run_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_step ON workflow_artifacts(step_run_id);
+
+CREATE TABLE IF NOT EXISTS workspace_leases (
+    lease_id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    holder_run_id TEXT DEFAULT '',
+    holder_step_id TEXT DEFAULT '',
+    acquired_at REAL NOT NULL,
+    expires_at REAL,
+    released_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_leases_path ON workspace_leases(path);
+CREATE INDEX IF NOT EXISTS idx_workspace_leases_holder ON workspace_leases(holder_run_id);
 """
