@@ -73,8 +73,10 @@ def test_create_then_get_definition(tmp_path, monkeypatch) -> None:
 def test_invalid_definition_rejected(tmp_path, monkeypatch) -> None:
     client, _ = _client(tmp_path, monkeypatch)
     bad_def = dict(_VALID_DEF)
+    # `conditional` is still reserved for AVA-31 / P3, so the schema must reject
+    # it with the ticket name surfaced in the error body.
     bad_def["steps"] = [
-        {"id": "p", "kind": "parallel", "agent": "codex", "task": {"prompt_template": "x"}}
+        {"id": "p", "kind": "conditional", "agent": "codex", "task": {"prompt_template": "x"}}
     ]
     resp = client.post(
         "/api/workflow-definitions",
@@ -82,7 +84,7 @@ def test_invalid_definition_rejected(tmp_path, monkeypatch) -> None:
         headers=_headers(),
     )
     assert resp.status_code == 400
-    assert "AVA-25" in resp.text or "reserved" in resp.text
+    assert "AVA-31" in resp.text or "reserved" in resp.text
 
 
 def test_patch_with_correct_base_version(tmp_path, monkeypatch) -> None:

@@ -1,23 +1,21 @@
-"""DSL v1 validator for workflow definitions (AVA-47 P2a).
+"""DSL validator for workflow definitions.
 
-The schema is a strict closed set:
+Accepted ``step.kind`` closed set:
 
-  step.kind ∈ {"agent_task"}        — ONLY this is allowed at v1
-  step.agent ∈ {"codex","claude_code","image_gen","nanobot"} OR "a2a://..."
-                                    — schema accepts both; runner rejects
-                                      a2a:// with `agent_unsupported` until P3
+  v1 (AVA-47 P2a) — ``agent_task``
+  v2 (AVA-25 P2b) — ``agent_task`` | ``parallel`` | ``join``
 
-Reserved vocabulary is defined here so error messages can name the future
-issue/phase the user is reaching for. See spec §1 F1 for the table.
+P2b unlocks fan-out / fan-in (all_success only). The reserved-vocabulary table
+still names the future tickets that own the remaining kinds.
 
-Reject set (any of these as step.kind raises a clear validation error):
+Reject set (validator raises with the ticket name in the message):
 
-  parallel / join / for_each   → AVA-25 / P2b
+  for_each                     → AVA-25 / P2b (deferred sub-feature)
   conditional / branch         → AVA-31 / P3
   loop / approval / nested     → AVA-31 / P3
 
-Inputs use a JSONPath subset (`$.inputs.*`, `$.workspace.root`,
-`$.steps.<id>.outputs.<name>`). The validator is permissive about exact
+Inputs use a JSONPath subset (``$.inputs.*``, ``$.workspace.root``,
+``$.steps.<id>.outputs.<name>``). The validator is permissive about exact
 JSONPath grammar; the runner enforces resolvability when it dereferences.
 """
 from __future__ import annotations
@@ -28,11 +26,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
-# Reserved keywords that are explicitly NOT allowed at v1; each maps to the
-# Linear ticket and milestone where they will land.
+# Reserved keywords that are explicitly NOT allowed; each maps to the Linear
+# ticket and milestone where they will land. ``parallel`` and ``join`` were
+# released here in P2b (AVA-25) so they no longer appear.
 RESERVED_KIND_REJECT: dict[str, tuple[str, str]] = {
-    "parallel":    ("AVA-25", "P2b"),
-    "join":        ("AVA-25", "P2b"),
     "for_each":    ("AVA-25", "P2b"),
     "conditional": ("AVA-31", "P3"),
     "branch":      ("AVA-31", "P3"),
@@ -40,6 +37,10 @@ RESERVED_KIND_REJECT: dict[str, tuple[str, str]] = {
     "approval":    ("AVA-31", "P3"),
     "nested":      ("AVA-31", "P3"),
 }
+
+ACCEPTED_STEP_KINDS: frozenset[str] = frozenset({"agent_task", "parallel", "join"})
+
+JOIN_MERGE_STRATEGIES: frozenset[str] = frozenset({"concat", "merge-objects", "last-success"})
 
 LOCAL_AGENTS = {"codex", "claude_code", "image_gen", "nanobot"}
 A2A_PREFIX = "a2a://"
@@ -74,17 +75,23 @@ class StepTaskBlock(BaseModel):
 
 
 class WorkflowStep(BaseModel):
-    """A single executable step. v1 closed set: kind == 'agent_task' only."""
+    """A single executable step. v2 closed set: ``agent_task | parallel | join``."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     kind: str
-    agent: str
-    task: StepTaskBlock
+    # agent_task fields (also reused as join output declaration)
+    agent: str | None = None
+    task: StepTaskBlock | None = None
     inputs: dict[str, str] = Field(default_factory=dict)
     outputs: list[str] = Field(default_factory=list)
     next: str | None = None
+    # parallel fields
+    branches: list[str] | None = None
+    # join fields
+    wait_for: list[str] | None = None
+    merge: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -98,24 +105,25 @@ class WorkflowStep(BaseModel):
     @field_validator("kind")
     @classmethod
     def _check_kind(cls, value: str) -> str:
-        if value == "agent_task":
+        if value in ACCEPTED_STEP_KINDS:
             return value
         if value in RESERVED_KIND_REJECT:
             ticket, phase = RESERVED_KIND_REJECT[value]
             raise ValueError(
                 f"step.kind '{value}' is reserved for {ticket} ({phase}); "
-                f"v1 only accepts 'agent_task'"
+                f"current schema accepts {sorted(ACCEPTED_STEP_KINDS)}"
             )
         raise ValueError(
-            f"step.kind '{value}' is not a recognised v1 kind; only "
-            f"'agent_task' is allowed at this milestone"
+            f"step.kind '{value}' is not a recognised kind; only "
+            f"{sorted(ACCEPTED_STEP_KINDS)} are allowed"
         )
 
     @field_validator("agent")
     @classmethod
-    def _check_agent(cls, value: str) -> str:
+    def _check_agent(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value.startswith(A2A_PREFIX):
-            # forward compat: schema accepts but runner rejects until P3
             tail = value[len(A2A_PREFIX):]
             if not tail or "/" not in tail:
                 raise ValueError(
@@ -129,8 +137,6 @@ class WorkflowStep(BaseModel):
                 f"step.agent '{value}' must be one of {sorted(LOCAL_AGENTS)} "
                 f"or an 'a2a://host/agent' URI"
             )
-        # accept unknown local-style agent names so future agents register without
-        # needing a schema bump; runner still has to know how to route it.
         return value
 
     @field_validator("inputs")
@@ -159,9 +165,100 @@ class WorkflowStep(BaseModel):
                 )
         return value
 
+    @field_validator("merge")
+    @classmethod
+    def _check_merge(cls, value: str | None) -> str | None:
+        if value is None or value in JOIN_MERGE_STRATEGIES:
+            return value
+        raise ValueError(
+            f"join.merge '{value}' must be one of {sorted(JOIN_MERGE_STRATEGIES)}"
+        )
+
+    @field_validator("branches")
+    @classmethod
+    def _check_branches(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        for entry in value:
+            if not _STEP_ID_PATTERN.match(entry):
+                raise ValueError(
+                    f"parallel.branches entry '{entry}' must be a valid step.id"
+                )
+        return value
+
+    @field_validator("wait_for")
+    @classmethod
+    def _check_wait_for(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
+        for entry in value:
+            if not _STEP_ID_PATTERN.match(entry):
+                raise ValueError(
+                    f"join.wait_for entry '{entry}' must be a valid step.id"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _check_per_kind(self) -> WorkflowStep:
+        if self.kind == "agent_task":
+            if self.agent is None:
+                raise ValueError(f"agent_task step '{self.id}' must declare agent")
+            if self.task is None:
+                raise ValueError(f"agent_task step '{self.id}' must declare task")
+            if self.branches is not None or self.wait_for is not None or self.merge is not None:
+                raise ValueError(
+                    f"agent_task step '{self.id}' must not declare branches / wait_for / merge"
+                )
+        elif self.kind == "parallel":
+            if not self.branches:
+                raise ValueError(
+                    f"parallel step '{self.id}' must declare non-empty branches"
+                )
+            if self.task is not None or self.agent is not None:
+                raise ValueError(
+                    f"parallel step '{self.id}' must not declare agent / task"
+                )
+            if self.inputs or self.outputs:
+                raise ValueError(
+                    f"parallel step '{self.id}' must not declare inputs / outputs"
+                )
+            if self.wait_for is not None or self.merge is not None:
+                raise ValueError(
+                    f"parallel step '{self.id}' must not declare wait_for / merge"
+                )
+            if len(set(self.branches)) != len(self.branches):
+                raise ValueError(
+                    f"parallel step '{self.id}' branches must be unique"
+                )
+        elif self.kind == "join":
+            if not self.wait_for:
+                raise ValueError(
+                    f"join step '{self.id}' must declare non-empty wait_for"
+                )
+            if self.merge is None:
+                raise ValueError(
+                    f"join step '{self.id}' must declare merge strategy "
+                    f"({sorted(JOIN_MERGE_STRATEGIES)})"
+                )
+            if self.task is not None or self.agent is not None:
+                raise ValueError(
+                    f"join step '{self.id}' must not declare agent / task"
+                )
+            if self.inputs or self.branches is not None:
+                raise ValueError(
+                    f"join step '{self.id}' must not declare inputs / branches"
+                )
+            if len(set(self.wait_for)) != len(self.wait_for):
+                raise ValueError(
+                    f"join step '{self.id}' wait_for must be unique"
+                )
+            if self.id in self.wait_for:
+                raise ValueError(f"join step '{self.id}' cannot wait for itself")
+        return self
+
 
 class WorkflowDefinition(BaseModel):
-    """Top-level workflow definition document (DSL v1)."""
+    """Top-level workflow definition document (DSL v2)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -186,11 +283,43 @@ class WorkflowDefinition(BaseModel):
                 raise ValueError(
                     f"step '{step.id}' next='{step.next}' references unknown step"
                 )
-        # `inputs` JSONPaths that target other steps must point to upstream ids
-        # (linear order). Forward references are rejected.
+        # Cross-step references for parallel/join must target known step ids.
+        # parallel.branches must be downstream (positions after self) so that the
+        # runner dispatches them as fan-out children. join.wait_for must be
+        # upstream so the dependency is satisfiable without cycles.
         ordered_ids: list[str] = [step.id for step in self.steps]
+        position: dict[str, int] = {step_id: idx for idx, step_id in enumerate(ordered_ids)}
         for index, step in enumerate(self.steps):
             allowed_upstream = set(ordered_ids[:index])
+            allowed_downstream = set(ordered_ids[index + 1:])
+            if step.kind == "parallel":
+                for branch_id in step.branches or []:
+                    if branch_id not in seen_ids:
+                        raise ValueError(
+                            f"parallel step '{step.id}' branches reference "
+                            f"unknown step '{branch_id}'"
+                        )
+                    if branch_id == step.id:
+                        raise ValueError(
+                            f"parallel step '{step.id}' cannot branch to itself"
+                        )
+                    if branch_id not in allowed_downstream:
+                        raise ValueError(
+                            f"parallel step '{step.id}' branch '{branch_id}' "
+                            f"must be a downstream step (after position {index})"
+                        )
+            elif step.kind == "join":
+                for upstream_id in step.wait_for or []:
+                    if upstream_id not in seen_ids:
+                        raise ValueError(
+                            f"join step '{step.id}' wait_for references "
+                            f"unknown step '{upstream_id}'"
+                        )
+                    if upstream_id not in allowed_upstream:
+                        raise ValueError(
+                            f"join step '{step.id}' wait_for '{upstream_id}' "
+                            f"must be an upstream step (before position {index})"
+                        )
             for key, expr in step.inputs.items():
                 if expr.startswith("$.steps."):
                     parts = expr.split(".")
@@ -212,7 +341,7 @@ class WorkflowDefinition(BaseModel):
 
 
 def validate_definition(payload: dict[str, Any]) -> WorkflowDefinition:
-    """Validate a raw dict payload against DSL v1.
+    """Validate a raw dict payload against the current DSL.
 
     Raises pydantic.ValidationError when invalid; returns the parsed model
     on success.
@@ -220,13 +349,15 @@ def validate_definition(payload: dict[str, Any]) -> WorkflowDefinition:
     return WorkflowDefinition.model_validate(payload)
 
 
-def is_a2a_agent(agent: str) -> bool:
-    """True if the agent URI is `a2a://...` (runner must fail-fast)."""
-    return agent.startswith(A2A_PREFIX)
+def is_a2a_agent(agent: str | None) -> bool:
+    """True if the agent URI is ``a2a://...`` (runner must fail-fast)."""
+    return bool(agent) and agent.startswith(A2A_PREFIX)
 
 
 __all__ = [
     "A2A_PREFIX",
+    "ACCEPTED_STEP_KINDS",
+    "JOIN_MERGE_STRATEGIES",
     "LOCAL_AGENTS",
     "RESERVED_KIND_REJECT",
     "StepTaskBlock",
